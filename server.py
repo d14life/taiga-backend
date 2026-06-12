@@ -695,14 +695,12 @@ def _rag_path(uid: str) -> Path:
     return user_dir(uid) / "rag.json"
 
 def _rag_load(uid: str) -> list:
-    try:
-        return json.loads(_rag_path(uid).read_text())
-    except Exception:
-        return []
+    v = _db_get_json("rag", "uid", uid, [])
+    return v if isinstance(v, list) else []
 
 def _rag_save(uid: str, items: list):
     try:
-        _rag_path(uid).write_text(json.dumps(items, ensure_ascii=False))
+        _db_put_json("rag", "uid", uid, items)
     except Exception:
         pass
 
@@ -994,9 +992,9 @@ PLATFORM_KNOWLEDGE = """\
 
 
 def _identity_custom() -> str:
-    """Кастомная личность из файла (пусто = используем дефолтную)."""
+    """Кастомная личность из БД (пусто = используем дефолтную)."""
     try:
-        return IDENTITY_FILE.read_text().strip()
+        return (_db_kv_get("identity", "") or "").strip()
     except Exception:
         return ""
 
@@ -1179,19 +1177,18 @@ def _rotate_key(name: str, pool: list) -> str:
 
 
 def user_keys(uid: str) -> dict:
-    try:
-        return json.loads((user_dir(uid) / "keys.json").read_text())
-    except Exception:
-        return {}
+    v = _db_get_json("user_keys", "uid", uid, {})
+    return v if isinstance(v, dict) else {}
 
 
 def save_user_key(uid: str, provider: str, key: str):
-    k = user_keys(uid)
-    if key:
-        k[provider] = key
-    else:
-        k.pop(provider, None)
-    (user_dir(uid) / "keys.json").write_text(json.dumps(k, ensure_ascii=False))
+    with _DB_LOCK:                      # read-modify-write под замком
+        k = user_keys(uid)
+        if key:
+            k[provider] = key
+        else:
+            k.pop(provider, None)
+        _db_put_json("user_keys", "uid", uid, k)
 
 
 def resolve_key(uid, model: str):
@@ -2242,21 +2239,20 @@ def _notes_path(uid: str) -> Path:
 
 
 def load_notes(uid: str) -> list:
-    try:
-        return json.loads(_notes_path(uid).read_text())
-    except Exception:
-        return []
+    v = _db_get_json("notes", "uid", uid, [])
+    return v if isinstance(v, list) else []
 
 
 def tool_save_note(uid: str, args: dict) -> str:
     text = str(args.get("text") or args.get("note") or "").strip()
     if not text:
         return "error: пустая заметка"
-    notes = load_notes(uid)
-    notes.append({"text": text[:2000], "ts": _now_ts()})
-    notes = notes[-200:]
     try:
-        _notes_path(uid).write_text(json.dumps(notes, ensure_ascii=False))
+        with _DB_LOCK:                  # read-modify-write под замком
+            notes = load_notes(uid)
+            notes.append({"text": text[:2000], "ts": _now_ts()})
+            notes = notes[-200:]
+            _db_put_json("notes", "uid", uid, notes)
     except Exception as e:
         return f"error: {e}"
     return f"заметка сохранена ({len(notes)} всего)"
@@ -2657,13 +2653,13 @@ _MCP_TTL = 300
 
 def load_mcp_servers() -> list:
     try:
-        return json.loads(MCP_FILE.read_text()).get("servers", [])
+        return json.loads(_db_kv_get("mcp", "") or "{}").get("servers", [])
     except Exception:
         return []
 
 
 def save_mcp_servers(servers: list):
-    MCP_FILE.write_text(json.dumps({"servers": servers}, ensure_ascii=False))
+    _db_kv_set("mcp", json.dumps({"servers": servers}, ensure_ascii=False))
 
 
 def ensure_mcp_connector(id_or_name: str, url: str = None, headers: dict = None) -> dict:
@@ -2819,16 +2815,36 @@ def safe_id(s: str) -> str:
 
 def load_users() -> list:
     try:
-        return json.loads(USERS_FILE.read_text())
+        rows = _db().execute(
+            "SELECT data FROM users ORDER BY pos, id").fetchall()
+        out = []
+        for r in rows:
+            try:
+                out.append(json.loads(r["data"]))
+            except Exception:
+                pass
+        return out
     except Exception:
         return []
+
+
+def save_users(users: list):
+    """Полная перезапись списка юзеров (порядок сохраняем через pos)."""
+    with _DB_LOCK:
+        conn = _db()
+        conn.execute("DELETE FROM users")
+        for i, u in enumerate(users):
+            if isinstance(u, dict) and u.get("id"):
+                conn.execute("INSERT INTO users (id, data, pos) VALUES (?, ?, ?)",
+                             (u["id"], json.dumps(u, ensure_ascii=False), i))
+        conn.commit()
 
 
 def ensure_default_user() -> list:
     users = load_users()
     if not users:
         users = [{"id": "default", "name": "Я", "emoji": "🦊", "owner": True}]
-        USERS_FILE.write_text(json.dumps(users, ensure_ascii=False))
+        save_users(users)
         user_dir("default")
     return users
 
@@ -2845,6 +2861,294 @@ def user_dir(uid: str) -> Path:
     d = BASE / "u" / (safe_id(uid) or "default")
     (d / "chats").mkdir(parents=True, exist_ok=True)
     return d
+
+
+# ================================================================ SQLite-хранилище
+# Один файл БД консолидирует прежние JSON-сторы (users/settings/balance/memory/
+# notes/keys/rag/chats + глобальные billing/apikeys/mcp/identity). JSON-файлы НЕ
+# удаляются — остаются резервной копией. Только stdlib `sqlite3`.
+import sqlite3 as _sqlite3
+
+DB_FILE = BASE / "db" / "taiga.db"
+_DB_CONN = None
+_DB_LOCK = threading.RLock()          # сериализует запись (сервер многопоточный)
+_DB_MIGRATED = False
+
+
+def _db():
+    """Потокобезопасное (общее) соединение. check_same_thread=False + _DB_LOCK на
+    запись. WAL — параллельное чтение/запись без блокировок всей БД. Ленивая
+    инициализация: первый вызов создаёт схему и однократно импортирует JSON."""
+    global _DB_CONN
+    if _DB_CONN is None:
+        with _DB_LOCK:
+            if _DB_CONN is None:
+                DB_FILE.parent.mkdir(parents=True, exist_ok=True)
+                conn = _sqlite3.connect(str(DB_FILE), check_same_thread=False,
+                                        timeout=30)
+                conn.row_factory = _sqlite3.Row
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=NORMAL")
+                conn.execute("PRAGMA foreign_keys=ON")
+                _db_init_schema(conn)
+                _DB_CONN = conn
+                _db_migrate_from_json(conn)
+    return _DB_CONN
+
+
+def _db_init_schema(conn):
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id     TEXT PRIMARY KEY,
+            data   TEXT NOT NULL,          -- весь объект юзера (name/emoji/owner…) как JSON
+            pos    INTEGER                 -- сохраняем исходный порядок списка
+        );
+        CREATE TABLE IF NOT EXISTS settings (
+            uid    TEXT PRIMARY KEY,
+            data   TEXT NOT NULL           -- JSON dict настроек
+        );
+        CREATE TABLE IF NOT EXISTS balance (
+            uid    TEXT PRIMARY KEY,
+            data   TEXT NOT NULL           -- JSON {balance, spent, ledger:[...]}
+        );
+        CREATE TABLE IF NOT EXISTS memory (
+            uid    TEXT PRIMARY KEY,
+            data   TEXT NOT NULL           -- JSON-массив фактов [{text, ts}, ...]
+        );
+        CREATE TABLE IF NOT EXISTS notes (
+            uid    TEXT PRIMARY KEY,
+            data   TEXT NOT NULL           -- JSON-массив заметок [{text, ts}, ...]
+        );
+        CREATE TABLE IF NOT EXISTS user_keys (
+            uid    TEXT PRIMARY KEY,
+            data   TEXT NOT NULL           -- JSON dict {provider: key}
+        );
+        CREATE TABLE IF NOT EXISTS rag (
+            uid    TEXT PRIMARY KEY,
+            data   TEXT NOT NULL           -- JSON-массив кусков [{doc, text, emb}, ...]
+        );
+        CREATE TABLE IF NOT EXISTS chats (
+            uid    TEXT NOT NULL,
+            cid    TEXT NOT NULL,
+            ts     REAL DEFAULT 0,         -- для сортировки/недавних без парса JSON
+            data   TEXT NOT NULL,          -- весь объект чата как JSON
+            PRIMARY KEY (uid, cid)
+        );
+        CREATE INDEX IF NOT EXISTS idx_chats_uid_ts ON chats(uid, ts);
+        CREATE TABLE IF NOT EXISTS kv (
+            k      TEXT PRIMARY KEY,        -- глобальные сторы: billing/apikeys/mcp/identity
+            v      TEXT NOT NULL
+        );
+        """
+    )
+    conn.commit()
+
+
+# --- мелкие хелперы доступа (внутренние; сигнатуры публичных функций НЕ меняются) ---
+def _db_get_json(table, key_col, key, default):
+    row = _db().execute(
+        "SELECT data FROM %s WHERE %s=?" % (table, key_col), (key,)).fetchone()
+    if not row:
+        return default
+    try:
+        return json.loads(row["data"])
+    except Exception:
+        return default
+
+
+def _db_put_json(table, key_col, key, value):
+    payload = json.dumps(value, ensure_ascii=False)
+    with _DB_LOCK:
+        conn = _db()
+        conn.execute(
+            "INSERT INTO %s (%s, data) VALUES (?, ?) "
+            "ON CONFLICT(%s) DO UPDATE SET data=excluded.data"
+            % (table, key_col, key_col), (key, payload))
+        conn.commit()
+
+
+def _db_kv_get(k, default):
+    row = _db().execute("SELECT v FROM kv WHERE k=?", (k,)).fetchone()
+    return row["v"] if row else default
+
+
+def _db_kv_set(k, v):
+    with _DB_LOCK:
+        conn = _db()
+        conn.execute(
+            "INSERT INTO kv (k, v) VALUES (?, ?) "
+            "ON CONFLICT(k) DO UPDATE SET v=excluded.v", (k, str(v)))
+        conn.commit()
+
+
+def _read_json_file(p, default):
+    try:
+        return json.loads(Path(p).read_text())
+    except Exception:
+        return default
+
+
+def _db_migrate_from_json(conn):
+    """Однократный импорт прежних JSON-файлов в БД. Идемпотентно: каждый стор
+    переносится, ТОЛЬКО если его таблица пуста (повторный запуск ничего не портит).
+    JSON НЕ удаляется — остаётся резервной копией. Любая ошибка по одному стору
+    не валит остальные."""
+    global _DB_MIGRATED
+    _DB_MIGRATED = True
+    try:
+        cur = conn.cursor()
+
+        def _empty(table):
+            return cur.execute("SELECT 1 FROM %s LIMIT 1" % table).fetchone() is None
+
+        # --- глобальные сторы (BASE/*.json, identity.txt) → kv ---
+        if cur.execute("SELECT 1 FROM kv WHERE k='billing' LIMIT 1").fetchone() is None:
+            f = BASE / "billing.json"
+            if f.exists():
+                cur.execute("INSERT OR IGNORE INTO kv (k, v) VALUES ('billing', ?)",
+                            (f.read_text(),))
+        if cur.execute("SELECT 1 FROM kv WHERE k='apikeys' LIMIT 1").fetchone() is None:
+            f = BASE / "apikeys.json"
+            if f.exists():
+                cur.execute("INSERT OR IGNORE INTO kv (k, v) VALUES ('apikeys', ?)",
+                            (f.read_text(),))
+        if cur.execute("SELECT 1 FROM kv WHERE k='mcp' LIMIT 1").fetchone() is None:
+            f = BASE / "mcp.json"
+            if f.exists():
+                cur.execute("INSERT OR IGNORE INTO kv (k, v) VALUES ('mcp', ?)",
+                            (f.read_text(),))
+        if cur.execute("SELECT 1 FROM kv WHERE k='identity' LIMIT 1").fetchone() is None:
+            f = BASE / "identity.txt"
+            if f.exists():
+                cur.execute("INSERT OR IGNORE INTO kv (k, v) VALUES ('identity', ?)",
+                            (f.read_text(),))
+
+        # --- список юзеров (users.json) ---
+        if _empty("users"):
+            f = BASE / "users.json"
+            if f.exists():
+                for i, u in enumerate(_read_json_file(f, []) or []):
+                    if isinstance(u, dict) and u.get("id"):
+                        cur.execute("INSERT OR IGNORE INTO users (id, data, pos) "
+                                    "VALUES (?, ?, ?)",
+                                    (u["id"], json.dumps(u, ensure_ascii=False), i))
+
+        # --- per-user сторы: проходим по существующим папкам BASE/u/<uid>/ ---
+        # «пусто?» вычисляем ОДИН раз до цикла: иначе после вставки первого юзера
+        # таблица перестаёт быть пустой и остальные юзеры не мигрируют.
+        udir = BASE / "u"
+        per_user = [
+            ("memory.json",   "memory"),
+            ("settings.json", "settings"),
+            ("balance.json",  "balance"),
+            ("notes.json",    "notes"),
+            ("keys.json",     "user_keys"),
+            ("rag.json",      "rag"),
+        ]
+        empty0 = {tbl: _empty(tbl) for _f, tbl in per_user}
+        empty0["chats"] = _empty("chats")
+        if udir.exists():
+            for ud in sorted(udir.iterdir()):
+                if not ud.is_dir():
+                    continue
+                uid = ud.name
+                for fname, table in per_user:
+                    if not empty0.get(table):
+                        continue
+                    fp = ud / fname
+                    if fp.exists():
+                        try:
+                            cur.execute(
+                                "INSERT OR IGNORE INTO %s (uid, data) VALUES (?, ?)"
+                                % table, (uid, fp.read_text()))
+                        except Exception:
+                            pass
+                # чаты
+                if empty0.get("chats"):
+                    cdir = ud / "chats"
+                    if cdir.exists():
+                        for cf in cdir.glob("*.json"):
+                            obj = _read_json_file(cf, None)
+                            if not isinstance(obj, dict):
+                                continue
+                            cid = obj.get("id") or cf.stem
+                            try:
+                                cur.execute(
+                                    "INSERT OR IGNORE INTO chats (uid, cid, ts, data) "
+                                    "VALUES (?, ?, ?, ?)",
+                                    (uid, str(cid), float(obj.get("ts") or 0),
+                                     json.dumps(obj, ensure_ascii=False)))
+                            except Exception:
+                                pass
+        conn.commit()
+    except Exception as e:
+        try:
+            print(f"── SQLite миграция: предупреждение ({e})")
+        except Exception:
+            pass
+
+
+# --- чаты: те же объекты, что лежали в chats/<id>.json, но теперь строки в БД ---
+def chat_load(uid: str, cid: str):
+    """Полный объект чата или None. cid уже нормализован вызывающим (safe_id)."""
+    row = _db().execute("SELECT data FROM chats WHERE uid=? AND cid=?",
+                        (uid, str(cid))).fetchone()
+    if not row:
+        return None
+    try:
+        return json.loads(row["data"])
+    except Exception:
+        return None
+
+
+def chat_save(uid: str, cid: str, obj: dict):
+    payload = json.dumps(obj, ensure_ascii=False)
+    try:
+        ts = float(obj.get("ts") or 0)
+    except Exception:
+        ts = 0.0
+    with _DB_LOCK:
+        conn = _db()
+        conn.execute(
+            "INSERT INTO chats (uid, cid, ts, data) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(uid, cid) DO UPDATE SET ts=excluded.ts, data=excluded.data",
+            (uid, str(cid), ts, payload))
+        conn.commit()
+
+
+def chat_delete(uid: str, cid: str):
+    with _DB_LOCK:
+        conn = _db()
+        conn.execute("DELETE FROM chats WHERE uid=? AND cid=?", (uid, str(cid)))
+        conn.commit()
+
+
+def chat_list_meta(uid: str) -> list:
+    """Лёгкий список (id/title/model/ts) для /api/chats — как прежний glob по файлам."""
+    out = []
+    for r in _db().execute(
+            "SELECT data FROM chats WHERE uid=? ORDER BY ts DESC", (uid,)).fetchall():
+        try:
+            c = json.loads(r["data"])
+            out.append({"id": c["id"], "title": c.get("title", "…"),
+                        "model": c.get("model", ""), "ts": c.get("ts", 0)})
+        except Exception:
+            continue
+    return out
+
+
+def chat_iter_recent(uid: str, limit: int = 200):
+    """Недавние чаты (полные объекты) для эпизодической памяти — по убыванию ts."""
+    out = []
+    for r in _db().execute(
+            "SELECT data FROM chats WHERE uid=? ORDER BY ts DESC LIMIT ?",
+            (uid, int(limit))).fetchall():
+        try:
+            out.append(json.loads(r["data"]))
+        except Exception:
+            continue
+    return out
 
 
 # --- Шифрохранилище cookies (Fernet): сохранить раз → браузить под логином. ---
@@ -2903,25 +3207,21 @@ def cookie_delete(uid: str, name: str):
 
 
 def load_memory(uid: str) -> list:
-    try:
-        return json.loads((user_dir(uid) / "memory.json").read_text())
-    except Exception:
-        return []
+    v = _db_get_json("memory", "uid", uid, [])
+    return v if isinstance(v, list) else []
 
 
 def save_memory(uid: str, mem: list):
-    (user_dir(uid) / "memory.json").write_text(json.dumps(mem, ensure_ascii=False))
+    _db_put_json("memory", "uid", uid, mem)
 
 
 def load_settings(uid: str) -> dict:
-    try:
-        return json.loads((user_dir(uid) / "settings.json").read_text())
-    except Exception:
-        return {}
+    v = _db_get_json("settings", "uid", uid, {})
+    return v if isinstance(v, dict) else {}
 
 
 def save_settings(uid: str, s: dict):
-    (user_dir(uid) / "settings.json").write_text(json.dumps(s, ensure_ascii=False))
+    _db_put_json("settings", "uid", uid, s)
 
 
 # ---------------------------------------------------------------- биллинг (реселлинг)
@@ -2931,7 +3231,9 @@ BILLING_FILE = BASE / "billing.json"
 
 def load_billing() -> dict:
     try:
-        b = json.loads(BILLING_FILE.read_text())
+        b = json.loads(_db_kv_get("billing", "") or "{}")
+        if not isinstance(b, dict):
+            b = {}
     except Exception:
         b = {}
     b.setdefault("enabled", True)        # тарифицировать юзеров (владелец всегда бесплатно)
@@ -2943,7 +3245,7 @@ def load_billing() -> dict:
 
 
 def save_billing(b: dict):
-    BILLING_FILE.write_text(json.dumps(b, ensure_ascii=False))
+    _db_kv_set("billing", json.dumps(b, ensure_ascii=False))
 
 
 # Живой курс USDT→₽ (именно в USDT ты платишь провайдерам). Кэш на час.
@@ -2981,10 +3283,10 @@ def effective_rate(bl: dict = None) -> float:
 
 
 def user_balance(uid: str) -> dict:
-    try:
-        return json.loads((user_dir(uid) / "balance.json").read_text())
-    except Exception:
+    v = _db_get_json("balance", "uid", uid, None)
+    if not isinstance(v, dict):
         return {"balance": 0.0, "spent": 0.0, "ledger": []}
+    return v
 
 
 import threading as _threading
@@ -3002,10 +3304,8 @@ def _balance_lock(uid: str):
 
 
 def save_balance(uid: str, b: dict):
-    p = user_dir(uid) / "balance.json"
-    tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(b, ensure_ascii=False))
-    tmp.replace(p)                     # атомарная замена (нет частичных/битых файлов)
+    # SQLite-транзакция атомарна (нет частичных/битых записей — как прежний tmp+replace).
+    _db_put_json("balance", "uid", uid, b)
 
 
 def price_of(model_id: str):
@@ -3020,13 +3320,14 @@ _ak_lock = threading.Lock()
 
 def load_apikeys() -> dict:
     try:
-        return json.loads(APIKEYS_FILE.read_text())
+        d = json.loads(_db_kv_get("apikeys", "") or "{}")
+        return d if isinstance(d, dict) else {}
     except Exception:
         return {}
 
 
 def save_apikeys(d: dict):
-    APIKEYS_FILE.write_text(json.dumps(d, ensure_ascii=False))
+    _db_kv_set("apikeys", json.dumps(d, ensure_ascii=False))
 
 
 def gen_apikey(uid: str, name: str = "") -> str:
@@ -3226,15 +3527,8 @@ def episodic_recall(uid: str, query: str, k: int = 5) -> list:
     terms = re.findall(r"\w{3,}", (query or "").lower())
     if not terms:
         return []
-    d = user_dir(uid) / "chats"
-    if not d.exists():
-        return []
     scored = []
-    for fp in sorted(d.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:200]:
-        try:
-            chat = json.loads(fp.read_text())
-        except Exception:
-            continue
+    for chat in chat_iter_recent(uid, 200):
         for m in chat.get("messages", []):
             c = m.get("content") or ""
             if isinstance(c, list):
@@ -4618,23 +4912,16 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"models": AIML_TD3 if _aiml_key() else [], "have": bool(_aiml_key())})
         elif path == "/api/chats":
             uid = (self._qs().get("user") or ["default"])[0]
-            chats = []
-            for f in (user_dir(uid) / "chats").glob("*.json"):
-                try:
-                    c = json.loads(f.read_text())
-                    chats.append({"id": c["id"], "title": c.get("title", "…"),
-                                  "model": c.get("model", ""), "ts": c.get("ts", 0)})
-                except Exception:
-                    continue
+            chats = chat_list_meta(uid)
             chats.sort(key=lambda c: -c["ts"])
             self._json(chats)
         elif path == "/api/chat":
             q = self._qs()
             uid = (q.get("user") or ["default"])[0]
             cid = safe_id((q.get("id") or [""])[0])
-            f = user_dir(uid) / "chats" / f"{cid}.json"
-            self._json(json.loads(f.read_text()) if f.exists() else {"error": "not found"},
-                       200 if f.exists() else 404)
+            obj = chat_load(uid, cid)
+            self._json(obj if obj is not None else {"error": "not found"},
+                       200 if obj is not None else 404)
         else:
             self._json({"error": "not found"}, 404)
 
@@ -4653,13 +4940,12 @@ class Handler(BaseHTTPRequestHandler):
             cid = safe_id(c.get("id", ""))
             if not cid:
                 return self._json({"error": "bad id"}, 400)
-            (user_dir(uid) / "chats" / f"{cid}.json").write_text(
-                json.dumps(c, ensure_ascii=False))
+            chat_save(uid, cid, c)
             self._json({"ok": True})
         elif path == "/api/delete":
             c = self._body()
             cid = safe_id(c.get("id", ""))
-            (user_dir(c.get("user", "default")) / "chats" / f"{cid}.json").unlink(missing_ok=True)
+            chat_delete(c.get("user", "default"), cid)
             self._json({"ok": True})
         elif path == "/api/remember":
             c = self._body()
@@ -4754,12 +5040,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "Менять личность Тайги может только владелец."}, 403)
             persona = str(c.get("persona") or "").strip()
             if not persona or persona == DEFAULT_IDENTITY.strip():
-                try:
-                    IDENTITY_FILE.unlink()          # пусто/как дефолт → возвращаем дефолт
-                except Exception:
-                    pass
+                _db_kv_set("identity", "")          # пусто/как дефолт → возвращаем дефолт
             else:
-                IDENTITY_FILE.write_text(persona)
+                _db_kv_set("identity", persona)
             self._json({"ok": True, "persona": _identity_custom()})
         elif path == "/api/mcp":
             c = self._body()
@@ -5024,26 +5307,27 @@ class Handler(BaseHTTPRequestHandler):
 
     def api_users(self):
         c = self._body()
-        action, users = c.get("action"), load_users()
-        if action == "create":
-            uid = safe_id(c.get("name", "")) or f"user{len(users)+1}"
-            base = uid
-            n = 2
-            while any(u["id"] == uid for u in users):
-                uid = f"{base}{n}"; n += 1
-            users.append({"id": uid, "name": c.get("name", uid)[:24],
-                          "emoji": c.get("emoji", "🙂")})
-            user_dir(uid)
-        elif action == "rename":
-            for u in users:
-                if u["id"] == c.get("id"):
-                    u["name"] = c.get("name", u["name"])[:24]
-                    if c.get("emoji"):
-                        u["emoji"] = c["emoji"]
-        elif action == "delete":
-            users = [u for u in users if u["id"] != c.get("id")] or \
-                    [{"id": "default", "name": "Я", "emoji": "🦊"}]
-        USERS_FILE.write_text(json.dumps(users, ensure_ascii=False))
+        with _DB_LOCK:                      # read-modify-write списка юзеров под замком
+            action, users = c.get("action"), load_users()
+            if action == "create":
+                uid = safe_id(c.get("name", "")) or f"user{len(users)+1}"
+                base = uid
+                n = 2
+                while any(u["id"] == uid for u in users):
+                    uid = f"{base}{n}"; n += 1
+                users.append({"id": uid, "name": c.get("name", uid)[:24],
+                              "emoji": c.get("emoji", "🙂")})
+                user_dir(uid)
+            elif action == "rename":
+                for u in users:
+                    if u["id"] == c.get("id"):
+                        u["name"] = c.get("name", u["name"])[:24]
+                        if c.get("emoji"):
+                            u["emoji"] = c["emoji"]
+            elif action == "delete":
+                users = [u for u in users if u["id"] != c.get("id")] or \
+                        [{"id": "default", "name": "Я", "emoji": "🦊"}]
+            save_users(users)
         self._json({"users": users})
 
     # --- RELAY: uncensored-крафтер причёсывает промпт → frontier-модель отвечает ---
