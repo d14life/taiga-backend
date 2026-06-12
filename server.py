@@ -5647,6 +5647,101 @@ class Handler(BaseHTTPRequestHandler):
             self._sse({"type": "cost", "owner": owner, **info})
         self._sse({"type": "done"})
 
+    def chat_compare(self, req):
+        """COMPARE-режим: тот же веер моделей, что и у «совета», но БЕЗ синтеза —
+        каждый ответ показываем отдельной карточкой (member_answer)."""
+        uid = req.get("user", "default")
+        raw_messages = list(req.get("messages") or [])
+        n = max(2, min(int(req.get("n") or 3), 5))
+        max_tokens = max(int(req.get("max_tokens") or 2048), 1500)
+        question = next((m.get("content") or "" for m in reversed(raw_messages)
+                         if m.get("role") == "user"), "")
+
+        billing = load_billing()
+        owner = is_owner(uid)
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        if not question.strip():
+            self._sse({"type": "error", "message": "Пустой запрос для сравнения."}); return
+        if not owner and not rate_ok(uid, billing.get("rate_per_min", 20)):
+            self._sse({"type": "error", "message": "Слишком часто — подожди минуту."}); return
+        if abuse_check(question):
+            log_abuse(uid, "compare")
+            self._sse({"type": "error", "message": "Запрос нарушает правила (запрещено у всех провайдеров)."}); return
+        bill = billing["enabled"] and not owner
+        if bill and user_balance(uid).get("balance", 0) <= 0:
+            self._sse({"type": "error", "message": "Баланс исчерпан. Пополни счёт, чтобы продолжить."}); return
+
+        # выбор моделей: явный мульти-селект пользователя (compareModels) или авто топ-N
+        members = None
+        want = req.get("compareModels")
+        if isinstance(want, list) and want:
+            valid = {r["id"]: r for r in RICH}
+            picked = []
+            for mid in want:
+                r = valid.get(mid)
+                if r and r not in picked:
+                    picked.append(r)
+                if len(picked) >= 5:
+                    break
+            if picked:
+                members = picked
+        if not members:
+            members = _council_models(n)
+        if not members:
+            self._sse({"type": "error", "message": "Нет доступных моделей для сравнения."}); return
+
+        def _disp(r):
+            return strip_model_prefix(r["id"]).split("/")[-1]
+
+        self._sse({"type": "council_plan", "members": [_disp(r) for r in members]})
+
+        member_sys = taiga_identity() + "\n\nОтветь на вопрос по существу, точно и без воды."
+
+        def ask_one(r):
+            k, _, ke = resolve_key(uid, r["id"])
+            if ke or not k:
+                return (r, None, 0, 0)
+            try:
+                txt = venice_complete(r["id"], [{"role": "system", "content": member_sys},
+                                                {"role": "user", "content": question}],
+                                      min(max_tokens, 1200), k)
+                return (r, txt, est_tokens(question), est_tokens(txt or ""))
+            except Exception:
+                return (r, None, 0, 0)
+
+        import concurrent.futures
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(members)) as ex:
+            futs = {ex.submit(ask_one, r): r for r in members}
+            for fut in concurrent.futures.as_completed(futs):
+                r, txt, ti, to = fut.result()
+                results.append((r, txt, ti, to))
+                # COMPARE: вместо «свести» — отдаём полный ответ каждой модели отдельно
+                if not self._sse({"type": "member_answer", "model": _disp(r),
+                                  "text": txt or "", "ok": bool(txt)}):
+                    return
+
+        # биллинг: суммируем расход всех ответивших участников (как в совете), без синтеза
+        if billing["enabled"]:
+            total_cost = total_charge = total_markup = 0.0
+            for r, t, ti, to in results:
+                if not t:
+                    continue
+                ri = meter(uid, r["id"], ti, to, deduct=not owner)
+                total_cost += ri.get("cost", 0); total_charge += ri.get("charge", 0)
+                total_markup += ri.get("markup", 0)
+            info = {"cost": total_cost, "charge": total_charge, "markup": total_markup, "byok": False}
+            if not owner:
+                info["balance"] = user_balance(uid).get("balance", 0)
+            self._sse({"type": "cost", "owner": owner, **info})
+        self._sse({"type": "done"})
+
     # --- агентский цикл с SSE ---
     def chat(self):
         req = self._body()
@@ -5654,6 +5749,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.chat_relay(req)
         if req.get("research"):
             return self.chat_research(req)
+        if req.get("compare"):
+            return self.chat_compare(req)
         if req.get("council"):
             return self.chat_council(req)
         uid = req.get("user", "default")
