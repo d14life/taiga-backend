@@ -5836,6 +5836,16 @@ class Handler(BaseHTTPRequestHandler):
         scenes = req.get("scenes") or []
         if not scenes:
             return self._json({"error": "нет сцен"}, 400)
+        # 🔐 анти-абуз: эндпоинт качает URL (SSRF) и жжёт ffmpeg-CPU. Гейтим как медиа-ручки:
+        # владелец/баланс + rate-limit. Иначе любой превратит его в бесплатный compute/SSRF-прокси.
+        uid = req.get("user", "default")
+        owner = is_owner(uid)
+        if not owner:
+            billing = load_billing()
+            if not rate_ok(uid, billing.get("rate_per_min", 20)):
+                return self._json({"error": "Слишком часто — подожди минуту."}, 429)
+            if billing.get("enabled") and user_balance(uid).get("balance", 0) <= 0:
+                return self._json({"error": "Баланс исчерпан. Пополни счёт."}, 402)
         if not shutil.which("ffmpeg"):
             return self._json({"error": "ffmpeg не установлен на сервере"}, 501)
         W, H, FPS = 1280, 720, 30
@@ -5854,10 +5864,14 @@ class Handler(BaseHTTPRequestHandler):
                     with open(src, "wb") as f:
                         f.write(base64.b64decode(b64))
                 else:
+                    # 🔐 анти-SSRF: наши сцены приходят как data:-URL; внешний URL допустим только
+                    # публичный http(s). localhost/внутренние адреса (и редиректы на них) — блок.
+                    if not url.startswith(("http://", "https://")) or not _is_public_url(url):
+                        return self._json({"error": "сцена %d: разрешены только data: или публичные http(s) URL" % (i + 1)}, 400)
                     src += ".mp4"
                     try:
                         rq = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                        with urllib.request.urlopen(rq, timeout=120) as r, open(src, "wb") as f:
+                        with _ssrf_safe_opener().open(rq, timeout=120) as r, open(src, "wb") as f:
                             shutil.copyfileobj(r, f)
                     except Exception as e:
                         return self._json({"error": "скачивание сцены %d: %s" % (i + 1, e)}, 502)
@@ -6745,8 +6759,26 @@ class Handler(BaseHTTPRequestHandler):
 
     def api_users(self):
         c = self._body()
+        action = c.get("action")
+        # КТО зовёт: валидный session-токен главнее заявленного user (его легко подделать).
+        # Без токена — падаем на поле user (как раньше; uid-режим). Деструктив гейтим ниже.
+        caller = c.get("user", "default")
+        tok = str(c.get("token") or "").strip()
+        if tok:
+            try:
+                import auth
+                tu = auth.uid_from_token(tok)
+                if tu:
+                    caller = tu
+            except Exception:
+                pass
+        target = c.get("id")
+        # 🔐 Гейт деструктивных операций над ЧУЖИМ аккаунтом: rename/delete другого юзера —
+        # только владелец. Себя юзер может удалить/переименовать сам. create — открыт (signup).
+        if action in ("delete", "rename") and target and target != caller and not is_owner(caller):
+            return self._json({"error": "только владелец может менять чужие аккаунты"}, 403)
         with _DB_LOCK:                      # read-modify-write списка юзеров под замком
-            action, users = c.get("action"), load_users()
+            users = load_users()
             if action == "create":
                 uid = safe_id(c.get("name", "")) or f"user{len(users)+1}"
                 base = uid
@@ -6758,12 +6790,12 @@ class Handler(BaseHTTPRequestHandler):
                 user_dir(uid)
             elif action == "rename":
                 for u in users:
-                    if u["id"] == c.get("id"):
+                    if u["id"] == target:
                         u["name"] = c.get("name", u["name"])[:24]
                         if c.get("emoji"):
                             u["emoji"] = c["emoji"]
             elif action == "delete":
-                users = [u for u in users if u["id"] != c.get("id")] or \
+                users = [u for u in users if u["id"] != target] or \
                         [{"id": "default", "name": "Я", "emoji": "🦊"}]
             save_users(users)
         self._json({"users": users})
@@ -6864,7 +6896,7 @@ class Handler(BaseHTTPRequestHandler):
             self._sse({"type": "error", "message": friendly_api_error(e.code, detail, has_images)})
             return
         except Exception as e:
-            self._sse({"type": "error", "message": str(e)})
+            self._sse({"type": "error", "message": friendly_api_error(None, str(e), has_images)})
             return
         # биллинг: крафтер всегда на твоём ключе (платишь ты). Ответчик: BYOK → платит юзер сам.
         if billing["enabled"]:
@@ -7091,8 +7123,10 @@ class Handler(BaseHTTPRequestHandler):
             picked = []
             for mid in want:
                 # id рекламируется в каталоге, но нет в RICH (иной формат/курируемый) →
-                # минимальная запись {"id": mid}, чтобы модель не дропалась молча
-                r = valid.get(mid) or ({"id": mid} if mid in valid_ids else None)
+                # минимальная запись {"id": mid}, чтобы модель не дропалась молча.
+                # _valid_model_ids() хранит id БЕЗ провайдер-префикса — сверяем по очищенной форме,
+                # иначе "ng:deepseek-ai/…" молча дропалось бы (хотя есть в каталоге).
+                r = valid.get(mid) or ({"id": mid} if strip_model_prefix(mid) in valid_ids else None)
                 if r and r not in picked:
                     picked.append(r)
                 if len(picked) >= 5:
@@ -7165,7 +7199,7 @@ class Handler(BaseHTTPRequestHandler):
             detail = e.read().decode("utf-8", "ignore")[:300]
             self._sse({"type": "error", "message": friendly_api_error(e.code, detail)}); return
         except Exception as e:
-            self._sse({"type": "error", "message": str(e)}); return
+            self._sse({"type": "error", "message": friendly_api_error(None, str(e))}); return
 
         if billing["enabled"]:
             for r, t, ti, to in good:
@@ -7227,8 +7261,10 @@ class Handler(BaseHTTPRequestHandler):
             picked = []
             for mid in want:
                 # id рекламируется в каталоге, но нет в RICH (иной формат/курируемый) →
-                # минимальная запись {"id": mid}, чтобы модель не дропалась молча
-                r = valid.get(mid) or ({"id": mid} if mid in valid_ids else None)
+                # минимальная запись {"id": mid}, чтобы модель не дропалась молча.
+                # _valid_model_ids() хранит id БЕЗ провайдер-префикса — сверяем по очищенной форме,
+                # иначе "ng:deepseek-ai/…" молча дропалось бы (хотя есть в каталоге).
+                r = valid.get(mid) or ({"id": mid} if strip_model_prefix(mid) in valid_ids else None)
                 if r and r not in picked:
                     picked.append(r)
                 if len(picked) >= 5:
