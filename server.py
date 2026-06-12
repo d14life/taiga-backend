@@ -5448,19 +5448,38 @@ class Handler(BaseHTTPRequestHandler):
                     if not self._sse({"type": "tool", "name": "ask_expert", "args": call[1]}):
                         return
                     eu = {}
+                    streamed0 = len(out_total)
                     try:
                         for d in venice_stream(expert_model, expert_msgs,
                                                max(max_tokens, 3000), eu, expert_key):
                             out_total += d
                             if not self._sse({"type": "delta", "text": d}):
                                 return
-                    except urllib.error.HTTPError as e:
-                        detail = e.read().decode("utf-8", "ignore")[:300]
-                        self._sse({"type": "error", "message": f"эксперт API {e.code}: {detail}"})
-                        return
-                    except Exception as e:
-                        self._sse({"type": "error", "message": f"эксперт: {e}"})
-                        return
+                    except Exception:
+                        # эксперт-провайдер лёг (502/down/таймаут) → НЕ показываем сырую ошибку юзеру.
+                        # Правило «только рабочие модели»: молча пробуем funded-запасные из цепочки.
+                        if len(out_total) == streamed0:        # ничего ещё не стримили — можно подменить
+                            for fb in _MODEL_FALLBACK["chat"]:
+                                if fb == expert_model:
+                                    continue
+                                fk, _fb_byok, _fk_err = resolve_key(uid, fb)
+                                if not fk:
+                                    continue
+                                try:
+                                    eu = {}
+                                    for d in venice_stream(fb, expert_msgs,
+                                                           max(max_tokens, 3000), eu, fk):
+                                        out_total += d
+                                        if not self._sse({"type": "delta", "text": d}):
+                                            return
+                                    expert_model, expert_key = fb, fk   # для биллинга — кто реально ответил
+                                    break
+                                except Exception:
+                                    eu = {}
+                                    continue
+                        if len(out_total) == streamed0:        # совсем никто не ответил
+                            self._sse({"type": "delta", "text":
+                                       "Модели-эксперты сейчас перегружены — попробуй ещё раз через пару секунд."})
                     expert_usage["prompt_tokens"] += eu.get("prompt_tokens", 0)
                     expert_usage["completion_tokens"] += eu.get("completion_tokens", 0)
                     self._sse({"type": "tool_done", "name": "ask_expert", "chars": len(out_total)})
