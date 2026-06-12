@@ -3276,6 +3276,93 @@ def _safety_hook(name: str, args: dict):
 register_hook("pre", _safety_hook)
 
 
+def _repair_tool_json(text: str):
+    """Попытка починить ОБРЕЗАННЫЙ/переогороженный JSON вызова инструмента (stream-recovery).
+    Чистый Python, без зависимостей: снимаем код-фенсы и спец-теги, берём от первой «{»,
+    балансируем скобки/строки (дорезаем хвостовой мусор и дозакрываем недостающее).
+    Возвращает dict или None. Только для случая, когда обычный разбор не справился."""
+    s = (text or "").strip()
+    s = re.sub(r"<\|[^|<>]*\|>", " ", s)
+    s = re.sub(r"```(?:json)?", " ", s).strip()
+    start = s.find("{")
+    if start == -1:
+        return None
+    s = s[start:]
+    depth = 0          # глубина {}/[]
+    in_str = False     # внутри строки
+    esc = False        # предыдущий символ — экранирование
+    end = -1           # позиция, где первый объект становится сбалансированным
+    stack = []         # ожидаемые закрывашки для дозакрытия хвоста
+    for i, ch in enumerate(s):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in "{[":
+            depth += 1
+            stack.append("}" if ch == "{" else "]")
+        elif ch in "}]":
+            if depth > 0:
+                depth -= 1
+                if stack:
+                    stack.pop()
+                if depth == 0:
+                    end = i + 1
+                    break
+    if end != -1:
+        cand = s[:end]                       # сбалансированный объект, хвост-мусор отрезан
+    else:
+        # поток оборвался посреди JSON → дозакрываем строку и недостающие скобки
+        cand = s.rstrip().rstrip(",")
+        if in_str:
+            cand += '"'
+        cand += "".join(reversed(stack))
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(cand)
+        return obj if isinstance(obj, dict) else None
+    except json.JSONDecodeError:
+        return None
+
+
+def _looks_like_tool_head(head: str, allowed: dict, steps: int = 0) -> bool:
+    """Stream-recovery холдбэк: похож ли НАЧАЛО ответа на зреющий tool-call JSON, который надо
+    придержать (чтобы обрезок tool-JSON на хвосте никогда не утёк как видимый текст)?
+    Консервативно: ДЕРЖИМ только пока голова реально может стать tool-call'ом.
+    Возвращаем True → держим; False → это проза/код/html, отдаём сразу.
+    Ключевое свойство: НЕЗАКОНЧЕННЫЙ «{...» всегда True (анти-утечка обрезанного JSON)."""
+    if not allowed or steps >= 8:
+        return False                      # инструменты недоступны → tool-call невозможен, не держим
+    s = re.sub(r"<\|[^|<>]*\|>", " ", head)
+    s = re.sub(r"```(?:json)?", " ", s).strip()
+    start = s.find("{")
+    if start == -1:
+        # ещё нет «{». Голый фенс ``` без json-тега или html-тег «<» — это код/разметка, не tool-call.
+        # Но «{» может прийти СЛЕДУЮЩЕЙ дельтой только если до сих пор только фенс/пробелы.
+        return s == "" and head.lstrip().startswith("`")
+    if s[:start].strip():
+        return False                      # перед «{» есть проза → это не вызов инструмента
+    frag = s[start:]
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(frag)
+    except json.JSONDecodeError:
+        return True                       # JSON ещё НЕ закончен (обрезок) → держим до доставки/разбора
+    # объект уже сбалансирован: tool-call только если совпало имя инструмента — иначе это JSON-проза
+    if not isinstance(obj, dict):
+        return False
+    for k in ("tool", "toolName", "name"):
+        if obj.get(k) in allowed:
+            return True
+    if len(obj) == 1 and next(iter(obj)) in allowed:
+        return True
+    return False
+
+
 def parse_tool_call(text: str, allowed: dict):
     """Если ответ модели — JSON вызова инструмента, вернуть (имя, args)."""
     s = text.strip()
@@ -3287,7 +3374,10 @@ def parse_tool_call(text: str, allowed: dict):
     try:
         obj, _ = json.JSONDecoder().raw_decode(s[start:])
     except json.JSONDecodeError:
-        return None
+        # обрезанный/переогороженный JSON (обрыв стрима, лишние фенсы) → пробуем починить
+        obj = _repair_tool_json(text)
+        if obj is None:
+            return None
     if not isinstance(obj, dict):
         return None
     if obj.get("tool") in allowed:
@@ -7814,11 +7904,22 @@ class Handler(BaseHTTPRequestHandler):
                     if buffering:
                         buf += delta
                         head = buf.lstrip()
-                        if head and not head.startswith(("{", "`", "<")):
+                        if not head:
+                            pass                       # ещё только пробелы — ждём первого значимого символа
+                        elif not head.startswith(("{", "`", "<")):
+                            # обычная проза — отдаём сразу (как и раньше), холдбэк не для неё
                             buffering = False
                             if not self._sse({"type": "delta", "text": buf}):
                                 return
                             buf = ""
+                        elif not _looks_like_tool_head(head, active_tools, steps):
+                            # фенс/тег/«{», но это ЯВНО не зреющий tool-call (markdown-код, html, JSON-проза) →
+                            # отпускаем как обычный текст, не держим до конца стрима
+                            buffering = False
+                            if not self._sse({"type": "delta", "text": buf}):
+                                return
+                            buf = ""
+                        # иначе: голова всё ещё похожа на tool-call JSON — ДЕРЖИМ (даже хвост-обрезок не утечёт)
                     else:
                         if not self._sse({"type": "delta", "text": delta}):
                             return
@@ -7846,6 +7947,13 @@ class Handler(BaseHTTPRequestHandler):
             usage_total["completion_tokens"] += u.get("completion_tokens", 0)
 
             if not got_any:
+                # стрим закрылся ЧИСТО, но без единой дельты (обрыв апстрима/пустой ответ до контента).
+                # Ничего юзеру ещё не ушло → тихо пробуем запасную funded-модель (двойной отправки нет,
+                # т.к. got_any=False). Только если запасной нет — показываем ошибку.
+                nxt = _next_fallback_model(stream_model, tried, uid, has_images)
+                if nxt:
+                    tried.add(nxt[0]); stream_model, stream_key = nxt
+                    continue
                 self._sse({"type": "error", "message": "пустой ответ модели"})
                 return
 
