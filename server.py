@@ -635,13 +635,24 @@ def _dedup_rich(records: list) -> list:
             groups[r["id"]] = [r]              # медиамодели уникальны — не группируем
         else:
             groups.setdefault(_model_key(r), []).append(r)
+    # NanoGPT — основной провайдер; при АКТИВНОЙ подписке его входные токены бесплатны
+    # (60М/нед), поэтому на дублях одной модели предпочитаем nano-вариант → запрос уходит
+    # через подписку, а не жжёт PAYG Venice. Уникальные модели (Venice-uncensored,
+    # дешёвый Opus у Redpill) этим не трогаются — у них нет дубля, остаются как есть.
+    try:
+        _sub_active = nano_sub_status().get("active")
+    except Exception:
+        _sub_active = False
     out = []
     for grp in groups.values():
         if len(grp) == 1:
             out.append(grp[0]); continue
         def rank(r):                            # дешевле → выше; цена не известна (None) → в конец; затем больше контекст
             p = r.get("per1k")
-            return (9e9 if p is None else p, -(r.get("ctx") or 0))
+            base = 9e9 if p is None else p
+            if _sub_active and r.get("provider") == "nanogpt":
+                base *= 0.001                   # nano-подписка ≈ бесплатно → дубль уходит к nano
+            return (base, -(r.get("ctx") or 0))
         grp.sort(key=rank)
         best = grp[0]
         best["also"] = sorted({g["provider"] for g in grp})   # инфо: тот же ум есть и у этих роутеров
@@ -1350,6 +1361,21 @@ def friendly_api_error(code, detail="", has_images=False):
     if has_images:
         return "С картинкой не вышло — попробуй другое изображение или модель «сильное зрение»."
     return "Не получилось получить ответ — попробуй ещё раз или смени модель."
+
+
+def _next_fallback_model(current, tried, uid, has_images=False):
+    """Следующая РАБОЧАЯ funded-модель из цепочки чата (не из tried, с ключом, зрячая если надо).
+    Для «провайдер лёг → молча подменяем», правило Damir: только рабочие модели, без сырых ошибок."""
+    for fb in _MODEL_FALLBACK.get("chat", []):
+        if fb in tried or fb == current:
+            continue
+        if has_images and not vision_ok(fb):
+            continue
+        fk, _byok, _err = resolve_key(uid, fb)
+        if not fk:
+            continue
+        return fb, fk
+    return None
 
 
 def _clean_temperature(temperature):
@@ -6629,6 +6655,7 @@ class Handler(BaseHTTPRequestHandler):
         expert_usage = {"prompt_tokens": 0, "completion_tokens": 0}
         out_total = ""
         steps = 0
+        tried = {stream_model}        # модели, что уже пробовали (для тихой подмены при сбое провайдера)
         while True:
             buf, buffering, got_any = "", True, False
             u = {}
@@ -6650,10 +6677,22 @@ class Handler(BaseHTTPRequestHandler):
                             return
             except urllib.error.HTTPError as e:
                 detail = e.read().decode("utf-8", "ignore")[:300]
+                # провайдер лёг (502/429/5xx) И мы ещё НИЧЕГО не отдали → молча на следующую funded
+                if not got_any and e.code in (408, 409, 425, 429, 500, 502, 503, 504):
+                    nxt = _next_fallback_model(stream_model, tried, uid, has_images)
+                    if nxt:
+                        tried.add(nxt[0]); stream_model, stream_key = nxt
+                        continue
                 self._sse({"type": "error", "message": friendly_api_error(e.code, detail, has_images)})
                 return
             except Exception as e:
-                self._sse({"type": "error", "message": str(e)})
+                # сетевой обрыв/таймаут до первого байта → тоже пробуем запасную молча
+                if not got_any:
+                    nxt = _next_fallback_model(stream_model, tried, uid, has_images)
+                    if nxt:
+                        tried.add(nxt[0]); stream_model, stream_key = nxt
+                        continue
+                self._sse({"type": "error", "message": friendly_api_error(None, str(e), has_images)})
                 return
 
             usage_total["prompt_tokens"] += u.get("prompt_tokens", 0)
