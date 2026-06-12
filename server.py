@@ -1333,6 +1333,25 @@ def build_api_messages(messages: list) -> list:
     return out
 
 
+def friendly_api_error(code, detail="", has_images=False):
+    """Сырые ошибки провайдера → понятный текст юзеру (правило: без «API 400/429» в лицо).
+    Покрывает частые случаи: битая/мелкая картинка, перегруз, доступ, 5xx."""
+    d = (detail or "").lower()
+    if code == 400 and "image content is not supported" in d:
+        return "Эта модель не умеет смотреть картинки — переключаю на зрячую, попробуй ещё раз."
+    if code == 400 and ("did not pass" in d or "validation" in d or "image" in d or has_images):
+        return "Картинку не получилось прочитать — загрузи покрупнее (от ~100px) в PNG или JPG."
+    if code == 429 or "overload" in d or "rate limit" in d or "too many" in d:
+        return "Модель сейчас перегружена — попробуй ещё раз через пару секунд."
+    if code in (401, 403):
+        return "Доступ к этой модели сейчас недоступен — выбери другую, мы уже чиним."
+    if code and code >= 500:
+        return "Провайдер временно недоступен — попробуй ещё раз через пару секунд."
+    if has_images:
+        return "С картинкой не вышло — попробуй другое изображение или модель «сильное зрение»."
+    return "Не получилось получить ответ — попробуй ещё раз или смени модель."
+
+
 def _clean_temperature(temperature):
     """Нормализуем temperature к 0..1.5 (как в userConfig) или None если не задана/мусор."""
     if temperature is None:
@@ -6013,7 +6032,7 @@ class Handler(BaseHTTPRequestHandler):
                     return
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "ignore")[:300]
-            self._sse({"type": "error", "message": f"API {e.code}: {detail}"})
+            self._sse({"type": "error", "message": friendly_api_error(e.code, detail, has_images)})
             return
         except Exception as e:
             self._sse({"type": "error", "message": str(e)})
@@ -6172,7 +6191,7 @@ class Handler(BaseHTTPRequestHandler):
                     return
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "ignore")[:300]
-            self._sse({"type": "error", "message": f"API {e.code}: {detail}"}); return
+            self._sse({"type": "error", "message": friendly_api_error(e.code, detail)}); return
         except Exception as e:
             self._sse({"type": "error", "message": str(e)}); return
 
@@ -6312,7 +6331,7 @@ class Handler(BaseHTTPRequestHandler):
                     return
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "ignore")[:300]
-            self._sse({"type": "error", "message": f"API {e.code}: {detail}"}); return
+            self._sse({"type": "error", "message": friendly_api_error(e.code, detail)}); return
         except Exception as e:
             self._sse({"type": "error", "message": str(e)}); return
 
@@ -6624,7 +6643,7 @@ class Handler(BaseHTTPRequestHandler):
                             return
             except urllib.error.HTTPError as e:
                 detail = e.read().decode("utf-8", "ignore")[:300]
-                self._sse({"type": "error", "message": f"API {e.code}: {detail}"})
+                self._sse({"type": "error", "message": friendly_api_error(e.code, detail, has_images)})
                 return
             except Exception as e:
                 self._sse({"type": "error", "message": str(e)})
