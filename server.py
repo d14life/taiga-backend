@@ -5576,11 +5576,12 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True, "config": load_user_config(uid)})
         elif path == "/api/build_function":
             c = self._body()
-            fn = build_function_from_nl(c.get("description") or "")
+            fn = build_function_from_nl(c.get("text") or c.get("description") or "")
             if not fn:
                 self._json({"error": "не удалось собрать функцию по описанию"}, 422)
             else:
-                self._json({"ok": True, "function": fn})
+                # отдаём И обёрткой function, И полями верхнего уровня — UI читает любой формат
+                self._json({"ok": True, "function": fn, **fn})
         elif path == "/api/save":
             c = self._body()
             uid = c.get("user", "default")
