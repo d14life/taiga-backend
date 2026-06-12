@@ -3902,6 +3902,7 @@ def chat_save(uid: str, cid: str, obj: dict):
             "ON CONFLICT(uid, cid) DO UPDATE SET ts=excluded.ts, data=excluded.data",
             (uid, str(cid), ts, payload))
         conn.commit()
+    fts_sync_chat(uid, str(cid), obj)     # поддерживаем полнотекстовый индекс (тихо)
 
 
 def chat_delete(uid: str, cid: str):
@@ -3909,6 +3910,7 @@ def chat_delete(uid: str, cid: str):
         conn = _db()
         conn.execute("DELETE FROM chats WHERE uid=? AND cid=?", (uid, str(cid)))
         conn.commit()
+    fts_remove_chat(uid, str(cid))        # вычищаем чат из полнотекстового индекса
 
 
 def chat_list_meta(uid: str) -> list:
@@ -3936,6 +3938,256 @@ def chat_iter_recent(uid: str, limit: int = 200):
         except Exception:
             continue
     return out
+
+
+# ================================================================ Полнотекстовый поиск (FTS5)
+# Индекс по тексту чатов (+title) и фактам памяти. Внешняя FTS5-таблица: храним
+# отдельные строки (kind/uid/cid/title/ts/body), синхронизируем при сохранении чата.
+# Если сборка sqlite без FTS5 — деградируем до LIKE-поиска, ничего не падает.
+_FTS_OK = None                         # None=не проверяли, True/False=есть ли FTS5
+_FTS_LOCK = threading.RLock()
+
+
+def _fts_supported(conn) -> bool:
+    """Один раз проверяем, собран ли sqlite с FTS5 (создаём temp-таблицу в памяти)."""
+    global _FTS_OK
+    if _FTS_OK is not None:
+        return _FTS_OK
+    try:
+        conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS temp._fts_probe USING fts5(x)")
+        conn.execute("DROP TABLE IF EXISTS temp._fts_probe")
+        _FTS_OK = True
+    except Exception:
+        _FTS_OK = False
+    return _FTS_OK
+
+
+def _fts_init(conn):
+    """Создаём FTS5-таблицу (если поддерживается) и однократно бэкфилим, если пусто."""
+    if not _fts_supported(conn):
+        return
+    try:
+        conn.execute(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS chat_fts USING fts5("
+            "   kind, uid UNINDEXED, cid UNINDEXED, title, body, ts UNINDEXED,"
+            "   tokenize='unicode61')")
+        conn.commit()
+        empty = conn.execute("SELECT 1 FROM chat_fts LIMIT 1").fetchone() is None
+        if empty:
+            _fts_backfill(conn)
+    except Exception as e:
+        global _FTS_OK
+        _FTS_OK = False
+        try:
+            print(f"── FTS5 init: отключаю, fallback LIKE ({e})")
+        except Exception:
+            pass
+
+
+def _chat_body_text(obj: dict) -> str:
+    """Склеиваем текст сообщений чата в один индексируемый блок (content — строки)."""
+    parts = []
+    for m in (obj.get("messages") or []):
+        c = m.get("content")
+        if isinstance(c, str):
+            if c.strip():
+                parts.append(c)
+        elif isinstance(c, list):           # на случай мультимодального формата
+            for seg in c:
+                if isinstance(seg, dict):
+                    t = seg.get("text") or seg.get("content")
+                    if isinstance(t, str) and t.strip():
+                        parts.append(t)
+                elif isinstance(seg, str) and seg.strip():
+                    parts.append(seg)
+    return "\n".join(parts)
+
+
+def _fts_index_chat(conn, uid: str, cid: str, obj: dict):
+    """Переиндексировать один чат (удаляем старые строки kind='chat' и вставляем заново)."""
+    try:
+        conn.execute("DELETE FROM chat_fts WHERE kind='chat' AND uid=? AND cid=?",
+                     (uid, str(cid)))
+        title = str(obj.get("title") or "")
+        body = _chat_body_text(obj)
+        try:
+            ts = float(obj.get("ts") or 0)
+        except Exception:
+            ts = 0.0
+        conn.execute(
+            "INSERT INTO chat_fts (kind, uid, cid, title, body, ts) "
+            "VALUES ('chat', ?, ?, ?, ?, ?)",
+            (uid, str(cid), title, body, ts))
+    except Exception:
+        pass
+
+
+def _fts_index_memory(conn, uid: str):
+    """Переиндексировать факты памяти юзера (kind='memory', cid='__memory__')."""
+    try:
+        conn.execute("DELETE FROM chat_fts WHERE kind='memory' AND uid=?", (uid,))
+        facts = load_memory(uid)
+        body = "\n".join(str(f.get("text", "")) for f in facts
+                         if isinstance(f, dict) and str(f.get("text", "")).strip())
+        if body.strip():
+            conn.execute(
+                "INSERT INTO chat_fts (kind, uid, cid, title, body, ts) "
+                "VALUES ('memory', ?, '__memory__', 'память', ?, 0)",
+                (uid, body))
+    except Exception:
+        pass
+
+
+def _fts_backfill(conn):
+    """Полная перестройка индекса из таблицы chats + памяти всех юзеров."""
+    try:
+        conn.execute("DELETE FROM chat_fts")
+        for r in conn.execute("SELECT uid, cid, data FROM chats").fetchall():
+            try:
+                obj = json.loads(r["data"])
+            except Exception:
+                continue
+            _fts_index_chat(conn, r["uid"], r["cid"], obj)
+        for r in conn.execute("SELECT DISTINCT uid FROM memory "
+                              "WHERE uid NOT LIKE '%::tombstones'").fetchall():
+            _fts_index_memory(conn, r["uid"])
+        conn.commit()
+    except Exception as e:
+        try:
+            print(f"── FTS5 backfill: предупреждение ({e})")
+        except Exception:
+            pass
+
+
+def fts_sync_chat(uid: str, cid: str, obj: dict):
+    """Публичный хук: вызывается из chat_save. Тихий, не валит сохранение чата."""
+    try:
+        conn = _db()
+        if not _fts_supported(conn):
+            return
+        with _FTS_LOCK, _DB_LOCK:
+            _fts_init(conn)
+            if _FTS_OK:
+                _fts_index_chat(conn, uid, str(cid), obj)
+                conn.commit()
+    except Exception:
+        pass
+
+
+def fts_remove_chat(uid: str, cid: str):
+    """Публичный хук: вызывается из chat_delete."""
+    try:
+        conn = _db()
+        if not (_FTS_OK and _fts_supported(conn)):
+            return
+        with _FTS_LOCK, _DB_LOCK:
+            conn.execute("DELETE FROM chat_fts WHERE kind='chat' AND uid=? AND cid=?",
+                         (uid, str(cid)))
+            conn.commit()
+    except Exception:
+        pass
+
+
+def _fts_query_string(q: str) -> str:
+    """Сырой пользовательский ввод → безопасный MATCH-запрос: каждое слово как
+    префиксный токен в кавычках (экранируем кавычки), термы соединяем OR."""
+    toks = re.findall(r"\w+", str(q or ""), flags=re.UNICODE)
+    toks = [t for t in toks if len(t) >= 2][:12]
+    if not toks:
+        return ""
+    return " OR ".join('"%s"*' % t.replace('"', '""') for t in toks)
+
+
+def _like_search(uid: str, q: str, owner: bool, limit: int) -> list:
+    """Fallback без FTS5: LIKE по data чатов + факты памяти. Сниппет вокруг совпадения."""
+    ql = str(q or "").strip().lower()
+    if not ql:
+        return []
+    out = []
+    if owner:
+        rows = _db().execute("SELECT uid, cid, data, ts FROM chats").fetchall()
+    else:
+        rows = _db().execute("SELECT uid, cid, data, ts FROM chats WHERE uid=?",
+                             (uid,)).fetchall()
+    for r in rows:
+        try:
+            obj = json.loads(r["data"])
+        except Exception:
+            continue
+        hay = (str(obj.get("title") or "") + "\n" + _chat_body_text(obj))
+        idx = hay.lower().find(ql)
+        if idx < 0:
+            continue
+        out.append({
+            "chat_id": r["cid"], "user": r["uid"],
+            "title": str(obj.get("title") or "…"),
+            "snippet": _make_snippet(hay, idx, len(ql)),
+            "ts": obj.get("ts", r["ts"] or 0), "kind": "chat",
+        })
+        if len(out) >= limit:
+            break
+    out.sort(key=lambda x: x.get("ts") or 0, reverse=True)
+    return out[:limit]
+
+
+def _make_snippet(text: str, idx: int, qlen: int, radius: int = 60) -> str:
+    a = max(0, idx - radius)
+    b = min(len(text), idx + qlen + radius)
+    s = text[a:b].replace("\n", " ").strip()
+    if a > 0:
+        s = "…" + s
+    if b < len(text):
+        s = s + "…"
+    return s
+
+
+def search_chats(uid: str, q: str, owner: bool = False, limit: int = 30) -> list:
+    """Поиск по чатам (+память) юзера. FTS5 bm25-ранжирование, LIKE-фоллбэк.
+    owner=True → ищем по всем юзерам (владелец видит всё)."""
+    q = str(q or "").strip()
+    if not q:
+        return []
+    limit = max(1, min(int(limit or 30), 100))
+    conn = _db()
+    if _fts_supported(conn):
+        try:
+            with _FTS_LOCK, _DB_LOCK:
+                _fts_init(conn)
+            if _FTS_OK:
+                match = _fts_query_string(q)
+                if not match:
+                    return []
+                if owner:
+                    sql = ("SELECT kind, uid, cid, title, ts, "
+                           "snippet(chat_fts, 4, '', '', '…', 12) AS snip "
+                           "FROM chat_fts WHERE chat_fts MATCH ? "
+                           "ORDER BY bm25(chat_fts) LIMIT ?")
+                    args = (match, limit)
+                else:
+                    sql = ("SELECT kind, uid, cid, title, ts, "
+                           "snippet(chat_fts, 4, '', '', '…', 12) AS snip "
+                           "FROM chat_fts WHERE chat_fts MATCH ? AND uid=? "
+                           "ORDER BY bm25(chat_fts) LIMIT ?")
+                    args = (match, uid, limit)
+                rows = conn.execute(sql, args).fetchall()
+                res = []
+                for r in rows:
+                    snip = (r["snip"] or "").replace("\n", " ").strip()
+                    if not snip:
+                        snip = str(r["title"] or "")
+                    res.append({
+                        "chat_id": r["cid"], "user": r["uid"],
+                        "title": str(r["title"] or "…"),
+                        "snippet": snip, "ts": r["ts"] or 0,
+                        "kind": r["kind"],
+                    })
+                return res
+        except Exception as e:
+            try:
+                print(f"── FTS5 search: fallback LIKE ({e})")
+            except Exception:
+                pass
+    return _like_search(uid, q, owner, limit)
 
 
 # --- Шифрохранилище cookies (Fernet): сохранить раз → браузить под логином. ---
@@ -6366,6 +6618,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "bad id"}, 400)
             chat_save(uid, cid, c)
             self._json({"ok": True})
+        elif path == "/api/search_chats":
+            c = self._body()
+            uid = c.get("user", "default")
+            q = str(c.get("q") or c.get("query") or "").strip()
+            # владелец может искать по всем чатам (all=True); обычный юзер — только свои.
+            owner = is_owner(uid) and bool(c.get("all"))
+            try:
+                limit = int(c.get("limit") or 30)
+            except Exception:
+                limit = 30
+            results = search_chats(uid, q, owner=owner, limit=limit)
+            self._json({"results": results, "count": len(results), "q": q})
         elif path == "/api/delete":
             c = self._body()
             cid = safe_id(c.get("id", ""))
@@ -7881,6 +8145,18 @@ def main():
     scheduler.set_runner(_scheduled_runner)
     scheduler.start()
     ensure_default_user()
+
+    def _fts_boot():
+        # Инициализируем/бэкфилим полнотекстовый индекс в фоне — не держим старт сервера.
+        try:
+            conn = _db()
+            if _fts_supported(conn):
+                with _FTS_LOCK, _DB_LOCK:
+                    _fts_init(conn)
+        except Exception:
+            pass
+    threading.Thread(target=_fts_boot, daemon=True).start()
+
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     print(f"── Mostik AI · http://127.0.0.1:{PORT}")
     for name, p in PROVIDERS.items():
