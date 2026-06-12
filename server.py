@@ -129,6 +129,11 @@ CURATED = [
 # Модели для внутренних задач (дёшево и быстро): авто-роутер, улучшение промпта, память.
 CHEAP_MODEL = "gemma-4-uncensored"
 
+# Дефолт ВЛАДЕЛЬЦА при активной подписке NanoGPT: гоним ЕГО тест-чат через подписку
+# (60М входных токенов/нед бесплатно) — чтобы разработка/тесты не жгли реальные деньги.
+# Обычные юзеры этим не затрагиваются (у них pay-token). Проверено: free через /subscription/v1.
+OWNER_SUB_MODEL = "ng:deepseek-ai/deepseek-v3.2"
+
 # Дефолт-модели по ролям + цепочки запасных. На старте heal_default_models() проверяет
 # каждую против живого каталога и подменяет устаревшую на первую рабочую из цепочки —
 # чтобы баг «модель сняли с раздачи → 404» (как было с deepseek-v3.1) больше не повторился.
@@ -6507,8 +6512,14 @@ class Handler(BaseHTTPRequestHandler):
 
         has_images = any(m.get("images") for m in raw_messages)
         model = str(req.get("model") or DEFAULTS["chat"])
+        explicit_model = bool(req.get("model")) and req.get("model") != "__auto__"
         if model == "__auto__":
             model = route_model(raw_messages, has_images)
+        # ВЛАДЕЛЕЦ + активная подписка + не задал модель руками + без картинок →
+        # гоним тест-чат через nano-подписку (free). Юзеры/явный выбор модели — не трогаем.
+        if (not explicit_model and not has_images and is_owner(uid)
+                and not req.get("brain") and nano_sub_status().get("active")):
+            model = OWNER_SUB_MODEL
         # картинки есть, а модель их не понимает — переключаем на зрячую
         if has_images and not vision_ok(model):
             model = DEFAULTS["cheap"]
