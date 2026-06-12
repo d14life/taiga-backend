@@ -1333,9 +1333,18 @@ def build_api_messages(messages: list) -> list:
     return out
 
 
-def venice_stream(model: str, messages: list, max_tokens: int, usage_out: dict = None, key: str = None):
+def _clean_temperature(temperature):
+    """Нормализуем temperature к 0..1.5 (как в userConfig) или None если не задана/мусор."""
+    if temperature is None:
+        return None
+    return _clamp(temperature, 0.0, 1.5, None)
+
+
+def venice_stream(model: str, messages: list, max_tokens: int, usage_out: dict = None,
+                  key: str = None, temperature=None):
     """Генератор дельт текста. key — конкретный ключ (BYOK/пул); если None — общий пул.
-    usage_out — складываем реальный расход токенов для биллинга."""
+    usage_out — складываем реальный расход токенов для биллинга.
+    temperature — необязательная (0..1.5); при None провайдеру не шлём (его дефолт)."""
     prov = provider_for(model)
     key = key or global_key(provider_name(model))
     if not key:
@@ -1348,6 +1357,9 @@ def venice_stream(model: str, messages: list, max_tokens: int, usage_out: dict =
         "stream": True,
         "stream_options": {"include_usage": True},
     }
+    temperature = _clean_temperature(temperature)
+    if temperature is not None:
+        body_dict["temperature"] = round(temperature, 3)
     with _open_chat(chat_completions_url(prov), body_dict, headers_for(prov, key), 300) as r:
         for raw in r:
             line = raw.decode("utf-8", "ignore").strip()
@@ -1372,15 +1384,20 @@ def venice_stream(model: str, messages: list, max_tokens: int, usage_out: dict =
                 yield delta
 
 
-def venice_complete(model: str, messages: list, max_tokens: int = 400, key: str = None) -> str:
+def venice_complete(model: str, messages: list, max_tokens: int = 400, key: str = None,
+                    temperature=None) -> str:
     """Не-стриминговый запрос — для служебных задач (память, улучшение промпта).
-    По умолчанию общий пул-ключ (это твои внутренние сервисы)."""
+    По умолчанию общий пул-ключ (это твои внутренние сервисы).
+    temperature — необязательная (0..1.5); при None провайдеру не шлём."""
     prov = provider_for(model)
     key = key or global_key(provider_name(model))
     if not key:
         return ""
     max_tokens = cap_nano_max_tokens(model, max_tokens, messages)  # низкий баланс NanoGPT → режем вывод, не 402
     body_dict = {"model": strip_model_prefix(model), "messages": messages, "max_tokens": max_tokens}
+    temperature = _clean_temperature(temperature)
+    if temperature is not None:
+        body_dict["temperature"] = round(temperature, 3)
     try:
         with _open_chat(chat_completions_url(prov), body_dict, headers_for(prov, key), 60) as r:
             d = json.load(r)
@@ -2230,6 +2247,118 @@ def tool_webhook(args: dict) -> str:
         return f"http {e.code}: {e.read(500).decode('utf-8', 'ignore')}"
     except Exception as e:
         return f"webhook error: {e}"
+
+
+# --- установка навыка по ссылке (owner-фича): фетч → парс → личный стор юзера ---
+# Навык — это ИНСТРУКЦИИ (текст), а НЕ код. Мы НИКОГДА не исполняем скачанное: только
+# парсим имя/описание/тело и кладём в личную библиотеку навыков пользователя.
+
+INSTALL_SKILL_MAX_BYTES = 256 * 1024       # потолок размера ответа (анти-DoS)
+INSTALL_SKILL_BODY_CAP = 24_000            # тело навыка режем (длина-кап)
+_INSTALL_OK_CTYPES = ("text/markdown", "text/x-markdown", "text/plain", "text/")
+
+
+def _user_skills_index_path(uid: str) -> Path:
+    return user_dir(uid) / "skills" / "index.json"
+
+
+def load_user_skills(uid: str) -> list:
+    try:
+        idx = json.loads(_user_skills_index_path(uid).read_text("utf-8"))
+        return idx if isinstance(idx, list) else []
+    except Exception:
+        return []
+
+
+def _save_user_skills_index(uid: str, idx: list):
+    p = _user_skills_index_path(uid)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(idx, ensure_ascii=False))
+    tmp.replace(p)
+
+
+def _store_user_skill(uid: str, name: str, desc: str, body: str, source_url: str = "") -> dict:
+    """Положить навык в ЛИЧНУЮ библиотеку пользователя (зеркалит skills_lib: id+name+
+    description+тело-файл). Тело прогоняется через redact_secrets (как в skills_lib._scan)
+    и режется по длине. Возвращает {id,name,description}."""
+    try:
+        from guard import redact_secrets
+        body = redact_secrets(body)
+    except Exception:
+        pass
+    body = (body or "")[:INSTALL_SKILL_BODY_CAP]
+    name = (name or "").strip()[:80] or "skill"
+    desc = (desc or "").strip()[:300]
+    sid = (re.sub(r"[^a-z0-9_-]", "", name.lower().replace(" ", "-"))[:60]
+           or ("skill-" + secrets.token_hex(3)))
+    sdir = user_dir(uid) / "skills"
+    sdir.mkdir(parents=True, exist_ok=True)
+    idx = load_user_skills(uid)
+    # де-дуп по id: перезаписываем тело, обновляем мету
+    idx = [s for s in idx if s.get("id") != sid]
+    (sdir / f"{sid}.md").write_text(body, "utf-8")
+    meta = {"id": sid, "name": name, "description": desc,
+            "source": source_url[:300], "added": datetime.now().strftime("%Y-%m-%d %H:%M")}
+    idx.append(meta)
+    _save_user_skills_index(uid, idx)
+    return {"id": sid, "name": name, "description": desc}
+
+
+def install_skill_from_url(uid: str, url: str) -> dict:
+    """Скачать навык по ссылке и установить в личный стор. Возвращает
+    {ok:True, skill:{...}} либо {ok:False, error:"..."}. ЖЁСТКИЙ SSRF-страж: только
+    публичный http(s), не localhost/внутренние/метадата, кап размера, только текст.
+    Скачанное НИКОГДА не исполняется — это просто инструкции."""
+    url = (url or "").strip()
+    # 1) схема: только http/https — отсекаем file:/ftp:/data: и прочее
+    scheme = urllib.parse.urlparse(url).scheme.lower()
+    if scheme not in ("http", "https"):
+        return {"ok": False, "error": "разрешены только http(s) ссылки"}
+    # 2) анти-SSRF: localhost/127.*/0.0.0.0/::1/169.254/private — резолв всех адресов
+    if not _is_public_url(url):
+        return {"ok": False, "error": "внутренние/приватные адреса заблокированы"}
+    # 3) фетч с таймаутом ~8с, читаем максимум 256КБ + 1 байт (чтобы заметить превышение)
+    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "text/markdown, text/plain, */*"})
+    try:
+        with urllib.request.urlopen(req, timeout=8) as r:
+            ctype = (r.headers.get("Content-Type") or "").lower()
+            # 4) только текст/markdown/plain — не тянем html-приложения/бинарь/архивы
+            if ctype and not ctype.startswith(_INSTALL_OK_CTYPES):
+                return {"ok": False, "error": f"не текстовый ответ ({ctype.split(';')[0]})"}
+            # объявленный Content-Length тоже проверяем (быстрый отказ)
+            try:
+                if int(r.headers.get("Content-Length") or 0) > INSTALL_SKILL_MAX_BYTES:
+                    return {"ok": False, "error": "файл слишком большой (>256КБ)"}
+            except (TypeError, ValueError):
+                pass
+            data = r.read(INSTALL_SKILL_MAX_BYTES + 1)
+    except urllib.error.HTTPError as e:
+        return {"ok": False, "error": f"http {e.code}"}
+    except Exception as e:
+        return {"ok": False, "error": f"не удалось скачать: {e}"}
+    # 5) кап размера тела (реальный размер, даже если Content-Length соврал/отсутствовал)
+    if len(data) > INSTALL_SKILL_MAX_BYTES:
+        return {"ok": False, "error": "файл слишком большой (>256КБ)"}
+    text = data.decode("utf-8", "ignore")
+    if not text.strip():
+        return {"ok": False, "error": "пустой документ"}
+    # 6) парс формата навыка: фронтматтер name/description + тело, либо первый #заголовок.
+    #    Переиспользуем парсер skills_lib (тот же формат, что у библиотеки навыков).
+    try:
+        import skills_lib
+        name, desc, body = skills_lib._parse_skill(text)
+    except Exception:
+        # фолбэк-парсер на случай недоступности модуля — тот же простой формат
+        name, desc, body = "", "", text
+        h = re.search(r"^#\s+(.+)$", text, re.M)
+        if h:
+            name = h.group(1).strip()
+    if not name:
+        # последний фолбэк имени — из хоста ссылки
+        name = (urllib.parse.urlparse(url).hostname or "skill").split(".")[0]
+    skill = _store_user_skill(uid, name, desc, body, source_url=url)
+    return {"ok": True, "skill": skill}
 
 
 # --- заметки пользователя (личный блокнот, к которому ИИ имеет доступ) ---
@@ -3445,6 +3574,24 @@ def apply_user_config(uid: str, mode: str, model, max_tokens, system, agent_tool
             if name in SAFE_TOOLS and name in TOOLS:
                 agent_tools[name] = TOOLS[name]
     return model, max_tokens, system, agent_tools
+
+
+def user_config_temperature(uid: str, mode: str, req_temperature=None):
+    """Эффективная temperature для режима: сохранённый пер-режим конфиг юзера имеет
+    приоритет над значением из запроса. Возвращает float 0..1.5 или None (тогда дефолт
+    провайдера). Та же валидация, что и в apply_user_config — читаем только из стора,
+    клиентскому temperature тоже не доверяем (клампим 0..1.5)."""
+    try:
+        cfg = load_user_config(uid)
+    except Exception:
+        cfg = {}
+    mc = (cfg.get("modes") or {}).get(mode) or (cfg.get("modes") or {}).get("default")
+    if isinstance(mc, dict):
+        mc = validate_user_config_mode(mc)        # ре-валидация (defense-in-depth)
+        if mc.get("temperature") is not None:
+            return mc["temperature"]
+    # конфиг ничего не задал — берём temperature из запроса (клампим, как в стор-валидаторе)
+    return _clean_temperature(req_temperature)
 
 
 _BUILD_FN_SYS = (
@@ -4964,6 +5111,17 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"skills": skills_lib.search_skills(str(c.get("query") or ""), int(c.get("k") or 12)),
                            "total": skills_lib.count()})
 
+    def api_install_skill(self):
+        """Установка навыка по ссылке: фетч (SSRF-страж) → парс → личный стор юзера.
+        Тело { url, user }. Скачанное НЕ исполняется — это инструкции (текст)."""
+        c = self._body()
+        url = str(c.get("url") or "").strip()
+        uid = c.get("user", "default")
+        if not url:
+            return self._json({"ok": False, "error": "нет url"}, 400)
+        res = install_skill_from_url(uid, url)
+        return self._json(res, 200 if res.get("ok") else 400)
+
     # --- медиа-поиск для in-chat браузера: web + YouTube + картинки ---
     def api_websearch(self):
         c = self._body()
@@ -5312,6 +5470,8 @@ class Handler(BaseHTTPRequestHandler):
             self.api_recall()
         elif path == "/api/skills":           # скиллы-маркетплейс (ECC): поиск/загрузка
             self.api_skills()
+        elif path == "/api/install_skill":    # установка навыка по ссылке (SSRF-страж, owner-фича)
+            self.api_install_skill()
         elif path == "/api/auth":             # signup/login + session-токены
             self.api_auth()
         elif path == "/api/websearch":        # медиа-поиск (web+YouTube+картинки) для in-chat браузера
@@ -5653,10 +5813,17 @@ class Handler(BaseHTTPRequestHandler):
         last = raw_messages[-1]
         last_text = last.get("content") or ""
         has_images = any(m.get("images") for m in raw_messages)
+        # 🔐 пер-режим конфиг юзера (relay): оверрайд модели-ОТВЕТЧИКА / maxTokens-капа /
+        # системного промпта. Та же серверная валидация, что и в chat(). Крафтер — внутренний,
+        # его не трогаем. tools в relay не задействуются, поэтому передаём пустой dict.
+        responder, max_tokens, system, _ = apply_user_config(
+            uid, "relay", responder, max_tokens, system, {})
+        temperature = user_config_temperature(uid, "relay", req.get("temperature"))
         if has_images and not vision_ok(responder):
             responder = DEFAULTS["cheap"]
         if is_reasoning(responder):
             max_tokens = max(max_tokens, 3000)
+        max_tokens = min(max_tokens, USERCFG_MAX_TOKENS)
 
         billing = load_billing()
         owner = is_owner(uid)
@@ -5714,7 +5881,8 @@ class Handler(BaseHTTPRequestHandler):
         ru = {}
         out_total = ""
         try:
-            for delta in venice_stream(responder, msgs, max_tokens, ru, key):
+            for delta in venice_stream(responder, msgs, max_tokens, ru, key,
+                                       temperature=temperature):
                 out_total += delta
                 if not self._sse({"type": "delta", "text": delta}):
                     return
@@ -5753,6 +5921,13 @@ class Handler(BaseHTTPRequestHandler):
         depth = max(2, min(int(req.get("depth") or 4), 8))
         question = next((m.get("content") or "" for m in reversed(raw_messages)
                          if m.get("role") == "user"), "")
+        # 🔐 пер-режим конфиг юзера (research): оверрайд синтез-модели / maxTokens-капа /
+        # системного промпта (препендится к ресёрч-инструкции синтезатора). Та же валидация.
+        model, max_tokens, _cfg_sys, _ = apply_user_config(
+            uid, "research", model, max_tokens, "", {})
+        cfg_system_prefix = _cfg_sys.strip()      # пользовательский systemPrompt (или "")
+        max_tokens = max(min(max_tokens, USERCFG_MAX_TOKENS), 2500)
+        temperature = user_config_temperature(uid, "research", req.get("temperature"))
 
         billing = load_billing()
         owner = is_owner(uid)
@@ -5823,13 +5998,16 @@ class Handler(BaseHTTPRequestHandler):
                      "Будь конкретным: факты, цифры, выводы. Используй заголовки и списки. В КОНЦЕ — "
                      "раздел «Источники» со ссылками из данных. Опирайся только на данные; если их "
                      "мало — честно скажи, что нашлось, а что нет. Не выдумывай.")
+        if cfg_system_prefix:                     # пользовательский systemPrompt (уже scrub'нут в сторе)
+            synth_sys = cfg_system_prefix + "\n\n" + synth_sys
         context = ("СОБРАННЫЕ ДАННЫЕ:\n\n" + "\n\n".join(findings))[:18000]
         synth_msgs = [{"role": "system", "content": synth_sys},
                       {"role": "user", "content": f"Запрос: {question}\n\n{context}\n\nНапиши отчёт."}]
         self._sse({"type": "meta", "model": model})
         ru, out_total = {}, ""
         try:
-            for delta in venice_stream(model, synth_msgs, max_tokens, ru, key):
+            for delta in venice_stream(model, synth_msgs, max_tokens, ru, key,
+                                       temperature=temperature):
                 out_total += delta
                 if not self._sse({"type": "delta", "text": delta}):
                     return
@@ -5862,6 +6040,19 @@ class Handler(BaseHTTPRequestHandler):
         question = next((m.get("content") or "" for m in reversed(raw_messages)
                          if m.get("role") == "user"), "")
 
+        # 🔐 пер-режим конфиг юзера (council): оверрайд модели-СИНТЕЗАТОРА / maxTokens-капа /
+        # системного промпта (препендится к промптам советников и синтезатора). Та же валидация.
+        # Сентинель _NO_MODEL: apply_user_config меняет модель ТОЛЬКО если в конфиге задан
+        # реальный id каталога; иначе вернёт сентинель и synth_model останется "" (лучший советник).
+        _NO_MODEL = "\x00nomodel\x00"
+        cfg_synth, max_tokens, _cfg_sys, _ = apply_user_config(
+            uid, "council", _NO_MODEL, max_tokens, "", {})
+        if cfg_synth != _NO_MODEL:
+            synth_model = cfg_synth               # конфиг явно задал валидного синтезатора
+        cfg_system_prefix = _cfg_sys.strip()
+        max_tokens = max(min(max_tokens, USERCFG_MAX_TOKENS), 1500)
+        temperature = user_config_temperature(uid, "council", req.get("temperature"))
+
         billing = load_billing()
         owner = is_owner(uid)
 
@@ -5889,16 +6080,17 @@ class Handler(BaseHTTPRequestHandler):
                    "members": [strip_model_prefix(r["id"]).split("/")[-1] for r in members]})
 
         member_sys = taiga_identity() + "\n\nОтветь на вопрос по существу, точно и без воды."
+        if cfg_system_prefix:
+            member_sys = cfg_system_prefix + "\n\n" + member_sys
 
         def ask_one(r):
             k, _, ke = resolve_key(uid, r["id"])
             if ke or not k:
                 return (r, None, 0, 0)
             try:
-                u = {}
                 txt = venice_complete(r["id"], [{"role": "system", "content": member_sys},
                                                 {"role": "user", "content": question}],
-                                      min(max_tokens, 1200), k)
+                                      min(max_tokens, 1200), k, temperature=temperature)
                 return (r, txt, est_tokens(question), est_tokens(txt or ""))
             except Exception:
                 return (r, None, 0, 0)
@@ -5929,13 +6121,16 @@ class Handler(BaseHTTPRequestHandler):
         synth_sys = (taiga_identity() + "\n\nТебе дали ответы нескольких ИИ-советников на ОДИН вопрос. "
                      "Сравни их, возьми лучшее, отбрось ошибочное и противоречивое, и дай ОДИН связный "
                      "лучший ответ пользователю на его языке. Не упоминай «советников», модели и этот процесс.")
+        if cfg_system_prefix:
+            synth_sys = cfg_system_prefix + "\n\n" + synth_sys
         panel = "\n\n".join(f"[Советник {i+1}]\n{t}" for i, (r, t, ti, to) in enumerate(good))[:16000]
         synth_msgs = [{"role": "system", "content": synth_sys},
                       {"role": "user", "content": f"Вопрос: {question}\n\n{panel}\n\nДай лучший единый ответ."}]
         self._sse({"type": "meta", "model": synth_model})
         ru, out_total = {}, ""
         try:
-            for delta in venice_stream(synth_model, synth_msgs, max_tokens, ru, skey):
+            for delta in venice_stream(synth_model, synth_msgs, max_tokens, ru, skey,
+                                       temperature=temperature):
                 out_total += delta
                 if not self._sse({"type": "delta", "text": delta}):
                     return
@@ -5965,6 +6160,16 @@ class Handler(BaseHTTPRequestHandler):
         max_tokens = max(int(req.get("max_tokens") or 2048), 1500)
         question = next((m.get("content") or "" for m in reversed(raw_messages)
                          if m.get("role") == "user"), "")
+
+        # 🔐 пер-режим конфиг юзера (compare): maxTokens-кап + системный промпт (препендится
+        # к промпту участников) + temperature. Модель-оверрайд не применяем — веер моделей
+        # задаёт сам пользователь (compareModels) либо авто-топ-N. Та же серверная валидация.
+        _NO_MODEL = "\x00nomodel\x00"
+        _cfg_m, max_tokens, _cfg_sys, _ = apply_user_config(
+            uid, "compare", _NO_MODEL, max_tokens, "", {})
+        cfg_system_prefix = _cfg_sys.strip()
+        max_tokens = max(min(max_tokens, USERCFG_MAX_TOKENS), 1500)
+        temperature = user_config_temperature(uid, "compare", req.get("temperature"))
 
         billing = load_billing()
         owner = is_owner(uid)
@@ -6011,6 +6216,8 @@ class Handler(BaseHTTPRequestHandler):
         self._sse({"type": "council_plan", "members": [_disp(r) for r in members]})
 
         member_sys = taiga_identity() + "\n\nОтветь на вопрос по существу, точно и без воды."
+        if cfg_system_prefix:
+            member_sys = cfg_system_prefix + "\n\n" + member_sys
 
         def ask_one(r):
             k, _, ke = resolve_key(uid, r["id"])
@@ -6019,7 +6226,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 txt = venice_complete(r["id"], [{"role": "system", "content": member_sys},
                                                 {"role": "user", "content": question}],
-                                      min(max_tokens, 1200), k)
+                                      min(max_tokens, 1200), k, temperature=temperature)
                 return (r, txt, est_tokens(question), est_tokens(txt or ""))
             except Exception:
                 return (r, None, 0, 0)
@@ -6112,6 +6319,8 @@ class Handler(BaseHTTPRequestHandler):
         cfg_mode = "brain" if req.get("brain") else ("web" if agent else "chat")
         model, max_tokens, system, active_tools = apply_user_config(
             uid, cfg_mode, model, max_tokens, system, active_tools)
+        # temperature: сохранённый конфиг режима > значение из запроса (0..1.5, иначе дефолт)
+        temperature = user_config_temperature(uid, cfg_mode, req.get("temperature"))
         # конфиг мог сменить модель — повторяем защиты: vision + потолок токенов
         if has_images and not vision_ok(model):
             model = DEFAULTS["cheap"]
@@ -6222,7 +6431,8 @@ class Handler(BaseHTTPRequestHandler):
             buf, buffering, got_any = "", True, False
             u = {}
             try:
-                for delta in venice_stream(stream_model, msgs, max_tokens, u, stream_key):
+                for delta in venice_stream(stream_model, msgs, max_tokens, u, stream_key,
+                                           temperature=temperature):
                     got_any = True
                     out_total += delta
                     if buffering:
@@ -6261,7 +6471,8 @@ class Handler(BaseHTTPRequestHandler):
                     streamed0 = len(out_total)
                     try:
                         for d in venice_stream(expert_model, expert_msgs,
-                                               max(max_tokens, 3000), eu, expert_key):
+                                               max(max_tokens, 3000), eu, expert_key,
+                                               temperature=temperature):
                             out_total += d
                             if not self._sse({"type": "delta", "text": d}):
                                 return
@@ -6278,7 +6489,8 @@ class Handler(BaseHTTPRequestHandler):
                                 try:
                                     eu = {}
                                     for d in venice_stream(fb, expert_msgs,
-                                                           max(max_tokens, 3000), eu, fk):
+                                                           max(max_tokens, 3000), eu, fk,
+                                                           temperature=temperature):
                                         out_total += d
                                         if not self._sse({"type": "delta", "text": d}):
                                             return
