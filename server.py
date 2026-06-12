@@ -2378,6 +2378,53 @@ def load_user_skills(uid: str) -> list:
         return []
 
 
+def _user_skill_body(uid: str, sid: str) -> str:
+    """Тело личного навыка юзера (импорт репо кладёт .md в user_dir/skills)."""
+    try:
+        p = user_dir(uid) / "skills" / (safe_id(sid) + ".md")
+        if not p.exists():     # safe_id мог не совпасть со слагом — пробуем как есть
+            p = user_dir(uid) / "skills" / (str(sid) + ".md")
+        return p.read_text("utf-8", "ignore") if p.exists() else ""
+    except Exception:
+        return ""
+
+
+def _merge_user_skills(uid: str, base: list, q: str = "", k: int = 24) -> list:
+    """Подмешать ЛИЧНЫЕ навыки юзера к результатам глобальной библиотеки.
+    При запросе q — фильтруем по подстроке в name/description/id и ДОБАВЛЯЕМ к ранжированным
+    глобальным хитам. Без запроса (browse) — личные идут ПЕРВЫМИ, иначе их вытеснит первая
+    страница глобальной библиотеки. Дедуп по id и по name (личные не затирают одноимённые)."""
+    try:
+        mine = load_user_skills(uid)
+    except Exception:
+        mine = []
+    if not mine:
+        return base
+    seen_id = {str(s.get("id", "")).lower() for s in base}
+    seen_name = {str(s.get("name", "")).lower() for s in base}
+    ql = q.lower().strip()
+    extra = []
+    for s in mine:
+        sid = str(s.get("id", "")).lower()
+        nm = str(s.get("name", "")).lower()
+        if sid in seen_id or (nm and nm in seen_name):
+            continue
+        if ql:
+            blob = (sid + " " + nm + " " + str(s.get("description", ""))).lower()
+            if ql not in blob:
+                continue
+        extra.append({"id": s.get("id"), "name": s.get("name"),
+                      "description": s.get("description", ""), "personal": True})
+        seen_id.add(sid)
+        if nm:
+            seen_name.add(nm)
+    if not extra:
+        return base
+    # browse: личные первыми (видимость), поиск: после ранжированных глобальных хитов
+    merged = (extra + base) if not ql else (base + extra)
+    return merged[:k] if k and len(merged) > k else merged
+
+
 def _save_user_skills_index(uid: str, idx: list):
     p = _user_skills_index_path(uid)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -3152,7 +3199,18 @@ MCP_CATALOG = [
 _mcp_sessions = {}      # name -> Mcp-Session-Id
 _mcp_inited = set()     # серверы, где уже прошёл initialize
 _mcp_tools_cache = {}   # name -> (ts, [tools])
+_mcp_res_cache = {}     # name -> (ts, [resources])
+_mcp_prompt_cache = {}   # name -> (ts, [prompts])
 _MCP_TTL = 300
+
+
+def _mcp_invalidate(name: str):
+    """Сбросить сессию/инициализацию И все кэши (tools/resources/prompts) сервера."""
+    _mcp_inited.discard(name)
+    _mcp_sessions.pop(name, None)
+    _mcp_tools_cache.pop(name, None)
+    _mcp_res_cache.pop(name, None)
+    _mcp_prompt_cache.pop(name, None)
 
 
 def load_mcp_servers() -> list:
@@ -3166,22 +3224,32 @@ def save_mcp_servers(servers: list):
     _db_kv_set("mcp", json.dumps({"servers": servers}, ensure_ascii=False))
 
 
-def ensure_mcp_connector(id_or_name: str, url: str = None, headers: dict = None) -> dict:
+def ensure_mcp_connector(id_or_name: str, url: str = None, headers: dict = None,
+                         token: str = "", header_name: str = "") -> dict:
     """Подключить MCP-коннектор ПРИ создании скилла/агента (если ещё не подключён). Идемпотентно.
     id_or_name — из каталога MCP_CATALOG или своё имя; url переопределяет (self-hosted, напр. ComfyUI).
+    token — опц. персональный токен (GitHub/Notion), хранится шифрованно, заголовок авторизации.
     Так навык/агент может объявить нужный инструмент (ComfyUI и пр.), и он подключится автоматически."""
     item = next((x for x in MCP_CATALOG if x["id"] == id_or_name or x["name"] == id_or_name), None)
     name = (item or {}).get("name") or str(id_or_name)
     target = url or (item or {}).get("url") or ""
     if not target.startswith(("http://", "https://")):
         return {"ok": False, "name": name, "tools": 0, "error": "нужен http(s)-URL коннектора (для self-hosted вставь свой)"}
+    # сохраняем ранее заданный токен, если при ensure его не передали (идемпотентность)
+    prev = next((s for s in load_mcp_servers() if s.get("name") == name), None)
     servers = [s for s in load_mcp_servers() if s.get("name") != name]
     srv = {"name": name, "url": target, "enabled": True}
     if isinstance(headers, dict) and headers:
         srv["headers"] = headers
+    if token:
+        _mcp_apply_token(srv, token, header_name)
+    elif prev and prev.get("token_enc"):
+        srv["token_enc"] = prev["token_enc"]
+        if prev.get("token_header"):
+            srv["token_header"] = prev["token_header"]
     servers.append(srv)
     save_mcp_servers(servers)
-    _mcp_inited.discard(name); _mcp_sessions.pop(name, None); _mcp_tools_cache.pop(name, None)
+    _mcp_invalidate(name)
     tools = mcp_list_tools(srv, force=True)
     return {"ok": True, "name": name, "tools": len(tools),
             "error": None if tools else "подключился, но инструментов не видно (проверь URL/доступ)"}
@@ -3191,10 +3259,47 @@ def _mcp_server_by_name(name):
     return next((s for s in load_mcp_servers() if s.get("name") == name), None)
 
 
+# --- Персональный токен MCP-коннектора (GitHub/Notion): хранится ШИФРОВАНО (Fernet),
+# в контекст модели/логи НЕ попадает. Полный браузерный OAuth вне scope — токен достаточно. ---
+def _mcp_token_enc(token: str) -> str:
+    try:
+        return _cookie_fernet().encrypt(str(token).encode()).decode()
+    except Exception:
+        return ""
+
+
+def _mcp_token_dec(blob: str) -> str:
+    try:
+        return _cookie_fernet().decrypt(str(blob).encode()).decode()
+    except Exception:
+        return ""
+
+
+def _mcp_apply_token(srv: dict, token: str, header_name: str = "") -> dict:
+    """Записать персональный токен в конфиг сервера (шифрованно). По умолчанию
+    заголовок Authorization: Bearer <token>. header_name переопределяет имя заголовка."""
+    token = str(token or "").strip()
+    if not token:
+        return srv
+    enc = _mcp_token_enc(token)
+    if enc:
+        srv["token_enc"] = enc
+        hn = str(header_name or "").strip() or "Authorization"
+        srv["token_header"] = hn
+    return srv
+
+
 def _mcp_headers(server: dict) -> dict:
     h = {"Content-Type": "application/json",
          "Accept": "application/json, text/event-stream"}
     h.update(server.get("headers") or {})
+    # Персональный токен (расшифровываем на лету) — инжектим как заголовок авторизации.
+    enc = server.get("token_enc")
+    if enc:
+        tok = _mcp_token_dec(enc)
+        if tok:
+            hn = server.get("token_header") or "Authorization"
+            h[hn] = tok if (hn.lower() != "authorization" or tok.lower().startswith("bearer ")) else f"Bearer {tok}"
     sid = _mcp_sessions.get(server["name"])
     if sid:
         h["Mcp-Session-Id"] = sid
@@ -3279,6 +3384,39 @@ def mcp_call_tool(server: dict, tool: str, args: dict) -> str:
     if res.get("isError"):
         return "MCP error: " + (txt or "unknown")
     return (txt or json.dumps(res, ensure_ascii=False))[:6000]
+
+
+def _mcp_list_kind(server: dict, method: str, key: str, cache: dict, force: bool = False) -> list:
+    """Общий помощник для resources/list и prompts/list: кэш 300с, graceful если сервер
+    метод не поддерживает (отдаём пустой список, не валим)."""
+    name = server["name"]
+    cached = cache.get(name)
+    if cached and not force and (_now_ts() - cached[0] < _MCP_TTL):
+        return cached[1]
+    items = []
+    for attempt in (1, 2):
+        try:
+            _mcp_ensure(server)
+            items = (_mcp_rpc(server, method, {}, 4) or {}).get(key, []) or []
+            break
+        except Exception:
+            # «method not found» и прочее — сервер просто не умеет: не переинициализируем зря на 2-й попытке
+            if attempt == 1:
+                _mcp_inited.discard(name); _mcp_sessions.pop(name, None)
+            else:
+                items = []
+    cache[name] = (_now_ts(), items)
+    return items
+
+
+def mcp_list_resources(server: dict, force: bool = False) -> list:
+    """resources/list — graceful: серверы без ресурсов отдают []."""
+    return _mcp_list_kind(server, "resources/list", "resources", _mcp_res_cache, force)
+
+
+def mcp_list_prompts(server: dict, force: bool = False) -> list:
+    """prompts/list — graceful: серверы без промптов отдают []."""
+    return _mcp_list_kind(server, "prompts/list", "prompts", _mcp_prompt_cache, force)
 
 
 _MCP_SLUG = re.compile(r"[^a-z0-9]+")
@@ -5517,13 +5655,19 @@ class Handler(BaseHTTPRequestHandler):
     def api_skills(self):
         c = self._body()
         action = str(c.get("action") or "search")
+        uid = c.get("user", "default")
         try:
             import skills_lib
         except Exception as e:
             return self._json({"error": str(e)}, 503)
         if action == "get":
-            return self._json({"body": skills_lib.get_skill(str(c.get("id") or c.get("name", "")))})
-        if action == "import" and is_owner(c.get("user", "default")):
+            # тело: сперва глобальная библиотека, затем — личный навык юзера (импорт репо)
+            sid = str(c.get("id") or c.get("name", ""))
+            body = skills_lib.get_skill(sid)
+            if not body:
+                body = _user_skill_body(uid, sid)
+            return self._json({"body": body})
+        if action == "import" and is_owner(uid):
             n = skills_lib.import_dir(str(c.get("dir", "")), int(c.get("limit") or 400))
             return self._json({"ok": True, "imported": n, "total": skills_lib.count()})
         # поиск: фронт шлёт {q, limit}; принимаем и старые {query, k}. Пустой запрос → листаем
@@ -5535,7 +5679,10 @@ class Handler(BaseHTTPRequestHandler):
         else:
             skills = [{"id": s["id"], "name": s["name"], "description": s.get("description", "")}
                       for s in skills_lib.load_index()[:k]]
-        return self._json({"skills": skills, "total": skills_lib.count()})
+        # Личные навыки юзера (импорт репо ~191 шт. кладёт сюда, а не в глобальный индекс) —
+        # подмешиваем в выдачу, чтобы они были видны в поиске/обзоре. Дедуп по id/name.
+        skills = _merge_user_skills(uid, skills, q, k)
+        return self._json({"skills": skills, "total": skills_lib.count() + len(load_user_skills(uid))})
 
     def api_install_skill(self):
         """Установка навыка по ссылке: фетч (SSRF-страж) → парс → личный стор юзера.
@@ -5796,9 +5943,16 @@ class Handler(BaseHTTPRequestHandler):
             for s in load_mcp_servers():
                 en = s.get("enabled") is not False        # дефолт вкл; тумблер хранит явный False
                 tools = mcp_list_tools(s) if en else []    # выключенный не дёргаем по сети
+                resources = mcp_list_resources(s) if en else []   # graceful: серверы без них → []
+                prompts = mcp_list_prompts(s) if en else []
                 servers.append({"name": s["name"], "url": s["url"], "enabled": en, "ok": bool(tools),
+                                "has_token": bool(s.get("token_enc")),   # сам токен НЕ отдаём
                                 "tools": [{"name": t.get("name"),
-                                           "description": (t.get("description") or "")[:120]} for t in tools]})
+                                           "description": (t.get("description") or "")[:120]} for t in tools],
+                                "resources": [{"uri": r.get("uri"), "name": r.get("name"),
+                                               "description": (r.get("description") or "")[:120]} for r in resources],
+                                "prompts": [{"name": p.get("name"),
+                                             "description": (p.get("description") or "")[:120]} for p in prompts]})
             self._json({"servers": servers, "catalog": MCP_CATALOG})
         elif path == "/api/balance":
             self._json(get_balance())
@@ -5999,21 +6153,24 @@ class Handler(BaseHTTPRequestHandler):
                 srv = {"name": name, "url": url}
                 if isinstance(c.get("headers"), dict) and c["headers"]:
                     srv["headers"] = c["headers"]
+                _mcp_apply_token(srv, c.get("token"), c.get("headerName"))   # шифрованный персональный токен
                 servers.append(srv)
                 save_mcp_servers(servers)
-                _mcp_inited.discard(name); _mcp_sessions.pop(name, None); _mcp_tools_cache.pop(name, None)
+                _mcp_invalidate(name)
                 tools = mcp_list_tools(srv, force=True)
                 return self._json({"ok": True, "name": name, "tools": len(tools),
                                    "error": None if tools else "подключился, но инструментов не видно (проверь URL/ключ)"})
             if action == "remove":
                 nm = c.get("name")
                 save_mcp_servers([s for s in servers if s.get("name") != nm])
-                _mcp_inited.discard(nm); _mcp_sessions.pop(nm, None); _mcp_tools_cache.pop(nm, None)
+                _mcp_invalidate(nm)
                 return self._json({"ok": True})
             if action == "refresh":
                 s = _mcp_server_by_name(c.get("name"))
                 n = len(mcp_list_tools(s, force=True)) if s else 0
-                return self._json({"ok": True, "tools": n})
+                res = len(mcp_list_resources(s, force=True)) if s else 0
+                pr = len(mcp_list_prompts(s, force=True)) if s else 0
+                return self._json({"ok": True, "tools": n, "resources": res, "prompts": pr})
             if action == "install":           # из маркетплейса по id каталога — одной кнопкой
                 item = next((x for x in MCP_CATALOG if x["id"] == c.get("id")), None)
                 if not item:
@@ -6022,9 +6179,10 @@ class Handler(BaseHTTPRequestHandler):
                 srv = {"name": item["name"], "url": item["url"], "enabled": True}
                 if isinstance(c.get("headers"), dict) and c["headers"]:
                     srv["headers"] = c["headers"]
+                _mcp_apply_token(srv, c.get("token"), c.get("headerName"))   # шифрованный персональный токен (GitHub/Notion)
                 servers.append(srv)
                 save_mcp_servers(servers)
-                _mcp_inited.discard(item["name"]); _mcp_sessions.pop(item["name"], None); _mcp_tools_cache.pop(item["name"], None)
+                _mcp_invalidate(item["name"])
                 tools = mcp_list_tools(srv, force=True)
                 hint = None if tools else ("нужен вход в аккаунт — добавь токен в заголовках"
                                            if item.get("auth") == "oauth" else "подключился, но инструментов не видно")
@@ -6046,7 +6204,9 @@ class Handler(BaseHTTPRequestHandler):
             if action == "ensure":            # подключить коннектор при создании скилла/агента (id+опц.url)
                 hdrs = c.get("headers") if isinstance(c.get("headers"), dict) else None
                 return self._json(ensure_mcp_connector(str(c.get("id") or c.get("name") or ""),
-                                                       url=c.get("url"), headers=hdrs))
+                                                       url=c.get("url"), headers=hdrs,
+                                                       token=str(c.get("token") or ""),
+                                                       header_name=str(c.get("headerName") or "")))
             return self._json({"error": "bad action"}, 400)
         elif path == "/api/billing":
             self.api_billing()
@@ -6837,6 +6997,12 @@ class Handler(BaseHTTPRequestHandler):
                 system += mprompt
         else:
             active_tools = {}
+            # Подключённые (включённые) MCP-коннекторы работают и в обычном чате —
+            # интеграции (GitHub/Notion/ComfyUI) доступны без явного агент-режима.
+            mtools, mprompt = mcp_agent_tools()
+            if mtools:
+                active_tools = {**active_tools, **mtools}
+                system += mprompt
 
         # 🔐 пер-юзер кастомизация: мержим сохранённый конфиг для текущего режима.
         # Серверный страж — model только из каталога, maxTokens КАП на потолке,
