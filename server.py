@@ -7028,9 +7028,12 @@ class Handler(BaseHTTPRequestHandler):
         want = req.get("councilModels")
         if isinstance(want, list) and want:
             valid = {r["id"]: r for r in RICH}
+            valid_ids = _valid_model_ids()   # шире RICH (курируемый/CATALOG/OR_LIVE) — не теряем рекламируемые модели
             picked = []
             for mid in want:
-                r = valid.get(mid)
+                # id рекламируется в каталоге, но нет в RICH (иной формат/курируемый) →
+                # минимальная запись {"id": mid}, чтобы модель не дропалась молча
+                r = valid.get(mid) or ({"id": mid} if mid in valid_ids else None)
                 if r and r not in picked:
                     picked.append(r)
                 if len(picked) >= 5:
@@ -7161,9 +7164,12 @@ class Handler(BaseHTTPRequestHandler):
         want = req.get("compareModels")
         if isinstance(want, list) and want:
             valid = {r["id"]: r for r in RICH}
+            valid_ids = _valid_model_ids()   # шире RICH (курируемый/CATALOG/OR_LIVE) — не теряем рекламируемые модели
             picked = []
             for mid in want:
-                r = valid.get(mid)
+                # id рекламируется в каталоге, но нет в RICH (иной формат/курируемый) →
+                # минимальная запись {"id": mid}, чтобы модель не дропалась молча
+                r = valid.get(mid) or ({"id": mid} if mid in valid_ids else None)
                 if r and r not in picked:
                     picked.append(r)
                 if len(picked) >= 5:

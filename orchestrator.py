@@ -111,6 +111,7 @@ def run_orchestration(task: str, workers: list = None, emit=None, mode: str = "p
     tools={'search': fn} → воркер-researcher реально ищет через супер-поиск."""
     emit = emit or (lambda *a, **k: None)
     tools = tools or {}
+    explicit_workers = bool(workers)          # юзер явно задал воркеров → уважаем их число
     workers = workers or [{"skill": "researcher"}, {"skill": "critic"}]
 
     def plan_node(state):
@@ -120,7 +121,10 @@ def run_orchestration(task: str, workers: list = None, emit=None, mode: str = "p
                                           "Верни ТОЛЬКО JSON-массив строк."},
             {"role": "user", "content": state["task"]}], max_tokens=400)
         plan = _extract_list(raw) or [state["task"]]
-        plan = plan[:max(2, min(4, len(workers)))]
+        # Уважаем явно заданное число воркеров (1 воркер → 1 подзадача, без удвоения стоимости).
+        # Без явных воркеров — дефолтный коридор 2-4 подзадачи (researcher+critic и т.п.).
+        cap = len(workers) if explicit_workers else max(2, min(4, len(workers)))
+        plan = plan[:cap]
         emit("step", {"node": "plan", "status": "done", "plan": plan})
         return {"plan": plan}
 
@@ -131,14 +135,23 @@ def run_orchestration(task: str, workers: list = None, emit=None, mode: str = "p
         emit("agent", {"worker": i, "model": model, "skill": skill, "status": "running", "task": sub})
         ctx = ""
         if skill == "researcher" and tools.get("search"):     # researcher реально ищет
+            emit("agent", {"worker": i, "status": "searching"})
             try:
-                emit("agent", {"worker": i, "status": "searching"})
                 sr = tools["search"](sub)
                 ans = "\n".join(a.get("answer", "") for a in (sr.get("answers") or [])[:3])
                 srcs = "; ".join(s.get("url", "") for s in (sr.get("sources") or [])[:6])
-                ctx = f"\n\nРЕЗУЛЬТАТЫ ПОИСКА (опирайся на них):\n{ans}\nИсточники: {srcs}"
-            except Exception:
-                pass
+                if ans.strip() or srcs.strip():
+                    ctx = f"\n\nРЕЗУЛЬТАТЫ ПОИСКА (опирайся на них):\n{ans}\nИсточники: {srcs}"
+                else:
+                    # поиск отработал, но пусто — честно сигналим, не делаем вид что нашли
+                    emit("agent", {"worker": i, "status": "search_empty",
+                                   "note": "поиск ничего не вернул — отвечаю без свежих источников"})
+                    ctx = "\n\n(Поиск не дал результатов — отвечай по своим знаниям, отметь это.)"
+            except Exception as e:
+                # не молчим: даём сигнал в таймлайн и помечаем контекст, воркер всё равно отвечает
+                emit("agent", {"worker": i, "status": "search_failed", "error": str(e)[:160],
+                               "note": "поиск упал — отвечаю без свежих источников"})
+                ctx = "\n\n(Поиск недоступен — отвечай по своим знаниям, отметь что без свежих источников.)"
         user_msg = sub + (f"\n\nКОНТЕКСТ от прошлых агентов:\n{prior}" if prior else "") + ctx
         try:
             res = _complete(model, [
