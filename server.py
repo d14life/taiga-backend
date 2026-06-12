@@ -1089,6 +1089,8 @@ Available tools:
 - generate_image args {"prompt": "..."}   — draw/generate an image from a description (shown to the user)
 - save_note   args {"text": "..."}        — save a note to the user's personal notebook
 - read_notes  args {}                      — read back the user's saved notes
+- remember    args {"fact": "..."}        — save a durable fact about the user to long-term memory (lasts across chats). Use for stable facts worth keeping; not for one-off chit-chat.
+- forget      args {"query": "..."}       — delete remembered fact(s) whose text matches the query (e.g. when the user corrects or retracts something).
 - webhook     args {"url":"https://...","method":"POST","data":{...}} — call an external API/webhook (public URLs only). Use this to connect external services / trigger skills.
 - self        args {} — само-знание Тайги: что умеет + КАК создать агента/навык + какая модель лучше под задачу. Вызывай на вопросы о возможностях и «как сделать X».
 
@@ -2267,11 +2269,43 @@ def tool_read_notes(uid: str, args: dict) -> str:
     return "\n".join(f"{i+1}. {n['text']}" for i, n in enumerate(notes[-50:]))
 
 
+def tool_remember(uid: str, args: dict) -> str:
+    """Само-редактируемая память (паттерн «Letta»): модель сама дописывает факт в долгую память."""
+    fact = scrub_identity(str(args.get("fact") or args.get("text") or "").strip())
+    if not fact:
+        return "error: пустой факт"
+    fact = fact[:240]
+    if not _safe_fact(fact):
+        return "error: такой факт нельзя сохранить"
+    mem = load_memory(uid)
+    if any(str(m.get("text", "")).strip().lower() == fact.lower() for m in mem):
+        return f"[уже помню: {fact}]"
+    mem.append({"text": fact, "ts": _now_ts()})
+    save_memory(uid, mem[-80:])
+    return f"[запомнил: {fact}]"
+
+
+def tool_forget(uid: str, args: dict) -> str:
+    """Само-редактируемая память (паттерн «Letta»): модель удаляет факт(ы) по запросу."""
+    query = str(args.get("query") or args.get("fact") or args.get("text") or "").strip().lower()
+    if not query:
+        return "error: пустой запрос"
+    mem = load_memory(uid)
+    kept = [m for m in mem if query not in str(m.get("text", "")).lower()]
+    removed = len(mem) - len(kept)
+    if not removed:
+        return "[нечего забывать: совпадений нет]"
+    save_memory(uid, kept)
+    return f"[забыл {removed}]"
+
+
 def user_tools(uid: str) -> dict:
-    """Инструменты, которым нужен контекст пользователя (заметки)."""
+    """Инструменты, которым нужен контекст пользователя (заметки, долгая память)."""
     return {
         "save_note": lambda a: tool_save_note(uid, a),
         "read_notes": lambda a: tool_read_notes(uid, a),
+        "remember": lambda a: tool_remember(uid, a),
+        "forget": lambda a: tool_forget(uid, a),
     }
 
 
@@ -3222,21 +3256,91 @@ def episodic_recall(uid: str, query: str, k: int = 5) -> list:
     return out
 
 
+def _append_facts(mem: list, facts: list) -> list:
+    """Старое поведение: тупо дописать новые факты (dedup по точному lower). Кап 80.
+    Это ФОЛБЭК — память никогда не теряем, если LLM-сверка не удалась."""
+    have = {m["text"].lower() for m in mem}
+    for f in facts:
+        f = str(f).strip()
+        if f and f.lower() not in have and len(f) < 240 and _safe_fact(f):
+            mem.append({"text": f, "ts": _now_ts()})
+            have.add(f.lower())
+    return mem[-80:]
+
+
+# Сверка памяти (паттерн «Mem0»): один дешёвый LLM-проход решает по каждому пункту
+# KEEP / ADD / UPDATE / DELETE — чтобы противоречащие факты не копились вечно
+# («живёт в Москве» должно УЙТИ после «переехал в Берлин»).
+_MEM_RECON_SYS = (
+    "Ты — менеджер долгой памяти ассистента. На входе ТЕКУЩАЯ память (список фактов о "
+    "пользователе) и НОВЫЕ факты из свежего разговора. Сверь их и верни ИТОГОВЫЙ список "
+    "фактов, применяя операции:\n"
+    "- KEEP: факт всё ещё верен — оставь как есть (дословно).\n"
+    "- ADD: новый факт, которого ещё не было — добавь.\n"
+    "- UPDATE: новый факт ОБНОВЛЯЕТ/уточняет старый (например переезд, смена работы, новое "
+    "предпочтение) — ЗАМЕНИ устаревший факт новой формулировкой, старый НЕ оставляй.\n"
+    "- DELETE: старый факт ПРОТИВОРЕЧИТ новому или явно отозван пользователем — выкинь его.\n"
+    "Правила: объединяй дубли; не выдумывай ничего сверх входных данных; держи формулировки "
+    "короткими, на русском. Верни СТРОГО JSON-массив строк (итоговые факты) и больше ничего."
+)
+
+
+def reconcile_memory(mem: list, facts: list):
+    """Сводит текущую память + новые факты в один список через дешёвую модель (паттерн Mem0).
+    Возвращает новый список фактов-строк или None при любой ошибке (тогда — фолбэк на дозапись)."""
+    cur = [str(m.get("text", "")).strip() for m in mem if str(m.get("text", "")).strip()]
+    user = ("ТЕКУЩАЯ ПАМЯТЬ:\n" + ("\n".join(f"- {t}" for t in cur) if cur else "(пусто)") +
+            "\n\nНОВЫЕ ФАКТЫ:\n" + "\n".join(f"- {f}" for f in facts) +
+            "\n\nВерни итоговый JSON-массив строк.")
+    try:
+        raw = venice_complete(aux_model("memory"),
+                              [{"role": "system", "content": _MEM_RECON_SYS},
+                               {"role": "user", "content": user}], max_tokens=600)
+    except Exception:
+        return None
+    # требуем НАСТОЯЩИЙ JSON-массив: если модель вернула прозу/мусор → None → фолбэк на дозапись
+    try:
+        parsed = json.loads(re.search(r"\[[\s\S]*\]", raw).group(0))
+        out = [str(x).strip() for x in parsed if str(x).strip()]
+    except Exception:
+        return None
+    if not out:
+        return None
+    # чистим: безопасность + длина + dedup по точному lower
+    res, seen = [], set()
+    for f in out:
+        f = str(f).strip()
+        if not f or len(f) >= 240 or not _safe_fact(f):
+            continue
+        if f.lower() in seen:
+            continue
+        seen.add(f.lower())
+        res.append(f)
+    return res or None
+
+
 def extract_memory(uid: str, messages: list) -> list:
-    """Серверная память (legacy «открытый» режим): извлечь + сохранить на диск."""
+    """Серверная память (legacy «открытый» режим): извлечь + СВЕРИТЬ + сохранить на диск.
+    Раньше было append-only (противоречия копились). Теперь — Mem0-сверка с фолбэком."""
     facts = extract_memory_facts(messages)
     if not facts:
         return load_memory(uid)
     mem = load_memory(uid)
-    have = {m["text"].lower() for m in mem}
-    for f in facts:
-        f = str(f).strip()
-        if f and f.lower() not in have and len(f) < 240:
-            mem.append({"text": f, "ts": _now_ts()})
-            have.add(f.lower())
-    mem = mem[-60:]                          # держим память компактной
-    save_memory(uid, mem)
-    return mem
+    # сверка запускается ТОЛЬКО когда есть новые факты; падать на чат-путь не должна
+    try:
+        reconciled = reconcile_memory(mem, facts)
+    except Exception:
+        reconciled = None
+    if reconciled is not None:
+        # сохраняем исходный ts для удержанных фактов, свежий — для новых/обновлённых
+        old_ts = {str(m.get("text", "")).strip().lower(): m.get("ts", _now_ts()) for m in mem}
+        new_mem = [{"text": f, "ts": old_ts.get(f.lower(), _now_ts())} for f in reconciled]
+        new_mem = new_mem[-80:]
+    else:
+        # LLM-сверка не удалась → НЕ теряем память: старое поведение (дозапись)
+        new_mem = _append_facts(mem, facts)
+    save_memory(uid, new_mem)
+    return new_mem
 
 
 def memory_block(uid: str) -> str:
