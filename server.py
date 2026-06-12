@@ -251,6 +251,8 @@ def load_catalog():
 
 
 RICH = []          # единый обогащённый каталог обоих провайдеров (для экрана «Каталог»)
+_CATALOG_TS = 0.0  # время последней сборки RICH (для TTL-авторефреша «новые модели без рестарта»)
+_CATALOG_REFRESHING = False   # гард: не запускаем второй фоновый рефреш поверх идущего
 OR_LIVE = {}       # {raw_id: {ctx, vision}} из живого каталога OpenRouter
 PRICE = {}         # {model_id: (in_per_1M, out_per_1M)} для биллинга
 MODEL_KIND = {}    # {model_id: kind} — способность модели (картинки/голос/зрение/код/думающая/общение)
@@ -791,7 +793,7 @@ def rag_context(uid: str, messages: list) -> str:
 def load_rich_catalog():
     """Строит единый каталог обоих провайдеров (метаданные, цены, флаги).
     Подмешивает результаты теста цензуры, если они есть."""
-    global RICH, OR_LIVE
+    global RICH, OR_LIVE, _CATALOG_TS
     cache = BASE / "rich_catalog.json"
     records = []
 
@@ -902,6 +904,8 @@ def load_rich_catalog():
     kinds = {}
     for r in RICH:
         kinds[r.get("kind", "chat")] = kinds.get(r.get("kind", "chat"), 0) + 1
+    import time as _t
+    _CATALOG_TS = _t.time()                            # отметка свежести для TTL-авторефреша
     print(f"── каталог: {len(RICH)} моделей · по способностям {kinds}")
 
 
@@ -1692,8 +1696,18 @@ def _chutes_balance() -> dict:
         return {"usd": None, "ok": True}
 
 
-def get_balances() -> dict:
-    """Кошельки: баланс/статус ключа по 4 комиссия-провайдерам (Venice/NanoGPT/Chutes/Redpill)."""
+def get_balances(refresh: bool = False) -> dict:
+    """Кошельки: баланс/статус ключа по 4 комиссия-провайдерам (Venice/NanoGPT/Chutes/Redpill).
+    refresh=True сбрасывает кэши NanoGPT (подписка + raw-баланс), чтобы пополнение баланса
+    отразилось сразу (юзер «закинул $20» → UI обновился без рестарта). В ответе всегда есть
+    `_total_usd` — сумма всех числовых usd по провайдерам (для тотала в UI)."""
+    if refresh:
+        # бьём кэши NanoGPT (60с), чтобы live-баланс был свежим прямо сейчас
+        try:
+            nano_sub_status._cache = None
+        except Exception:
+            pass
+        _nano_bal_cache["t"] = 0.0
     out = {}
     vk = PROVIDERS["venice"]["key"].exists()
     out["venice"] = {"usd": get_balance().get("usd") if vk else None, "ok": vk}
@@ -1706,10 +1720,14 @@ def get_balances() -> dict:
     out["aimlapi"] = {"usd": None, "ok": bool(_aiml_key()), "no_api_balance": True,
                       "media": "video"}
     # подмешиваем легальный статус + флаг низкого баланса (<$2 → красным в UI)
+    total = 0.0
     for name, info in out.items():
         info.update(PROVIDER_LEGAL.get(name, {}))
         u = info.get("usd")
         info["low"] = isinstance(u, (int, float)) and u < 2.0
+        if isinstance(u, (int, float)):
+            total += u
+    out["_total_usd"] = round(total, 2)               # суммарный кошелёк по всем провайдерам
     return out
 
 
@@ -2303,9 +2321,28 @@ def tool_webhook(args: dict) -> str:
 # Навык — это ИНСТРУКЦИИ (текст), а НЕ код. Мы НИКОГДА не исполняем скачанное: только
 # парсим имя/описание/тело и кладём в личную библиотеку навыков пользователя.
 
-INSTALL_SKILL_MAX_BYTES = 256 * 1024       # потолок размера ответа (анти-DoS)
+INSTALL_SKILL_MAX_BYTES = 1_000_000        # потолок размера ответа SKILL.md (~1МБ, анти-DoS)
 INSTALL_SKILL_BODY_CAP = 24_000            # тело навыка режем (длина-кап)
 _INSTALL_OK_CTYPES = ("text/markdown", "text/x-markdown", "text/plain", "text/")
+
+
+def _github_blob_to_raw(url: str) -> str:
+    """github.com/owner/repo/blob/<ref>/<path> → raw.githubusercontent.com/owner/repo/<ref>/<path>.
+    Юзер копирует ссылку на файл из веб-интерфейса GitHub (это HTML-страница, не сам файл) — а нам
+    нужен сырой текст. Не github/blob — возвращаем как есть."""
+    try:
+        p = urllib.parse.urlparse(url)
+        host = (p.hostname or "").lower()
+        if host not in ("github.com", "www.github.com"):
+            return url
+        parts = p.path.strip("/").split("/")
+        # owner / repo / blob / <ref> / <path...>
+        if len(parts) >= 5 and parts[2] == "blob":
+            owner, repo, ref, rest = parts[0], parts[1], parts[3], "/".join(parts[4:])
+            return f"https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{rest}"
+    except Exception:
+        pass
+    return url
 
 
 def _user_skills_index_path(uid: str) -> Path:
@@ -2355,15 +2392,18 @@ def _store_user_skill(uid: str, name: str, desc: str, body: str, source_url: str
     return {"id": sid, "name": name, "description": desc}
 
 
-def _fetch_text_guarded(url: str) -> tuple:
+def _fetch_text_guarded(url: str, token: str = "") -> tuple:
     """ЕДИНЫЙ SSRF-страж для install-по-ссылке (навык И агент). Возвращает (text, error):
     при успехе (str, None), при отказе (None, "причина"). Гарантии (ровно как у навыка):
       • схема только http/https (отсекаем file:/ftp:/data:/gopher и прочее);
       • анти-SSRF: резолв ВСЕХ адресов, блок localhost/127.*/0.0.0.0/::1/169.254/private/метадата;
-      • фетч с таймаутом ~8с; кап 256КБ (и по Content-Length, и по реальному размеру);
-      • только текст (text/markdown/plain/json) — не тянем бинарь/архивы/html-приложения.
+      • github.com/.../blob/... → raw.githubusercontent.com (юзер копирует ссылку на страницу файла);
+      • фетч с таймаутом ~8с; кап ~1МБ (и по Content-Length, и по реальному размеру);
+      • только текст (text/markdown/plain/json) — не тянем бинарь/архивы/html-приложения;
+      • token (опц.): Bearer-заголовок ТОЛЬКО для raw.githubusercontent.com (приватные репо).
     Скачанное НИКОГДА не исполняется — вызывающий лишь ПАРСИТ текст."""
     url = (url or "").strip()
+    url = _github_blob_to_raw(url)             # blob-страница GitHub → сырой файл
     # 1) схема: только http/https
     scheme = urllib.parse.urlparse(url).scheme.lower()
     if scheme not in ("http", "https"):
@@ -2371,9 +2411,14 @@ def _fetch_text_guarded(url: str) -> tuple:
     # 2) анти-SSRF: localhost/127.*/0.0.0.0/::1/169.254/private — резолв всех адресов
     if not _is_public_url(url):
         return None, "внутренние/приватные адреса заблокированы"
-    # 3) фетч с таймаутом ~8с, читаем максимум 256КБ + 1 байт (чтобы заметить превышение)
-    req = urllib.request.Request(url, headers={"User-Agent": UA,
-                                               "Accept": "text/markdown, text/plain, application/json, */*"})
+    # 3) фетч с таймаутом ~8с, читаем максимум ~1МБ + 1 байт (чтобы заметить превышение)
+    headers = {"User-Agent": UA,
+               "Accept": "text/markdown, text/plain, application/json, */*"}
+    # token → Authorization ТОЛЬКО для raw.githubusercontent.com (не утекает на чужие хосты)
+    host = (urllib.parse.urlparse(url).hostname or "").lower()
+    if token and host == "raw.githubusercontent.com":
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=8) as r:
             ctype = (r.headers.get("Content-Type") or "").lower()
@@ -2383,7 +2428,7 @@ def _fetch_text_guarded(url: str) -> tuple:
             # объявленный Content-Length тоже проверяем (быстрый отказ)
             try:
                 if int(r.headers.get("Content-Length") or 0) > INSTALL_SKILL_MAX_BYTES:
-                    return None, "файл слишком большой (>256КБ)"
+                    return None, "файл слишком большой (>1МБ)"
             except (TypeError, ValueError):
                 pass
             data = r.read(INSTALL_SKILL_MAX_BYTES + 1)
@@ -2393,7 +2438,7 @@ def _fetch_text_guarded(url: str) -> tuple:
         return None, f"не удалось скачать: {e}"
     # 5) кап размера тела (реальный размер, даже если Content-Length соврал/отсутствовал)
     if len(data) > INSTALL_SKILL_MAX_BYTES:
-        return None, "файл слишком большой (>256КБ)"
+        return None, "файл слишком большой (>1МБ)"
     text = data.decode("utf-8", "ignore")
     if not text.strip():
         return None, "пустой документ"
@@ -2404,13 +2449,14 @@ def _fetch_text_guarded(url: str) -> tuple:
 _INSTALL_OK_CTYPES = _INSTALL_OK_CTYPES + ("application/json",)
 
 
-def install_skill_from_url(uid: str, url: str) -> dict:
+def install_skill_from_url(uid: str, url: str, token: str = "") -> dict:
     """Скачать навык по ссылке и установить в личный стор. Возвращает
     {ok:True, skill:{...}} либо {ok:False, error:"..."}. ЖЁСТКИЙ SSRF-страж (общий с
     install_agent через _fetch_text_guarded): только публичный http(s), не localhost/
-    внутренние/метадата, кап размера, только текст. Скачанное НИКОГДА не исполняется."""
+    внутренние/метадата, кап размера, только текст. token (опц.) → приватный GitHub-репо.
+    Скачанное НИКОГДА не исполняется."""
     url = (url or "").strip()
-    text, err = _fetch_text_guarded(url)
+    text, err = _fetch_text_guarded(url, token=token)
     if err:
         return {"ok": False, "error": err}
     # 6) парс формата навыка: фронтматтер name/description + тело, либо первый #заголовок.
@@ -4660,38 +4706,50 @@ AIML_VIDEO = [
 
 # AIMLAPI funded → его видео-модели ПЕРВЫМИ (NanoGPT-видео не оплачено → даст 402).
 # Дефолт студии = первая модель → должна быть рабочей (AIMLAPI), NanoGPT идёт ниже как фоллбэк.
-if _aiml_key():
-    for _m in AIML_VIDEO:
-        _m.setdefault("provider", "aimlapi")
-    # NanoGPT-видео списывается с его кошелька. Если он ПУСТ ($0) — submit принимается,
-    # но задача висит «QUEUED» вечно (нет денег на обработку) → юзер тупит у вечной очереди.
-    # Поэтому при $0 ПРЯЧЕМ NanoGPT-видео целиком, оставляя только funded AIMLAPI.
-    # Вернутся сами, если кошелёк пополнить (баланс-проверка при старте).
-    # баланс при старте бывает флапает (таймаут среди прочих каталог-вызовов). Поэтому
-    # показываем NanoGPT-видео ТОЛЬКО при ПОДТВЕРЖДЁННОМ балансе > 0. Неизвестно/0 → прячем
-    # (иначе юзер утыкается в вечную очередь). Пара попыток, чтобы не прятать зря при флапе.
-    _nano_usd = None
-    for _try in range(2):
-        try:
-            _nano_usd = _nano_balance().get("usd")
-        except Exception:
-            _nano_usd = None
-        if isinstance(_nano_usd, (int, float)):
-            break
-    NANO_VIDEO_FUNDED = isinstance(_nano_usd, (int, float)) and _nano_usd > 0
-    if NANO_VIDEO_FUNDED:
-        VIDEO_MODELS = sorted(
-            AIML_VIDEO + VIDEO_MODELS,
-            key=lambda m: (0 if m.get("provider") == "aimlapi" else 1,
-                           0 if m.get("featured") else 1, m.get("usd", 0.25)))
-        print(f"── AIMLAPI видео подключён: +{len(AIML_VIDEO)} моделей (funded, первыми)")
+def rebuild_video_models():
+    """Пересобрать VIDEO_MODELS: живой видео-каталог NanoGPT + funded AIMLAPI, с учётом
+    баланса NanoGPT-кошелька. Зовётся на старте И при live-рефреше каталога (новые видео-модели
+    без рестарта). Идемпотентна — не дублирует AIMLAPI при повторном вызове."""
+    global VIDEO_MODELS, NANO_VIDEO_FUNDED
+    base = build_video_models()                       # свежий NanoGPT видео-каталог (только nano-модели)
+    base = [m for m in base if m.get("provider") != "aimlapi"]   # подстраховка от дублей AIMLAPI
+    if _aiml_key():
+        for _m in AIML_VIDEO:
+            _m.setdefault("provider", "aimlapi")
+        # NanoGPT-видео списывается с его кошелька. Если он ПУСТ ($0) — submit принимается,
+        # но задача висит «QUEUED» вечно (нет денег на обработку) → юзер тупит у вечной очереди.
+        # Поэтому при $0 ПРЯЧЕМ NanoGPT-видео целиком, оставляя только funded AIMLAPI.
+        # Вернутся сами, если кошелёк пополнить (баланс-проверка при старте).
+        # баланс при старте бывает флапает (таймаут среди прочих каталог-вызовов). Поэтому
+        # показываем NanoGPT-видео ТОЛЬКО при ПОДТВЕРЖДЁННОМ балансе > 0. Неизвестно/0 → прячем
+        # (иначе юзер утыкается в вечную очередь). Пара попыток, чтобы не прятать зря при флапе.
+        _nano_usd = None
+        for _try in range(2):
+            try:
+                _nano_usd = _nano_balance().get("usd")
+            except Exception:
+                _nano_usd = None
+            if isinstance(_nano_usd, (int, float)):
+                break
+        NANO_VIDEO_FUNDED = isinstance(_nano_usd, (int, float)) and _nano_usd > 0
+        if NANO_VIDEO_FUNDED:
+            VIDEO_MODELS = sorted(
+                AIML_VIDEO + base,
+                key=lambda m: (0 if m.get("provider") == "aimlapi" else 1,
+                               0 if m.get("featured") else 1, m.get("usd", 0.25)))
+            print(f"── AIMLAPI видео подключён: +{len(AIML_VIDEO)} моделей (funded, первыми)")
+        else:
+            VIDEO_MODELS = sorted(
+                list(AIML_VIDEO),
+                key=lambda m: (0 if m.get("featured") else 1, m.get("usd", 0.25)))
+            print(f"── NanoGPT-видео кошелёк ${_nano_usd} (пуст) → скрыт; студия = {len(VIDEO_MODELS)} funded AIMLAPI")
     else:
-        VIDEO_MODELS = sorted(
-            list(AIML_VIDEO),
-            key=lambda m: (0 if m.get("featured") else 1, m.get("usd", 0.25)))
-        print(f"── NanoGPT-видео кошелёк ${_nano_usd} (пуст) → скрыт; студия = {len(VIDEO_MODELS)} funded AIMLAPI")
-else:
-    NANO_VIDEO_FUNDED = True  # нет AIMLAPI → показываем что есть (NanoGPT как было)
+        NANO_VIDEO_FUNDED = True  # нет AIMLAPI → показываем что есть (NanoGPT как было)
+        VIDEO_MODELS = base
+    return VIDEO_MODELS
+
+
+rebuild_video_models()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -5276,8 +5334,16 @@ class Handler(BaseHTTPRequestHandler):
         if action == "import" and is_owner(c.get("user", "default")):
             n = skills_lib.import_dir(str(c.get("dir", "")), int(c.get("limit") or 400))
             return self._json({"ok": True, "imported": n, "total": skills_lib.count()})
-        return self._json({"skills": skills_lib.search_skills(str(c.get("query") or ""), int(c.get("k") or 12)),
-                           "total": skills_lib.count()})
+        # поиск: фронт шлёт {q, limit}; принимаем и старые {query, k}. Пустой запрос → листаем
+        # первую страницу библиотеки (browse), чтобы юзер видел сотни навыков без ввода.
+        q = str(c.get("q") or c.get("query") or "").strip()
+        k = int(c.get("limit") or c.get("k") or 24)
+        if q:
+            skills = skills_lib.search_skills(q, k)
+        else:
+            skills = [{"id": s["id"], "name": s["name"], "description": s.get("description", "")}
+                      for s in skills_lib.load_index()[:k]]
+        return self._json({"skills": skills, "total": skills_lib.count()})
 
     def api_install_skill(self):
         """Установка навыка по ссылке: фетч (SSRF-страж) → парс → личный стор юзера.
@@ -5285,9 +5351,10 @@ class Handler(BaseHTTPRequestHandler):
         c = self._body()
         url = str(c.get("url") or "").strip()
         uid = c.get("user", "default")
+        token = str(c.get("token") or "").strip()     # опц. GitHub-токен для приватного репо
         if not url:
             return self._json({"ok": False, "error": "нет url"}, 400)
-        res = install_skill_from_url(uid, url)
+        res = install_skill_from_url(uid, url, token=token)
         return self._json(res, 200 if res.get("ok") else 400)
 
     def api_install_agent(self):
@@ -5352,12 +5419,10 @@ class Handler(BaseHTTPRequestHandler):
         if not is_owner(self._body().get("user", "default")):
             return self._json({"error": "только владелец"}, 403)
         try:
-            load_rich_catalog()
-            heal_default_models()
-            build_self_texts()          # само-знание под обновлённый каталог
+            r = refresh_catalog_live()   # RICH + видео + само-знание, без рестарта
         except Exception as e:
             return self._json({"error": str(e)}, 502)
-        return self._json({"ok": True, "models": len(RICH)})
+        return self._json({"ok": True, **r})
 
     # --- планировщик: фоновые/расписание-агенты (cron) ---
     def api_jobs(self):
@@ -5528,11 +5593,21 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"servers": servers, "catalog": MCP_CATALOG})
         elif path == "/api/balance":
             self._json(get_balance())
+        elif path == "/api/balances":         # все кошельки + тотал; ?refresh=1 бьёт кэши (свежий баланс)
+            refresh = (self._qs().get("refresh") or ["0"])[0] in ("1", "true", "yes")
+            self._json(get_balances(refresh=refresh))
         elif path == "/v1/models":          # OpenAI-совместимый список для внешних клиентов
             self._json({"object": "list",
                         "data": [{"id": r["id"], "object": "model", "owned_by": r["provider"]}
                                  for r in RICH]})
+        elif path == "/api/catalog/refresh":  # live-пересбор каталога (RICH+видео) без рестарта
+            try:
+                r = refresh_catalog_live()
+                self._json({"ok": True, **r})
+            except Exception as e:
+                self._json({"ok": False, "error": str(e)}, 502)
         elif path == "/api/catalog":
+            _maybe_bg_refresh_catalog()        # старше TTL → фоновый авто-рефреш (не блокирует ответ)
             self._json({"models": RICH,
                         "providers": {n: p["key"].exists() for n, p in PROVIDERS.items()}})
         elif path == "/api/video-models":
@@ -6841,6 +6916,52 @@ def _start_catalog_refresher(interval_sec: int = 21600):
             except Exception as e:
                 print(f"── авто-обновление каталога: {e}")
     threading.Thread(target=_loop, daemon=True).start()
+
+
+def refresh_catalog_live() -> dict:
+    """Live-пересборка каталога БЕЗ рестарта: RICH (текст/картинки) + видео-студия + само-знание.
+    Зовётся ручкой /api/catalog/refresh и фоновым TTL-триггером. Возвращает свежие счётчики."""
+    global _CATALOG_REFRESHING
+    _CATALOG_REFRESHING = True
+    try:
+        load_rich_catalog()
+        try:
+            heal_default_models()
+        except Exception:
+            pass
+        try:
+            rebuild_video_models()      # новые видео-модели студии тоже без рестарта
+        except Exception:
+            pass
+        try:
+            build_self_texts()          # пересобрать само-знание под свежий каталог
+        except Exception:
+            pass
+    finally:
+        _CATALOG_REFRESHING = False
+    return {"models": len(RICH), "video": len(VIDEO_MODELS)}
+
+
+_CATALOG_TTL = 1800       # 30 мин: старше — фоновый авто-рефреш при следующем запросе каталога
+
+
+def _maybe_bg_refresh_catalog():
+    """Если каталог старше TTL — пускаем рефреш в ФОНЕ (не блокируя текущий запрос). Гард не даёт
+    запустить второй параллельный рефреш. Любая осечка глотается — живой сервер не должен висеть."""
+    import time as _t
+    import threading
+    if _CATALOG_REFRESHING:
+        return
+    if _t.time() - _CATALOG_TS < _CATALOG_TTL:
+        return
+
+    def _bg():
+        try:
+            refresh_catalog_live()
+            print(f"── каталог TTL-авто-обновлён ({len(RICH)} моделей)")
+        except Exception as e:
+            print(f"── TTL-рефреш каталога: {e}")
+    threading.Thread(target=_bg, daemon=True).start()
 
 
 def _scheduled_runner(uid, task, workers):
