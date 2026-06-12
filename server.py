@@ -4927,7 +4927,7 @@ def aiml_music_status(gid: str) -> dict:
 
 
 # ---- AIMLAPI 3D (sync: image → glb-меш) ----
-def aiml_3d(model: str, image: str, prompt: str = None) -> dict:
+def aiml_3d(model: str, image: str, prompt: str = None, timeout: int = 75) -> dict:
     key = _aiml_key()
     if not key:
         raise RuntimeError("нет ключа AIMLAPI")
@@ -4941,12 +4941,15 @@ def aiml_3d(model: str, image: str, prompt: str = None) -> dict:
                                  data=json.dumps(body).encode(),
                                  headers=_aiml_headers(key, post=True), method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=75) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             d = json.loads(r.read())
+    except urllib.error.HTTPError:
+        raise                                       # пробрасываем — api_td3 отдаёт код API
     except http.client.IncompleteRead:
         raise RuntimeError("3D-провайдер сейчас на обслуживании, попробуй позже")
-    except (TimeoutError, http.client.HTTPException):
-        raise RuntimeError("3D-провайдер не ответил вовремя, попробуй позже")
+    except (TimeoutError, socket.timeout, http.client.HTTPException, OSError):
+        # тайт-таймаут/обрыв сети: провайдер на обслуживании — не висим, отвечаем сразу
+        raise RuntimeError("3D-сервис временно недоступен — попробуй позже")
     mesh = d.get("model_mesh") or d.get("mesh") or {}
     url = (mesh.get("url") if isinstance(mesh, dict) else mesh) or d.get("url")
     if not url:
@@ -5397,7 +5400,9 @@ class Handler(BaseHTTPRequestHandler):
         if not owner and user_balance(uid).get("balance", 0) <= 0:
             return self._json({"error": "Баланс исчерпан. Пополни счёт."}, 402)
         try:
-            res = aiml_3d(model, image, req.get("prompt"))
+            # тайт-таймаут: 3D-провайдер сейчас на обслуживании и может висеть.
+            # Лучше быстро упасть с понятным сообщением, чем держать соединение 30-75с.
+            res = aiml_3d(model, image, req.get("prompt"), timeout=13)
         except urllib.error.HTTPError as e:
             return self._json({"error": f"3D API {e.code}: {e.read().decode('utf-8','ignore')[:200]}"}, 502)
         except Exception as e:
