@@ -2305,44 +2305,64 @@ def _store_user_skill(uid: str, name: str, desc: str, body: str, source_url: str
     return {"id": sid, "name": name, "description": desc}
 
 
-def install_skill_from_url(uid: str, url: str) -> dict:
-    """Скачать навык по ссылке и установить в личный стор. Возвращает
-    {ok:True, skill:{...}} либо {ok:False, error:"..."}. ЖЁСТКИЙ SSRF-страж: только
-    публичный http(s), не localhost/внутренние/метадата, кап размера, только текст.
-    Скачанное НИКОГДА не исполняется — это просто инструкции."""
+def _fetch_text_guarded(url: str) -> tuple:
+    """ЕДИНЫЙ SSRF-страж для install-по-ссылке (навык И агент). Возвращает (text, error):
+    при успехе (str, None), при отказе (None, "причина"). Гарантии (ровно как у навыка):
+      • схема только http/https (отсекаем file:/ftp:/data:/gopher и прочее);
+      • анти-SSRF: резолв ВСЕХ адресов, блок localhost/127.*/0.0.0.0/::1/169.254/private/метадата;
+      • фетч с таймаутом ~8с; кап 256КБ (и по Content-Length, и по реальному размеру);
+      • только текст (text/markdown/plain/json) — не тянем бинарь/архивы/html-приложения.
+    Скачанное НИКОГДА не исполняется — вызывающий лишь ПАРСИТ текст."""
     url = (url or "").strip()
-    # 1) схема: только http/https — отсекаем file:/ftp:/data: и прочее
+    # 1) схема: только http/https
     scheme = urllib.parse.urlparse(url).scheme.lower()
     if scheme not in ("http", "https"):
-        return {"ok": False, "error": "разрешены только http(s) ссылки"}
+        return None, "разрешены только http(s) ссылки"
     # 2) анти-SSRF: localhost/127.*/0.0.0.0/::1/169.254/private — резолв всех адресов
     if not _is_public_url(url):
-        return {"ok": False, "error": "внутренние/приватные адреса заблокированы"}
+        return None, "внутренние/приватные адреса заблокированы"
     # 3) фетч с таймаутом ~8с, читаем максимум 256КБ + 1 байт (чтобы заметить превышение)
-    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "text/markdown, text/plain, */*"})
+    req = urllib.request.Request(url, headers={"User-Agent": UA,
+                                               "Accept": "text/markdown, text/plain, application/json, */*"})
     try:
         with urllib.request.urlopen(req, timeout=8) as r:
             ctype = (r.headers.get("Content-Type") or "").lower()
-            # 4) только текст/markdown/plain — не тянем html-приложения/бинарь/архивы
+            # 4) только текст/markdown/plain/json — не тянем бинарь/архивы
             if ctype and not ctype.startswith(_INSTALL_OK_CTYPES):
-                return {"ok": False, "error": f"не текстовый ответ ({ctype.split(';')[0]})"}
+                return None, f"не текстовый ответ ({ctype.split(';')[0]})"
             # объявленный Content-Length тоже проверяем (быстрый отказ)
             try:
                 if int(r.headers.get("Content-Length") or 0) > INSTALL_SKILL_MAX_BYTES:
-                    return {"ok": False, "error": "файл слишком большой (>256КБ)"}
+                    return None, "файл слишком большой (>256КБ)"
             except (TypeError, ValueError):
                 pass
             data = r.read(INSTALL_SKILL_MAX_BYTES + 1)
     except urllib.error.HTTPError as e:
-        return {"ok": False, "error": f"http {e.code}"}
+        return None, f"http {e.code}"
     except Exception as e:
-        return {"ok": False, "error": f"не удалось скачать: {e}"}
+        return None, f"не удалось скачать: {e}"
     # 5) кап размера тела (реальный размер, даже если Content-Length соврал/отсутствовал)
     if len(data) > INSTALL_SKILL_MAX_BYTES:
-        return {"ok": False, "error": "файл слишком большой (>256КБ)"}
+        return None, "файл слишком большой (>256КБ)"
     text = data.decode("utf-8", "ignore")
     if not text.strip():
-        return {"ok": False, "error": "пустой документ"}
+        return None, "пустой документ"
+    return text, None
+
+
+# install_agent принимает ещё и application/json (конфиг агента), помимо текста/markdown.
+_INSTALL_OK_CTYPES = _INSTALL_OK_CTYPES + ("application/json",)
+
+
+def install_skill_from_url(uid: str, url: str) -> dict:
+    """Скачать навык по ссылке и установить в личный стор. Возвращает
+    {ok:True, skill:{...}} либо {ok:False, error:"..."}. ЖЁСТКИЙ SSRF-страж (общий с
+    install_agent через _fetch_text_guarded): только публичный http(s), не localhost/
+    внутренние/метадата, кап размера, только текст. Скачанное НИКОГДА не исполняется."""
+    url = (url or "").strip()
+    text, err = _fetch_text_guarded(url)
+    if err:
+        return {"ok": False, "error": err}
     # 6) парс формата навыка: фронтматтер name/description + тело, либо первый #заголовок.
     #    Переиспользуем парсер skills_lib (тот же формат, что у библиотеки навыков).
     try:
@@ -2359,6 +2379,75 @@ def install_skill_from_url(uid: str, url: str) -> dict:
         name = (urllib.parse.urlparse(url).hostname or "skill").split(".")[0]
     skill = _store_user_skill(uid, name, desc, body, source_url=url)
     return {"ok": True, "skill": skill}
+
+
+def _valid_model_or_auto(mid) -> str:
+    """Сверить id модели с живым каталогом; иначе — сентинель «авто» (фронт сам выберет)."""
+    mid = str(mid or "").strip()
+    if not mid or mid == "__auto__":
+        return "__auto__"
+    bare = strip_model_prefix(mid)
+    valid = _valid_model_ids()
+    if mid in valid or bare in valid:
+        return mid
+    return "__auto__"
+
+
+def install_agent_from_url(uid: str, url: str) -> dict:
+    """Скачать КОНФИГ агента по ссылке и вернуть его фронту (НЕ сохраняем на сервере — стор
+    у фронта). Возвращает {ok:True, config:{name,emoji,driver,expert,inst}} либо
+    {ok:False, error:"..."}. Тот же ЖЁСТКИЙ SSRF-страж, что и install_skill (общий
+    _fetch_text_guarded): только публичный http(s), не localhost/внутренние/метадата,
+    кап 256КБ, только текст/json. Скачанное НИКОГДА не исполняется — лишь парсится.
+    Формат источника: либо маленький JSON {name,emoji,driver,expert,inst}, либо
+    SKILL-подобный фронтматтер (name/description + тело → inst). Модели сверяются с
+    каталогом, иначе откат на '__auto__'."""
+    url = (url or "").strip()
+    text, err = _fetch_text_guarded(url)
+    if err:
+        return {"ok": False, "error": err}
+
+    name = emoji = driver = expert = inst = ""
+    # 1) пробуем JSON-конфиг агента
+    data = None
+    try:
+        data = json.loads(text)
+    except Exception:
+        data = None
+    if isinstance(data, dict):
+        name = str(data.get("name") or data.get("title") or "").strip()
+        emoji = str(data.get("emoji") or "").strip()
+        driver = str(data.get("driver") or "").strip()
+        expert = str(data.get("expert") or data.get("model") or "").strip()
+        inst = str(data.get("inst") or data.get("instructions")
+                   or data.get("system") or data.get("sys") or data.get("description") or "").strip()
+    else:
+        # 2) фолбэк: фронтматтер/markdown как у навыка — name/description + тело → inst
+        try:
+            import skills_lib
+            name, _desc, body = skills_lib._parse_skill(text)
+            inst = (_desc + ("\n\n" if _desc and body else "") + body).strip()
+        except Exception:
+            name, inst = "", text.strip()
+            h = re.search(r"^#\s+(.+)$", text, re.M)
+            if h:
+                name = h.group(1).strip()
+        # эмодзи можно объявить отдельной строкой во фронтматтере/тексте: "emoji: 🤖"
+        em = re.search(r"^\s*emoji\s*[:=]\s*(\S+)", text, re.M | re.I)
+        if em:
+            emoji = em.group(1).strip().strip('"\'')
+
+    if not name:
+        name = (urllib.parse.urlparse(url).hostname or "agent").split(".")[0]
+    name = name[:80]
+    emoji = (emoji or "🤖")[:8]
+    inst = (inst or "")[:4000]
+    # модели сверяем с каталогом; неизвестные → '__auto__' (фронт сам подберёт)
+    driver = _valid_model_or_auto(driver)
+    expert = _valid_model_or_auto(expert)
+
+    config = {"name": name, "emoji": emoji, "driver": driver, "expert": expert, "inst": inst}
+    return {"ok": True, "config": config}
 
 
 # --- заметки пользователя (личный блокнот, к которому ИИ имеет доступ) ---
@@ -5122,6 +5211,18 @@ class Handler(BaseHTTPRequestHandler):
         res = install_skill_from_url(uid, url)
         return self._json(res, 200 if res.get("ok") else 400)
 
+    def api_install_agent(self):
+        """Установка АГЕНТА по ссылке: фетч (тот же SSRF-страж, что у навыка) → парс →
+        конфиг {name,emoji,driver,expert,inst}. НЕ сохраняем на сервере — отдаём фронту,
+        он кладёт в свой стор. Тело { url, user }. Скачанное НЕ исполняется (только парс)."""
+        c = self._body()
+        url = str(c.get("url") or "").strip()
+        uid = c.get("user", "default")
+        if not url:
+            return self._json({"ok": False, "error": "нет url"}, 400)
+        res = install_agent_from_url(uid, url)
+        return self._json(res, 200 if res.get("ok") else 400)
+
     # --- медиа-поиск для in-chat браузера: web + YouTube + картинки ---
     def api_websearch(self):
         c = self._body()
@@ -5472,6 +5573,8 @@ class Handler(BaseHTTPRequestHandler):
             self.api_skills()
         elif path == "/api/install_skill":    # установка навыка по ссылке (SSRF-страж, owner-фича)
             self.api_install_skill()
+        elif path == "/api/install_agent":    # установка агента по ссылке (тот же SSRF-страж)
+            self.api_install_agent()
         elif path == "/api/auth":             # signup/login + session-токены
             self.api_auth()
         elif path == "/api/websearch":        # медиа-поиск (web+YouTube+картинки) для in-chat браузера
@@ -5917,8 +6020,41 @@ class Handler(BaseHTTPRequestHandler):
         if model in ("__auto__", ""):
             model = DEFAULTS["chat"]              # ресёрчу нужна вменяемая текстовая модель
         max_tokens = max(int(req.get("max_tokens") or 2048), 2500)
-        # глубина = «сколько готов потратить» (ползунок на фронте): 2..8 под-вопросов
-        depth = max(2, min(int(req.get("depth") or 4), 8))
+        # глубина ресёрча. Два совместимых формата:
+        #  • строка-пресет "fast"|"balanced"|"deep" — фронтовый селектор режима;
+        #  • число 2..8 — старый ползунок «сколько под-вопросов» (обратная совместимость).
+        # Пресет задаёт: число под-вопросов (sub_q), читать ли страницы целиком (read_pages),
+        # сколько страниц читать (read_n), сколько источников цитировать (src_cap) и нижний
+        # порог длины синтеза (synth_floor). По умолчанию (без параметра) — "balanced".
+        _DEPTH_PROFILES = {
+            "fast":     {"sub_q": 3, "read_pages": False, "read_n": 0, "src_cap": 6,  "synth_floor": 2500},
+            "balanced": {"sub_q": 4, "read_pages": True,  "read_n": 2, "src_cap": 12, "synth_floor": 2500},
+            "deep":     {"sub_q": 8, "read_pages": True,  "read_n": 4, "src_cap": 20, "synth_floor": 4000},
+        }
+        _depth_raw = req.get("depth")
+        if _depth_raw is None:
+            prof = dict(_DEPTH_PROFILES["balanced"])   # параметр отсутствует → дефолт «balanced»
+            depth = prof["sub_q"]
+        elif isinstance(_depth_raw, str) and _depth_raw.strip().lower() in _DEPTH_PROFILES:
+            prof = dict(_DEPTH_PROFILES[_depth_raw.strip().lower()])
+            depth = prof["sub_q"]                  # число под-вопросов из пресета
+        else:
+            # числовой ползунок (обратная совместимость): глубже → читаем страницы при >=5
+            try:
+                depth = max(2, min(int(_depth_raw), 8))
+            except (TypeError, ValueError):
+                depth = _DEPTH_PROFILES["balanced"]["sub_q"]   # мусор → «balanced»
+            prof = {"sub_q": depth, "read_pages": depth >= 5, "read_n": 2,
+                    "src_cap": 12, "synth_floor": 2500}
+        # sources: пользовательский кап на число собранных/цитируемых источников (cap ~10),
+        # сужает src_cap пресета (но не расширяет выше потолка пресета).
+        _src_req = req.get("sources")
+        if _src_req is not None:
+            try:
+                prof["src_cap"] = max(1, min(int(_src_req), 10, prof["src_cap"]))
+            except (TypeError, ValueError):
+                pass
+        max_tokens = max(max_tokens, prof["synth_floor"])   # «deep» гарантирует длинный синтез
         question = next((m.get("content") or "" for m in reversed(raw_messages)
                          if m.get("role") == "user"), "")
         # 🔐 пер-режим конфиг юзера (research): оверрайд синтез-модели / maxTokens-капа /
@@ -5982,8 +6118,9 @@ class Handler(BaseHTTPRequestHandler):
                 u = u.rstrip(".,);")
                 if u not in sources:
                     sources.append(u)
-        if depth >= 5 and sources:                # глубже — читаем пару страниц целиком
-            for url in sources[:2]:
+        sources = sources[:prof["src_cap"]]       # кап числа собранных источников (depth/sources)
+        if prof["read_pages"] and prof["read_n"] and sources:   # глубже — читаем топ-страницы целиком
+            for url in sources[:prof["read_n"]]:
                 self._sse({"type": "research_step", "stage": "read", "text": url})
                 try:
                     page = tool_fetch_url({"url": url})
@@ -6017,7 +6154,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self._sse({"type": "error", "message": str(e)}); return
 
-        self._sse({"type": "research_sources", "sources": sources[:12]})
+        self._sse({"type": "research_sources", "sources": sources[:prof["src_cap"]]})
         if billing["enabled"]:
             meter(uid, planner, est_tokens(question), est_tokens(plan_raw), deduct=not owner)
             ri = meter(uid, model, ru.get("prompt_tokens") or est_tokens(context),
@@ -6073,7 +6210,24 @@ class Handler(BaseHTTPRequestHandler):
         if bill and user_balance(uid).get("balance", 0) <= 0:
             self._sse({"type": "error", "message": "Баланс исчерпан. Пополни счёт, чтобы продолжить."}); return
 
-        members = _council_models(n)
+        # выбор советников: явный мульти-селект пользователя (councilModels) или авто-топ-N.
+        # Зеркалит ровно ту же серверную валидацию, что и compare (compareModels):
+        # сверяем каждый id с живым каталогом (RICH), дедупим, режем до 5. Иначе — авто топ-N (n=2..5).
+        members = None
+        want = req.get("councilModels")
+        if isinstance(want, list) and want:
+            valid = {r["id"]: r for r in RICH}
+            picked = []
+            for mid in want:
+                r = valid.get(mid)
+                if r and r not in picked:
+                    picked.append(r)
+                if len(picked) >= 5:
+                    break
+            if picked:
+                members = picked
+        if not members:
+            members = _council_models(n)
         if not members:
             self._sse({"type": "error", "message": "Нет доступных моделей для совета."}); return
         self._sse({"type": "council_plan",
@@ -6097,7 +6251,7 @@ class Handler(BaseHTTPRequestHandler):
 
         import concurrent.futures
         results = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=n) as ex:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(members))) as ex:
             futs = {ex.submit(ask_one, r): r for r in members}
             for fut in concurrent.futures.as_completed(futs):
                 r, txt, ti, to = fut.result()
