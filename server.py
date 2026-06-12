@@ -1815,6 +1815,65 @@ def route_model(messages: list, has_images: bool) -> str:
     return DEFAULTS["chat"]                     # дефолт — флагман без цензуры
 
 
+# Маркеры «трудного» запроса для авто-Мозга: вопросы/просьбы, где одна средняя модель
+# часто галлюцинирует или отвечает слабо (факты, код, рассуждения, многошаговость, точность).
+_HARD_HINTS = re.compile(
+    r"(?:"
+    r"как\b|почему|зачем|объясн|сравн|разниц|отлич|докаж|выведи|реши\b|посчита|вычисл|"
+    r"проанализир|разбер|пошагов|алгоритм|оптимизир|спроектир|архитектур|"
+    r"напиши\s+(?:код|функц|программ|скрипт|запрос)|исправь|отладь|debug|"
+    r"код|програм|функци|python|javascript|typescript|java\b|golang|\bgo\b|rust|c\+\+|"
+    r"\bsql\b|регуляр|regex|api\b|cli\b|terminal|команд|конфиг|"
+    r"how\b|why\b|explain|compare|prove|derive|solve|calculate|analyze|design\b|"
+    r"difference|step.?by.?step|trade.?off|"
+    r"теорем|формул|уравнен|интеграл|производн|вероятност|"
+    r"точн|корректн|достоверн|правда\s+ли|верно\s+ли|accurate|correct"
+    r")", re.IGNORECASE)
+
+# Однозначно лёгкое: приветствия, благодарности, смолток, короткие реакции.
+_EASY_RE = re.compile(
+    r"^\s*(?:привет|здаров|здравств|хай|ку\b|hi|hello|hey|йо\b|"
+    r"спасибо|спс|благодар|thanks|thx|"
+    r"пока|бай|bye|ок\b|ok\b|окей|угу|ага|да\b|нет\b|"
+    r"как\s+дела|как\s+ты|how\s+are\s+you|"
+    r"что\s+умеешь|кто\s+ты|"
+    r"ха+х|лол|lol|😂|👍|🙏|❤)",
+    re.IGNORECASE)
+
+
+def query_is_hard(messages: list) -> bool:
+    """Дёшево (без вызова модели) оценить: похож ли последний запрос на трудный —
+    фактический/технический/многошаговый/ответственный. Тогда авто-режим включает Мозг
+    (дешёвый ведущий триажит → при необходимости делегирует сильному эксперту).
+    Для приветствий/смолтока/коротких реплик возвращает False (обычный дешёвый чат)."""
+    last = ""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            c = m.get("content")
+            last = c if isinstance(c, str) else (str(c) if c is not None else "")
+            break
+    t = last.strip()
+    if not t:
+        return False
+    low = t.lower()
+    # явный лёгкий смолток в начале и короткое сообщение — не эскалируем
+    # (трейлинг «?» у приветствий допустим: «как дела?», «как ты?»).
+    if _EASY_RE.match(low) and len(t) <= 60:
+        return False
+    # код-блок, сложные маркеры, многошаговость → трудный
+    if "```" in t:
+        return True
+    if _HARD_HINTS.search(low):
+        return True
+    # длинный связный запрос (развёрнутая просьба) — обычно ответственный
+    if len(t) >= 280:
+        return True
+    # вопрос + достаточная длина → скорее фактический/предметный, а не смолток
+    if "?" in t and len(t) >= 40:
+        return True
+    return False
+
+
 def improve_prompt(text: str) -> str:
     """Переписывает промпт дешёвой моделью: чётче и эффективнее, тот же язык."""
     out = venice_complete(aux_model("improve"), [
@@ -7251,13 +7310,32 @@ class Handler(BaseHTTPRequestHandler):
         has_images = any(m.get("images") for m in raw_messages)
         model = str(req.get("model") or DEFAULTS["chat"])
         explicit_model = bool(req.get("model")) and req.get("model") != "__auto__"
+        # 🧠 АВТО-МОЗГ: на «__auto__» (юзер НЕ выбрал модель) и БЕЗ спец-режима, если запрос
+        # выглядит трудным (факты/код/рассуждения/многошаговость) — включаем экономный Мозг:
+        # дешёвый ведущий триажит и эскалирует к сильному эксперту ТОЛЬКО при нужде. Лёгкий
+        # смолток/«привет» остаётся на одной дешёвой модели (быстро и дёшево). Робастно: любой
+        # сбой в этой ветке → обычный одно-модельный ответ (см. try/except ниже).
+        _in_special_mode = bool(req.get("brain") or req.get("relay") or req.get("council")
+                                or req.get("compare") or req.get("research") or req.get("agent"))
+        auto_brain = False
+        if not explicit_model and not _in_special_mode and not has_images:
+            try:
+                auto_brain = query_is_hard(raw_messages)
+            except Exception:
+                auto_brain = False
         if model == "__auto__":
             model = route_model(raw_messages, has_images)
         # ВЛАДЕЛЕЦ + активная подписка + не задал модель руками + без картинок →
         # гоним тест-чат через nano-подписку (free). Юзеры/явный выбор модели — не трогаем.
-        if (not explicit_model and not has_images and is_owner(uid)
+        # При авто-Мозге эксперта подбираем ниже (сильная модель), поэтому этот шорткат пропускаем.
+        if (not explicit_model and not has_images and is_owner(uid) and not auto_brain
                 and not req.get("brain") and nano_sub_status().get("active")):
             model = OWNER_SUB_MODEL
+        # авто-Мозг: «model» становится СИЛЬНЫМ экспертом (его и зовёт ask_expert при эскалации).
+        # Владельцу — сильная модель бесплатно через подписку (ng:claude-opus-4-8); остальным —
+        # обычный сильный дефолт. Стрим всё равно ведёт дешёвый ведущий (см. брейн-ветку ниже).
+        if auto_brain:
+            model = "ng:claude-opus-4-8" if is_owner(uid) else DEFAULTS["smart"]
         # картинки есть, а модель их не понимает — переключаем на зрячую
         if has_images and not vision_ok(model):
             model = DEFAULTS["cheap"]
@@ -7317,13 +7395,15 @@ class Handler(BaseHTTPRequestHandler):
         owner = is_owner(uid)
         key, byok, kerr = resolve_key(uid, model)        # ключ выбранной модели (в брейне — эксперт)
 
-        # 🧠 МОЗГ: дешёвый ведущий триажит → умный эксперт отвечает на сложное
-        brain = (bool(req.get("brain")) and not has_images
+        # 🧠 МОЗГ: дешёвый ведущий триажит → умный эксперт отвечает на сложное.
+        # Включается явным флагом brain ЛИБО авто-Мозгом (трудный запрос на «__auto__»).
+        brain = ((bool(req.get("brain")) or auto_brain) and not has_images
                  and model_kind(model) not in ("image", "voice"))
         expert_model, expert_key = model, key
         stream_model, stream_key = model, key
         if brain:
-            # ведущий (контролёр) — модель без цензуры, юзер может выбрать свою
+            # ведущий (контролёр) — дешёвая модель без цензуры; в явном брейне юзер может выбрать свою,
+            # в авто-Мозге всегда дефолтный дешёвый ведущий (req["driver"] здесь не задан).
             driver_model = str(req.get("driver") or BRAIN_DRIVER)
             dkey, dbyok, dkerr = resolve_key(uid, driver_model)
             if dkerr or not dkey:                          # выбранный недоступен — берём дефолтного
@@ -7331,6 +7411,13 @@ class Handler(BaseHTTPRequestHandler):
                 dkey, dbyok, dkerr = resolve_key(uid, driver_model)
             if dkerr or not dkey:
                 brain = False                              # нет ключа ведущего — обычный режим
+                if auto_brain:
+                    # авто-Мозг не смог стартовать → НЕ оставляем дорогого эксперта одиночной
+                    # моделью, а откатываемся к обычному дешёвому авто-выбору (без регресса/ошибки).
+                    model = route_model(raw_messages, has_images)
+                    expert_model = stream_model = model
+                    key, byok, kerr = resolve_key(uid, model)
+                    expert_key = stream_key = key
             else:
                 system = base_system + "\n" + BRAIN_PROMPT
                 active_tools = {**active_tools, "ask_expert": True}
