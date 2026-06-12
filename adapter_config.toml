@@ -1,0 +1,43 @@
+# Конфиг адаптера. Ключ в файле НЕ хранится — только имя env-переменной.
+# Загрузка:  AdapterConfig.from_toml("adapter_config.toml")
+
+base_url = "https://api.venice.ai/api/v1"
+api_key_env = "VENICE_API_KEY"     # положи ключ в эту переменную окружения
+default_route = "default"
+normalizer_route = "normalizer"
+max_validation_retries = 3          # ретраи на ошибках валидации схемы (самокоррекция модели)
+max_transport_retries = 3           # ретраи на 429/5xx/таймаутах с backoff
+timeout_s = 120.0
+
+# ── маршруты: routing_key → модель. Ключ берётся из task_type (code/config/text/data)
+#    либо из raw.hints["routing_key"]. Неизвестный ключ → default.
+
+[routes.normalizer]                 # дешёвая модель для «прозрачной» нормализации ввода
+model_id = "gemma-4-uncensored"
+temperature = 0.2
+max_tokens = 600
+json_mode = true
+
+[routes.default]                    # запасной маршрут
+model_id = "venice-uncensored-1-2"
+temperature = 0.4
+max_tokens = 2048
+json_mode = true
+
+[routes.code]                       # код → специализированная модель, низкая температура
+model_id = "qwen3-coder-480b-a35b-instruct-turbo"
+temperature = 0.2
+max_tokens = 4096
+json_mode = true
+
+[routes.config]                     # конфиги → максимально детерминированно
+model_id = "venice-uncensored-1-2"
+temperature = 0.1
+max_tokens = 2048
+json_mode = true
+
+[routes.text]                       # текст → можно живее
+model_id = "venice-uncensored-1-2"
+temperature = 0.7
+max_tokens = 3000
+json_mode = true
