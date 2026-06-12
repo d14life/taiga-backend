@@ -958,6 +958,27 @@ def full_catalog_payload():
     return out
 
 
+def _free_chat_ids() -> set:
+    """ID бесплатных ЧАТ-моделей (pin==pout==0, не картинки/голос) — из обогащённого RICH.
+    Эти модели владелец прячет от обычных юзеров: монетизация идёт наценкой на платные."""
+    out = set()
+    for r in RICH:
+        if r.get("free") and r.get("kind") not in ("image", "voice", "media"):
+            out.add(r.get("id"))
+    out.discard(None)
+    return out
+
+
+def visible_catalog_for(uid: str) -> list:
+    """Каталог моделей, ПОКАЗЫВАЕМЫЙ пользователю. Владелец видит всё (включая бесплатные).
+    Обычный юзер НЕ видит бесплатные чат-модели (директива владельца: «для юзеров всё
+    платное, бесплатное только мне»). Картинки/голос/медиа и платные — у всех."""
+    if is_owner(uid):
+        return RICH
+    return [r for r in RICH
+            if not (r.get("free") and r.get("kind") not in ("image", "voice", "media"))]
+
+
 def provider_for(model_id: str) -> dict:
     return PROVIDERS[provider_name(model_id)]
 
@@ -2365,10 +2386,14 @@ def _save_user_skills_index(uid: str, idx: list):
     tmp.replace(p)
 
 
-def _store_user_skill(uid: str, name: str, desc: str, body: str, source_url: str = "") -> dict:
+def _store_user_skill(uid: str, name: str, desc: str, body: str, source_url: str = "",
+                      unique: bool = False) -> dict:
     """Положить навык в ЛИЧНУЮ библиотеку пользователя (зеркалит skills_lib: id+name+
     description+тело-файл). Тело прогоняется через redact_secrets (как в skills_lib._scan)
-    и режется по длине. Возвращает {id,name,description}."""
+    и режется по длине. Возвращает {id,name,description}.
+    unique=False — де-дуп по id (перезапись): нужен при единичной установке по ссылке.
+    unique=True  — при коллизии id даём СОСЕДНИЙ id (суффикс): нужен при массовом импорте
+    репо, где разные файлы могут давать одинаковый слаг — иначе они затёрли бы друг друга."""
     try:
         from guard import redact_secrets
         body = redact_secrets(body)
@@ -2382,8 +2407,17 @@ def _store_user_skill(uid: str, name: str, desc: str, body: str, source_url: str
     sdir = user_dir(uid) / "skills"
     sdir.mkdir(parents=True, exist_ok=True)
     idx = load_user_skills(uid)
-    # де-дуп по id: перезаписываем тело, обновляем мету
-    idx = [s for s in idx if s.get("id") != sid]
+    if unique:
+        # массовый импорт: не затираем — если слаг занят, добавляем числовой суффикс
+        existing = {s.get("id") for s in idx}
+        if sid in existing:
+            base, n = sid[:56], 2
+            while f"{base}-{n}" in existing:
+                n += 1
+            sid = f"{base}-{n}"
+    else:
+        # де-дуп по id: перезаписываем тело, обновляем мету
+        idx = [s for s in idx if s.get("id") != sid]
     (sdir / f"{sid}.md").write_text(body, "utf-8")
     meta = {"id": sid, "name": name, "description": desc,
             "source": source_url[:300], "added": datetime.now().strftime("%Y-%m-%d %H:%M")}
@@ -2475,6 +2509,162 @@ def install_skill_from_url(uid: str, url: str, token: str = "") -> dict:
         name = (urllib.parse.urlparse(url).hostname or "skill").split(".")[0]
     skill = _store_user_skill(uid, name, desc, body, source_url=url)
     return {"ok": True, "skill": skill}
+
+
+IMPORT_REPO_MAX_FILES = 200                # потолок числа навыков за один импорт-репо (анти-DoS)
+
+
+def _parse_github_repo_url(url: str):
+    """Разобрать ссылку на GitHub-репо → (owner, repo, branch|None, subpath|None).
+    Понимает: https://github.com/owner/repo,
+              .../owner/repo/tree/<branch>/<subdir>,
+              .../owner/repo/blob/<branch>/<path>.
+    Возвращает None, если это не github.com или не разобрать."""
+    try:
+        p = urllib.parse.urlparse(url.strip())
+        if (p.hostname or "").lower() not in ("github.com", "www.github.com"):
+            return None
+        parts = [x for x in p.path.strip("/").split("/") if x]
+        if len(parts) < 2:
+            return None
+        owner, repo = parts[0], parts[1]
+        repo = repo[:-4] if repo.endswith(".git") else repo
+        branch, subpath = None, None
+        if len(parts) >= 4 and parts[2] in ("tree", "blob"):
+            branch = parts[3]
+            subpath = "/".join(parts[4:]) or None
+        return owner, repo, branch, subpath
+    except Exception:
+        return None
+
+
+def _github_trees(owner: str, repo: str, branch: str, token: str = ""):
+    """Дёрнуть GitHub trees API (рекурсивно) для ветки. Возвращает (list_paths, error).
+    Тот же анти-SSRF (только публичный api.github.com), token → Bearer. Только JSON, кап ~4МБ."""
+    api = f"https://api.github.com/repos/{owner}/{repo}/git/trees/{branch}?recursive=1"
+    if not _is_public_url(api):
+        return None, "внутренние/приватные адреса заблокированы"
+    headers = {"User-Agent": UA, "Accept": "application/vnd.github+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(api, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=12) as r:
+            data = r.read(4_000_000)
+    except urllib.error.HTTPError as e:
+        return None, f"http {e.code}"
+    except Exception as e:
+        return None, f"не удалось скачать дерево: {e}"
+    try:
+        tree = json.loads(data.decode("utf-8", "ignore")).get("tree", [])
+    except Exception as e:
+        return None, f"некорректный ответ trees API: {e}"
+    paths = [t.get("path", "") for t in tree if t.get("type") == "blob"]
+    return paths, None
+
+
+def import_skill_repo_from_url(uid: str, url: str, token: str = "") -> dict:
+    """Массовый импорт навыков из GitHub-репозитория: разбираем owner/repo(/ветку/подпапку),
+    тянем дерево файлов (trees API), находим все SKILL.md (и top-level *.md в папках skills/),
+    качаем каждый через тот же SSRF-страж (_fetch_text_guarded), парсим skills_lib._parse_skill
+    и кладём в личный стор юзера. Кап ~200 файлов. Возвращает {ok,imported,skipped,total,...}.
+    Скачанное НИКОГДА не исполняется — это инструкции (текст)."""
+    parsed = _parse_github_repo_url(url)
+    if not parsed:
+        return {"ok": False, "error": "это не похоже на ссылку на GitHub-репозиторий"}
+    owner, repo, branch, subpath = parsed
+    branches = [branch] if branch else ["main", "master"]
+    paths, err = None, "ветка не найдена"
+    used_branch = None
+    for b in branches:
+        paths, e = _github_trees(owner, repo, b, token=token)
+        if paths is not None:
+            used_branch, err = b, None
+            break
+        err = e
+    if paths is None:
+        return {"ok": False, "error": err or "не удалось получить дерево репозитория"}
+
+    # отбор путей: SKILL.md где угодно + *.md прямо в каталоге skills/ (запасной макет)
+    def _want(path: str) -> bool:
+        if subpath and not (path == subpath or path.startswith(subpath.rstrip("/") + "/")):
+            return False
+        base = path.rsplit("/", 1)[-1].lower()
+        if base == "skill.md":
+            return True
+        # запасной макет: <...>/skills/<name>.md (один файл-навык на md)
+        return base.endswith(".md") and ("/skills/" in ("/" + path.lower()) or
+                                          path.lower().startswith("skills/"))
+
+    wanted = [p for p in paths if _want(p)]
+    # SKILL.md приоритетнее: если они есть, не тащим случайные *.md
+    skill_md = [p for p in wanted if p.rsplit("/", 1)[-1].lower() == "skill.md"]
+    if skill_md:
+        wanted = skill_md
+    wanted = wanted[:IMPORT_REPO_MAX_FILES]
+    total = len(wanted)
+    if total == 0:
+        return {"ok": True, "imported": 0, "skipped": 0, "total": 0,
+                "note": "в репозитории не найдено SKILL.md (или *.md в skills/)",
+                "branch": used_branch}
+
+    def _resolve_symlink(path: str, body: str):
+        """В git репо файл бывает симлинком: raw возвращает не контент, а целевой путь
+        (одна короткая строка вида '../../x/SKILL.md'). Резолвим относительно директории
+        файла и тянем настоящий контент (1 хоп). Не симлинк — возвращаем body как есть."""
+        b = (body or "").strip()
+        if "\n" in b or len(b) > 200 or "/" not in b or b.startswith(("#", "---")):
+            return body
+        # нормализуем относительный путь относительно каталога SKILL.md
+        dir_parts = path.split("/")[:-1]
+        for seg in b.split("/"):
+            if seg in ("", "."):
+                continue
+            if seg == "..":
+                if dir_parts:
+                    dir_parts.pop()
+            else:
+                dir_parts.append(seg)
+        target = "/".join(dir_parts)
+        if not target or target == path:
+            return body
+        raw2 = f"https://raw.githubusercontent.com/{owner}/{repo}/{used_branch}/{target}"
+        t2, e2 = _fetch_text_guarded(raw2, token=token)
+        return t2 if (t2 and not e2) else body
+
+    imported, skipped, errors = 0, 0, []
+    try:
+        import skills_lib
+    except Exception:
+        skills_lib = None
+    for path in wanted:
+        raw = f"https://raw.githubusercontent.com/{owner}/{repo}/{used_branch}/{path}"
+        text, e = _fetch_text_guarded(raw, token=token)
+        if e or not text:
+            skipped += 1
+            if len(errors) < 8:
+                errors.append({"path": path, "error": e or "пусто"})
+            continue
+        text = _resolve_symlink(path, text)     # git-симлинк → настоящий контент
+        try:
+            if skills_lib:
+                name, desc, body = skills_lib._parse_skill(text)
+            else:
+                name, desc, body = "", "", text
+            if not name:
+                h = re.search(r"^#\s+(.+)$", text, re.M)
+                name = h.group(1).strip() if h else (path.rsplit("/", 1)[-1].rsplit(".", 1)[0])
+            _store_user_skill(uid, name, desc, body, source_url=raw, unique=True)
+            imported += 1
+        except Exception as ex:
+            skipped += 1
+            if len(errors) < 8:
+                errors.append({"path": path, "error": str(ex)})
+    res = {"ok": True, "imported": imported, "skipped": skipped, "total": total,
+           "branch": used_branch, "repo": f"{owner}/{repo}"}
+    if errors:
+        res["errors"] = errors
+    return res
 
 
 def _valid_model_or_auto(mid) -> str:
@@ -5371,6 +5561,18 @@ class Handler(BaseHTTPRequestHandler):
         res = install_agent_from_url(uid, url)
         return self._json(res, 200 if res.get("ok") else 400)
 
+    def api_import_skill_repo(self):
+        """Массовый импорт навыков из GitHub-репо: дерево файлов → все SKILL.md → личный стор.
+        Тело { url, user, token? }. Тот же SSRF-страж; скачанное НЕ исполняется (только парс)."""
+        c = self._body()
+        url = str(c.get("url") or "").strip()
+        uid = c.get("user", "default")
+        token = str(c.get("token") or "").strip()      # опц. GitHub-токен (приватный/лимиты)
+        if not url:
+            return self._json({"ok": False, "error": "нет url"}, 400)
+        res = import_skill_repo_from_url(uid, url, token=token)
+        return self._json(res, 200 if res.get("ok") else 400)
+
     # --- медиа-поиск для in-chat браузера: web + YouTube + картинки ---
     def api_websearch(self):
         c = self._body()
@@ -5551,10 +5753,15 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/init":
             uid = (self._qs().get("user") or ["default"])[0]
             users = ensure_default_user()
+            _models, _full = curated_payload(), full_catalog_payload()
+            if not is_owner(uid):                       # обычный юзер: прячем бесплатные чат-модели
+                _free = _free_chat_ids()
+                _models = [m for m in _models if m.get("id") not in _free]
+                _full = [m for m in _full if m.get("id") not in _free]
             self._json({
                 "users": users,
-                "models": curated_payload(),
-                "full": full_catalog_payload(),
+                "models": _models,
+                "full": _full,
                 "system": DEFAULT_SYSTEM,
                 "relay_craft": RELAY_CRAFT_SYSTEM,
                 "keys": {n: p["key"].exists() for n, p in PROVIDERS.items()},
@@ -5610,7 +5817,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": False, "error": str(e)}, 502)
         elif path == "/api/catalog":
             _maybe_bg_refresh_catalog()        # старше TTL → фоновый авто-рефреш (не блокирует ответ)
-            self._json({"models": RICH,
+            uid = (self._qs().get("user") or ["default"])[0]
+            self._json({"models": visible_catalog_for(uid),  # юзеру не показываем бесплатные чат-модели
                         "providers": {n: p["key"].exists() for n, p in PROVIDERS.items()}})
         elif path == "/api/video-models":
             self._json({"models": VIDEO_MODELS,
@@ -5732,6 +5940,8 @@ class Handler(BaseHTTPRequestHandler):
             self.api_install_skill()
         elif path == "/api/install_agent":    # установка агента по ссылке (тот же SSRF-страж)
             self.api_install_agent()
+        elif path == "/api/import_skill_repo":  # массовый импорт навыков из GitHub-репо
+            self.api_import_skill_repo()
         elif path == "/api/auth":             # signup/login + session-токены
             self.api_auth()
         elif path == "/api/websearch":        # медиа-поиск (web+YouTube+картинки) для in-chat браузера
