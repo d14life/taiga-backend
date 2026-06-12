@@ -5120,7 +5120,8 @@ class Handler(BaseHTTPRequestHandler):
                 mid = model[3:]
                 try:
                     url = nano_image(model, prompt, width=w, height=h, seed=seed)
-                    sub_free = mid in NANO_SUB_IMAGE_MODELS and nano_sub_status().get("active")
+                    # подписка — ТОЛЬКО для владельца (его тесты): юзеры её не видят и не тратят.
+                    sub_free = owner and mid in NANO_SUB_IMAGE_MODELS and nano_sub_status().get("active")
                 except urllib.error.HTTPError as e:
                     # 402 = выбранная модель не входит в подписку и баланса нет.
                     # Если подписка активна — генерим бесплатной subscription-моделью (hidream).
@@ -5129,8 +5130,9 @@ class Handler(BaseHTTPRequestHandler):
                         body = e.read().decode("utf-8", "ignore")
                     except Exception:
                         pass
-                    if (e.code == 402 and mid != NANO_FREE_IMAGE_DEFAULT
+                    if (owner and e.code == 402 and mid != NANO_FREE_IMAGE_DEFAULT
                             and nano_sub_status().get("active")):
+                        # фоллбэк на бесплатную subscription-модель — ТОЛЬКО владельцу
                         model = "ng:" + NANO_FREE_IMAGE_DEFAULT
                         url = nano_image(model, prompt, width=w, height=h, seed=seed)
                         sub_free = True
