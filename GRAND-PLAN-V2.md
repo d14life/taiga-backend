@@ -5,7 +5,7 @@ Rule: ≤1 server.py lane + ≤1 chat.tsx lane per batch (god-file contention). 
 ## STATUS (source of truth for resume)
 - [x] BATCH 0 — requirements scrape (3 agents, 18 docs) — DONE
 - [x] BATCH 1 — proxies+wirings, FTS5, themes — DONE (FE 930d121 / parent af5e1bb)
-- [ ] BATCH 2 — stream-recovery, office-export, img2img, onboarding
+- [x] BATCH 2 — stream-recovery, office-export, img2img, onboarding — DONE (FE 5d2d84c / parent 4fd3715)
 - [ ] BATCH 3 — heuristic-tools, analytics, aux-models-UI, voice-picker
 - [ ] BATCH 4 — RAG-chunking, bg-tasks-panel, catalog-screen, agent-tabs
 - [ ] BATCH 5 — Beam-fusion, camera+Beam-UI, cron-triggers, sub-meters

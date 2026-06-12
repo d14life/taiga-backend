@@ -192,7 +192,9 @@ def aux_model(task: str) -> str:
     """Модель для служебной под-задачи. 'main' → текущий CHEAP_MODEL. Override в settings владельца.
     Если переопределили на модель не из живого каталога — безопасный откат на CHEAP_MODEL."""
     try:
-        pick = (load_settings("default").get("aux_models") or {}).get(task) or "main"
+        # владелец задаёт override в dev-mode (userconfig.aux_models), либо в settings; иначе main
+        pick = ((load_user_config("default").get("aux_models") or {}).get(task)
+                or (load_settings("default").get("aux_models") or {}).get(task) or "main")
     except Exception:
         pick = "main"
     if pick == "main":
@@ -3363,23 +3365,247 @@ def _looks_like_tool_head(head: str, allowed: dict, steps: int = 0) -> bool:
     return False
 
 
-def parse_tool_call(text: str, allowed: dict):
-    """Если ответ модели — JSON вызова инструмента, вернуть (имя, args)."""
+# Главный («позиционный») аргумент каждого инструмента: если эвристика выудила ОДНУ
+# голую строку (web_search("курс биткоина") / TOOL: wiki Парижская коммуна), кладём её
+# в этот ключ. Для незнакомых/MCP-инструментов фолбэк — порядок ниже в _PRIMARY_ARG_GUESS.
+_TOOL_PRIMARY_ARG = {
+    "web_search": "query", "super_search": "query", "reddit": "query",
+    "search_skills": "query", "wiki": "query", "forget": "query",
+    "fetch_url": "url", "browse": "url", "webhook": "url",
+    "calc": "expression", "load_skill": "id", "save_note": "text",
+    "remember": "fact", "generate_image": "prompt", "list_dir": "path",
+    "read_file": "path", "revert_file": "path", "shell": "cmd",
+    "run_code": "code",
+}
+# Порядок предпочтения, когда инструмент не в карте выше (например MCP-инструмент):
+# берём первый из этих ключей, который вообще «осмысленный» как одиночная строка.
+_PRIMARY_ARG_GUESS = ("query", "q", "url", "prompt", "text", "input", "path",
+                      "expression", "code", "cmd", "id", "name", "question")
+
+
+def _coerce_arg_value(v: str):
+    """Строковое значение из loose-формата → питон-тип (number/bool/null/JSON), иначе str."""
+    s = v.strip()
+    if len(s) >= 2 and s[0] in "\"'" and s[-1] == s[0]:
+        s = s[1:-1]                                   # снимаем кавычки
+        return s
+    low = s.lower()
+    if low in ("true", "false"):
+        return low == "true"
+    if low in ("null", "none", "nil"):
+        return None
+    if re.fullmatch(r"-?\d+", s):
+        try:
+            return int(s)
+        except ValueError:
+            pass
+    if re.fullmatch(r"-?\d*\.\d+", s):
+        try:
+            return float(s)
+        except ValueError:
+            pass
+    if s[:1] in "{[":                                 # вложенный JSON-объект/массив
+        try:
+            return json.loads(s)
+        except (json.JSONDecodeError, ValueError):
+            return s
+    return s
+
+
+def _parse_kv_pairs(s: str) -> dict:
+    """`key="val", key2=val2` / `key: val` → dict. Терпим к разделителям и кавычкам."""
+    out = {}
+    # ключ = значение, где значение — строка в кавычках, JSON-объект/массив, или голый токен
+    for m in re.finditer(
+        r'([A-Za-z_][\w\-]*)\s*[:=]\s*'
+        r'("(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'|\{[^{}]*\}|\[[^\[\]]*\]|[^,\n)]+)',
+        s,
+    ):
+        out[m.group(1)] = _coerce_arg_value(m.group(2))
+    return out
+
+
+def _map_recovered_args(name: str, allowed: dict, kv: dict, positional):
+    """Свести выуженные kv/позиционную строку к ожидаемым ключам инструмента.
+    Возвращает dict args (возможно пустой) или None если ничего осмысленного нет."""
+    if kv:
+        return kv
+    if positional is not None and str(positional).strip():
+        key = _TOOL_PRIMARY_ARG.get(name)
+        if not key:
+            key = next((g for g in _PRIMARY_ARG_GUESS), "query")  # неизвестный → query по умолчанию
+        return {key: positional}
+    return {}
+
+
+def heuristic_tool_call(text: str, allowed: dict):
+    """ФОЛБЭК-парсер вызова инструмента для слабых/uncensored-моделей без нативного
+    function-calling: они шлют tool-call в рыхлых форматах. Срабатывает ТОЛЬКО когда строгий
+    parse_tool_call не справился. Принцип free-claude-code HeuristicToolParser.
+
+    Распознаёт (требуется ИМЯ активного инструмента + arg-подобная структура):
+      • ```json {...}``` / голый {...} с лишним префиксом-прозой
+      • <tool_call>{...}</tool_call> / <function_call>...</function_call>
+      • префиксы TOOL: / Action: / Tool call: / Использую инструмент:
+      • function-call синтаксис  name(arg="...")  /  name(query="...", k=v)
+      • name("одна строка")  /  name: одна строка  /  ИМЯ {json}
+    Анти-misfire: без явного имени активного инструмента + arg-структуры → None
+    (обычная проза просто стримится как ответ)."""
+    if not allowed:
+        return None
+    raw = text or ""
+    if not raw.strip():
+        return None
+
+    # --- 0) снять обёртки-теги, оставив внутренность для дальнейшего разбора
+    s = raw
+    m = re.search(r"<(?:tool_call|function_call|tool|function)\b[^>]*>(.*?)</(?:tool_call|function_call|tool|function)>",
+                  s, re.DOTALL | re.IGNORECASE)
+    if m:
+        inner = m.group(1).strip()
+        # внутри тега чаще всего JSON или name(args) — пробуем сначала строгий разбор
+        strict = parse_tool_call(inner, allowed, _heuristic=False)
+        if strict:
+            return strict
+        s = inner
+
+    # --- 1) снять код-фенсы и спец-токены, снять командные префиксы
+    body = re.sub(r"<\|[^|<>]*\|>", " ", s)
+    fenced = re.findall(r"```(?:json|tool|tool_call)?\s*(.*?)```", body, re.DOTALL | re.IGNORECASE)
+    candidates = [body] + [f.strip() for f in fenced if f.strip()]
+
+    for cand in candidates:
+        c = cand.strip()
+        # срезаем командный префикс, если он есть в начале строки
+        c = re.sub(r"^\s*(?:TOOL\s*CALL|TOOL|ACTION|FUNCTION|"
+                   r"использую\s+инструмент|вызываю\s+инструмент|инструмент)\s*[:=>\-]*\s*",
+                   "", c, flags=re.IGNORECASE)
+
+        # --- A) внутри кандидата есть сбалансированный JSON с именем инструмента?
+        for jm in re.finditer(r"\{", c):
+            obj = _repair_tool_json(c[jm.start():])
+            if isinstance(obj, dict):
+                got = parse_tool_call(json.dumps(obj), allowed, _heuristic=False)
+                if got:
+                    return got
+                # имя инструмента может стоять ВНЕ json (name {json}) — обработаем ниже
+                break
+
+        # --- B) ищем имя активного инструмента + следующую за ним arg-структуру
+        # сортируем по длине: длинные имена матчим первыми (super_search раньше search)
+        for name in sorted(allowed, key=len, reverse=True):
+            for nm in re.finditer(r"(?<![\w.])" + re.escape(name) + r"(?![\w])", c):
+                after = c[nm.end():]
+                lead = after.lstrip()
+
+                # B1) function-call:  name( ... )
+                if lead.startswith("("):
+                    inner = _balanced_parens(lead)
+                    if inner is not None:
+                        kv = _parse_kv_pairs(inner)
+                        positional = None
+                        if not kv:
+                            ps = inner.strip()
+                            if ps and ps[0] in "\"'" and ps[-1] == ps[0]:
+                                positional = ps[1:-1]
+                            elif ps and "=" not in ps and ":" not in ps:
+                                positional = ps
+                        args = _map_recovered_args(name, allowed, kv, positional)
+                        return name, args
+
+                # B2) name {json}   (имя перед JSON-объектом)
+                if lead.startswith("{"):
+                    obj = _repair_tool_json(lead)
+                    if isinstance(obj, dict):
+                        # это args целиком, либо обёртка с tool/args
+                        inner_call = parse_tool_call(json.dumps(obj), allowed, _heuristic=False)
+                        if inner_call:
+                            return inner_call
+                        return name, obj
+
+                # B3) name: "строка"  /  name = строка  /  name with {"k":..}
+                #     ищем ближайшую arg-структуру в ХВОСТЕ строки (kv или JSON или кавычки)
+                tail = after
+                obj_m = re.search(r"\{.*?\}", tail, re.DOTALL)
+                if obj_m:
+                    obj = _repair_tool_json(obj_m.group(0))
+                    if isinstance(obj, dict):
+                        return name, obj
+                kv = _parse_kv_pairs(tail[:400])
+                if kv:
+                    return name, kv
+                # B4) name "одна строка в кавычках"  /  name: одна строка
+                qm = re.search(r'[:=]?\s*"([^"]{1,400})"', tail) or \
+                     re.search(r"[:=]?\s*'([^']{1,400})'", tail)
+                if qm:
+                    return name, _map_recovered_args(name, allowed, {}, qm.group(1))
+                pm = re.match(r"\s*[:=]\s*([^\n{}\[\]]{1,400})", tail)
+                if pm:
+                    val = pm.group(1).strip().strip('.')
+                    if val:
+                        return name, _map_recovered_args(name, allowed, {}, val)
+                # имя нашлось, но без arg-структуры — для инструментов БЕЗ аргументов
+                # (rates/now/self/read_notes) это валидный вызов; иначе — не misfire-им.
+                if not lead or lead[0] in ".,!?;)\n" or lead == "":
+                    if _TOOL_PRIMARY_ARG.get(name) is None and name not in (
+                            "calc", "wiki"):
+                        # инструмент не требует аргумента → допускаем пустой вызов,
+                        # но ТОЛЬКО если имя явно выделено (а не случайное слово в прозе)
+                        if re.search(r"(?<![\w.])" + re.escape(name) + r"\s*\(\s*\)", c) or \
+                           re.search(r"\b" + re.escape(name) + r"\b\s*$", c.strip()):
+                            return name, {}
+    return None
+
+
+def _balanced_parens(s: str):
+    """Дан текст, начинающийся с '(' → вернуть содержимое сбалансированной пары скобок
+    (без внешних скобок), уважая строки/вложенность; иначе None."""
+    if not s or s[0] != "(":
+        return None
+    depth = 0
+    in_str = False
+    quote = ""
+    esc = False
+    for i, ch in enumerate(s):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == quote:
+                in_str = False
+            continue
+        if ch in "\"'":
+            in_str = True
+            quote = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return s[1:i]
+    return None
+
+
+def parse_tool_call(text: str, allowed: dict, _heuristic: bool = True):
+    """Если ответ модели — JSON вызова инструмента, вернуть (имя, args).
+    Строгий разбор; при провале — эвристический фолбэк для слабых моделей
+    (_heuristic=False отключает фолбэк, чтобы избежать рекурсии из heuristic_tool_call)."""
     s = text.strip()
     s = re.sub(r"<\|[^|<>]*\|>", " ", s)
     s = re.sub(r"```(?:json)?", " ", s).strip()
     start = s.find("{")
     if start == -1 or s[:start].strip():
-        return None
+        return heuristic_tool_call(text, allowed) if _heuristic else None
     try:
         obj, _ = json.JSONDecoder().raw_decode(s[start:])
     except json.JSONDecodeError:
         # обрезанный/переогороженный JSON (обрыв стрима, лишние фенсы) → пробуем починить
         obj = _repair_tool_json(text)
         if obj is None:
-            return None
+            return heuristic_tool_call(text, allowed) if _heuristic else None
     if not isinstance(obj, dict):
-        return None
+        return heuristic_tool_call(text, allowed) if _heuristic else None
     if obj.get("tool") in allowed:
         return obj["tool"], obj.get("args") or obj.get("arguments") or {}
     # AI-SDK / OpenAI-стиль: {"toolName": "...", "arguments": {...}} — частый формат у моделей.
@@ -3391,7 +3617,7 @@ def parse_tool_call(text: str, allowed: dict):
         k, v = next(iter(obj.items()))
         if k in allowed and isinstance(v, dict):
             return k, v
-    return None
+    return heuristic_tool_call(text, allowed) if _heuristic else None
 
 
 # ---------------------------------------------------------------- MCP: нативный клиент (stdlib)
@@ -4584,6 +4810,18 @@ def validate_user_config(raw) -> dict:
             cf = validate_custom_function(f)
             if cf:
                 out["functions"].append(cf)
+    # вспомогательные модели на под-задачу (dev-mode-panel) — только валидные task + catalog-id
+    aux = raw.get("aux_models")
+    if isinstance(aux, dict):
+        valid = _valid_model_ids()
+        clean_aux = {}
+        for task, mid in aux.items():
+            if task in _AUX_TASKS and isinstance(mid, str):
+                m = strip_model_prefix(mid.strip())
+                if m and m in valid:
+                    clean_aux[task] = m
+        if clean_aux:
+            out["aux_models"] = clean_aux
     return out
 
 
