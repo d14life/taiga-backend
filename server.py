@@ -4613,11 +4613,28 @@ AIML_VIDEO = [
 if _aiml_key():
     for _m in AIML_VIDEO:
         _m.setdefault("provider", "aimlapi")
-    VIDEO_MODELS = sorted(
-        AIML_VIDEO + VIDEO_MODELS,
-        key=lambda m: (0 if m.get("provider") == "aimlapi" else 1,
-                       0 if m.get("featured") else 1, m.get("usd", 0.25)))
-    print(f"── AIMLAPI видео подключён: +{len(AIML_VIDEO)} моделей (funded, первыми)")
+    # NanoGPT-видео списывается с его кошелька. Если он ПУСТ ($0) — submit принимается,
+    # но задача висит «QUEUED» вечно (нет денег на обработку) → юзер тупит у вечной очереди.
+    # Поэтому при $0 ПРЯЧЕМ NanoGPT-видео целиком, оставляя только funded AIMLAPI.
+    # Вернутся сами, если кошелёк пополнить (баланс-проверка при старте).
+    try:
+        _nano_usd = _nano_balance().get("usd")
+    except Exception:
+        _nano_usd = None
+    NANO_VIDEO_FUNDED = not (isinstance(_nano_usd, (int, float)) and _nano_usd <= 0)
+    if NANO_VIDEO_FUNDED:
+        VIDEO_MODELS = sorted(
+            AIML_VIDEO + VIDEO_MODELS,
+            key=lambda m: (0 if m.get("provider") == "aimlapi" else 1,
+                           0 if m.get("featured") else 1, m.get("usd", 0.25)))
+        print(f"── AIMLAPI видео подключён: +{len(AIML_VIDEO)} моделей (funded, первыми)")
+    else:
+        VIDEO_MODELS = sorted(
+            list(AIML_VIDEO),
+            key=lambda m: (0 if m.get("featured") else 1, m.get("usd", 0.25)))
+        print(f"── NanoGPT-видео кошелёк ${_nano_usd} (пуст) → скрыт; студия = {len(VIDEO_MODELS)} funded AIMLAPI")
+else:
+    NANO_VIDEO_FUNDED = True  # нет AIMLAPI → показываем что есть (NanoGPT как было)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -4671,6 +4688,11 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         is_aiml = model.startswith("aiml:")
+        # backstop: если выбрана НЕ-funded NanoGPT-видео-модель, а кошелёк пуст —
+        # не вешаем юзера в 10-мин очередь, говорим сразу и зовём выбрать ⚡ funded.
+        if not is_aiml and not globals().get("NANO_VIDEO_FUNDED", True):
+            self._sse({"type": "error", "message": "Эта видео-модель идёт через неоплаченного провайдера и зависнет. Выбери модель сверху списка (⚡ funded) — она сгенерит сразу."})
+            return
         aiml_seg = None
         try:
             if is_aiml:
