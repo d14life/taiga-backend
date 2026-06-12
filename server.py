@@ -2936,6 +2936,10 @@ def _db_init_schema(conn):
             PRIMARY KEY (uid, cid)
         );
         CREATE INDEX IF NOT EXISTS idx_chats_uid_ts ON chats(uid, ts);
+        CREATE TABLE IF NOT EXISTS userconfig (
+            uid    TEXT PRIMARY KEY,
+            data   TEXT NOT NULL           -- JSON {modes:{<mode>:userConfig}, functions:[customFunction]}
+        );
         CREATE TABLE IF NOT EXISTS kv (
             k      TEXT PRIMARY KEY,        -- глобальные сторы: billing/apikeys/mcp/identity
             v      TEXT NOT NULL
@@ -3222,6 +3226,289 @@ def load_settings(uid: str) -> dict:
 
 def save_settings(uid: str, s: dict):
     _db_put_json("settings", "uid", uid, s)
+
+
+# ================================================================ пер-юзер кастомизация
+# Пользователь может настроить под-режимы (модель/токены/температура/системный
+# промпт/инструменты) и собрать «свои функции» вокруг примитивов. Это ВСЁ ходит через
+# серверный валидатор ниже — UI только ПРИСЫЛАЕТ конфиг, доверять ему нельзя. Главный
+# инвариант безопасности: пользователь НИКОГДА не может через конфиг включить dev-тулзы
+# (shell/файлы/код), поднять лимит токенов выше серверного потолка, подсунуть
+# несуществующую модель или дотянуться до owner-роутов/биллинга/ключей.
+
+# Разрешённые НЕОПАСНЫЕ инструменты (read-only / без побочных эффектов). ТОЛЬКО эти
+# может включить пользовательский конфиг. Намеренно НЕ входят: browse/webhook/reddit
+# (сеть-сайд-эффекты/ресурс) и тем более любой DEV_TOOLS. Пересечение с реальными
+# TOOLS гарантирует, что мы не «включим» несуществующий тул.
+SAFE_TOOLS = {"web_search", "super_search", "fetch_url", "wiki", "rates",
+              "calc", "now", "search_skills", "self"}
+
+# Примитивы, вокруг которых юзер собирает «свою функцию». Фиксированный список —
+# совпадает с реальными режимами чата (chat/brain/relay/council/compare/research/web/image).
+ALLOWED_FUNCTION_BASES = {"chat", "brain", "relay", "council", "compare",
+                          "research", "web", "image"}
+
+# Серверный потолок вывода. Пользовательский конфиг НИКОГДА не поднимет maxTokens выше.
+USERCFG_MAX_TOKENS = 16384
+# Допустимые имена под-режимов в userConfig (фиксированный набор — чужие ключи дропаем).
+ALLOWED_CONFIG_MODES = {"chat", "brain", "relay", "council", "compare",
+                        "research", "web", "image", "default"}
+
+
+def _clamp(v, lo, hi, default=None):
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return default
+    if v != v:                                # NaN
+        return default
+    return max(lo, min(hi, v))
+
+
+def _validate_tools(raw) -> dict:
+    """tools:{name:bool} → ТОЛЬКО включённые SAFE_TOOLS. Любой dev-тул, неизвестный
+    или небезопасный ключ молча выбрасывается (НЕ передаётся дальше)."""
+    out = {}
+    if not isinstance(raw, dict):
+        return out
+    for name, on in raw.items():
+        if name in SAFE_TOOLS and name in TOOLS and bool(on):
+            out[name] = True
+    return out
+
+
+def validate_user_config_mode(raw) -> dict:
+    """Один userConfig (для одного режима). Возвращает ОЧИЩЕННЫЙ dict — только
+    известные ключи в безопасных диапазонах. Неизвестные/запрещённые ключи дропаются."""
+    out = {}
+    if not isinstance(raw, dict):
+        return out
+    # model: только реальный id живого каталога (стрипнутый от провайдер-префикса)
+    model = raw.get("model")
+    if isinstance(model, str) and model:
+        m = strip_model_prefix(model.strip())
+        valid = _valid_model_ids()
+        # если каталог ещё не загружен (valid пуст) — модель не пропускаем (fail-closed)
+        if m and m in valid:
+            out["model"] = m
+    # maxTokens: целое 1..потолок (кап, никогда выше)
+    mt = raw.get("maxTokens")
+    if mt is not None:
+        c = _clamp(mt, 1, USERCFG_MAX_TOKENS, None)
+        if c is not None:
+            out["maxTokens"] = int(c)
+    # temperature: 0..1.5
+    temp = raw.get("temperature")
+    if temp is not None:
+        c = _clamp(temp, 0.0, 1.5, None)
+        if c is not None:
+            out["temperature"] = round(c, 3)
+    # systemPrompt: строка, ограничим длину, прогоним через scrub_identity
+    sp = raw.get("systemPrompt")
+    if isinstance(sp, str) and sp.strip():
+        out["systemPrompt"] = scrub_identity(sp.strip())[:4000]
+    # tools: только SAFE_TOOLS
+    tools = _validate_tools(raw.get("tools"))
+    if tools:
+        out["tools"] = tools
+    return out
+
+
+def _validate_function_params(base: str, raw) -> dict:
+    """params под примитив. Жёсткие диапазоны — модели 2..5, итерации 1..3,
+    глубина 2..8. Чужие ключи дропаем."""
+    out = {}
+    if not isinstance(raw, dict):
+        return out
+    valid = _valid_model_ids()
+    for key in ("models", "compareModels"):
+        lst = raw.get(key)
+        if isinstance(lst, list):
+            clean = []
+            for mid in lst:
+                if isinstance(mid, str):
+                    m = strip_model_prefix(mid.strip())
+                    if m and m in valid and m not in clean:
+                        clean.append(m)
+                if len(clean) >= 5:
+                    break
+            if len(clean) >= 2:
+                out[key] = clean[:5]
+    if "depth" in raw:
+        c = _clamp(raw.get("depth"), 2, 8, None)
+        if c is not None:
+            out["depth"] = int(c)
+    if "iterations" in raw:
+        c = _clamp(raw.get("iterations"), 1, 3, None)
+        if c is not None:
+            out["iterations"] = int(c)
+    if "n" in raw:
+        c = _clamp(raw.get("n"), 2, 5, None)
+        if c is not None:
+            out["n"] = int(c)
+    return out
+
+
+def validate_custom_function(raw) -> dict:
+    """Одна customFunction. Возвращает очищенный dict или None если невалидна
+    (нет имени / base не из белого списка)."""
+    if not isinstance(raw, dict):
+        return None
+    base = raw.get("base")
+    if not isinstance(base, str) or base not in ALLOWED_FUNCTION_BASES:
+        return None
+    name = raw.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return None
+    fid = raw.get("id")
+    if not isinstance(fid, str) or not fid.strip():
+        fid = "fn-" + secrets.token_hex(4)
+    icon = raw.get("icon")
+    icon = icon.strip()[:8] if isinstance(icon, str) and icon.strip() else "✨"
+    out = {
+        "id": fid.strip()[:64],
+        "name": name.strip()[:60],
+        "icon": icon,
+        "base": base,
+        "params": _validate_function_params(base, raw.get("params")),
+    }
+    cfg = validate_user_config_mode(raw.get("config"))
+    if cfg:
+        out["config"] = cfg
+    return out
+
+
+def validate_user_config(raw) -> dict:
+    """Полный конфиг юзера {modes:{...}, functions:[...]}. Серверный страж — всё
+    проходит через под-валидаторы. Возвращает безопасный, готовый к хранению dict."""
+    out = {"modes": {}, "functions": []}
+    if not isinstance(raw, dict):
+        return out
+    modes = raw.get("modes")
+    if isinstance(modes, dict):
+        for mode, cfg in modes.items():
+            if mode in ALLOWED_CONFIG_MODES:
+                clean = validate_user_config_mode(cfg)
+                if clean:
+                    out["modes"][mode] = clean
+    funcs = raw.get("functions")
+    if isinstance(funcs, list):
+        for f in funcs[:40]:                  # верхний предел числа функций
+            cf = validate_custom_function(f)
+            if cf:
+                out["functions"].append(cf)
+    return out
+
+
+def load_user_config(uid: str) -> dict:
+    v = _db_get_json("userconfig", "uid", uid, None)
+    if not isinstance(v, dict):
+        return {"modes": {}, "functions": []}
+    v.setdefault("modes", {})
+    v.setdefault("functions", [])
+    return v
+
+
+def save_user_config(uid: str, cfg: dict):
+    # ВСЕГДА валидируем перед записью — в БД попадает только очищенный конфиг.
+    _db_put_json("userconfig", "uid", uid, validate_user_config(cfg))
+
+
+def apply_user_config(uid: str, mode: str, model, max_tokens, system, agent_tools):
+    """Мержим сохранённый пер-режим конфиг юзера поверх запроса. Возвращает
+    (model, max_tokens, system, agent_tools). Каждое поле РЕ-валидируется здесь —
+    клиентскому блобу не доверяем, читаем только из нашего стора.
+
+    · model       — оверрайд, но только реальный id каталога (иначе игнор)
+    · max_tokens  — КАП на серверном потолке (никогда не поднимаем)
+    · system      — systemPrompt ПРЕПЕНДим (после scrub_identity, уже в сторе)
+    · tools       — пересекаем с SAFE_TOOLS (dev-тулзы недостижимы)
+    """
+    try:
+        cfg = load_user_config(uid)
+    except Exception:
+        return model, max_tokens, system, agent_tools
+    mc = (cfg.get("modes") or {}).get(mode) or (cfg.get("modes") or {}).get("default")
+    if not isinstance(mc, dict):
+        return model, max_tokens, system, agent_tools
+    mc = validate_user_config_mode(mc)        # ре-валидация (defense-in-depth)
+    if mc.get("model"):
+        model = mc["model"]
+    if mc.get("maxTokens"):
+        # кап: пользователь может только ПОНИЗИТЬ относительно серверного потолка
+        max_tokens = min(int(mc["maxTokens"]), USERCFG_MAX_TOKENS)
+    if mc.get("systemPrompt"):
+        system = mc["systemPrompt"] + "\n\n" + system     # PREPEND
+    # инструменты: добавляем ТОЛЬКО SAFE_TOOLS ∩ конфиг (никогда DEV_TOOLS)
+    if isinstance(agent_tools, dict) and mc.get("tools"):
+        for name in mc["tools"]:
+            if name in SAFE_TOOLS and name in TOOLS:
+                agent_tools[name] = TOOLS[name]
+    return model, max_tokens, system, agent_tools
+
+
+_BUILD_FN_SYS = (
+    "Ты конструктор «своих функций» для чат-приложения. По описанию на русском собери "
+    "ОДНУ функцию строго как JSON-объект и НИЧЕГО больше — ни пояснений, ни форматирования.\n"
+    "Поля:\n"
+    '  "name"  — короткое название (до 60 символов)\n'
+    '  "icon"  — один эмодзи\n'
+    '  "base"  — РОВНО один из: chat, brain, relay, council, compare, research, web, image\n'
+    '  "params" — объект, ТОЛЬКО эти ключи и диапазоны:\n'
+    '       "models": [2..5 id моделей]  (для council/compare)\n'
+    '       "compareModels": [2..5 id]   (для compare)\n'
+    '       "depth": 2..8                (для research)\n'
+    '       "iterations": 1..3\n'
+    '       "n": 2..5                    (сколько моделей)\n'
+    '  "config" — объект (необязательно): {"temperature":0..1.5, "maxTokens":1..16384, '
+    '"systemPrompt":"...", "tools":{"web_search":true,...}}\n'
+    "Инструменты в tools допустимы ТОЛЬКО из набора: web_search, super_search, fetch_url, "
+    "wiki, rates, calc, now, search_skills, self. Никаких других.\n"
+    "base подбирай по смыслу: «сравни модели»→compare, «совет/консилиум»→council, "
+    "«глубокий ресёрч»→research, «поиск в сети»→web, «картинка»→image, «через умную модель»→relay, "
+    "«дешёвый ведущий + умный эксперт»→brain, иначе chat.\n"
+    "Верни ТОЛЬКО валидный JSON-объект."
+)
+
+
+def build_function_from_nl(description: str) -> dict:
+    """NL-описание → customFunction через дешёвую модель, затем ОБЯЗАТЕЛЬНО через
+    серверный валидатор. Возвращает очищенный dict или None. Никогда не возвращает
+    невалидированный конфиг."""
+    description = (description or "").strip()
+    if not description:
+        return None
+    catalog_hint = ", ".join(sorted(_valid_model_ids())[:40]) or "(каталог пуст)"
+    raw = venice_complete(aux_model("craft"), [
+        {"role": "system", "content": _BUILD_FN_SYS},
+        {"role": "system", "content": "Доступные id моделей (выбирай ТОЛЬКО отсюда): " + catalog_hint},
+        {"role": "user", "content": description[:1200]},
+    ], max_tokens=500)
+    obj = _extract_json_object(raw)
+    if obj is None:
+        return None
+    # тот же валидатор, что и для сохранения — НИКОГДА не отдаём непровалидированное
+    return validate_custom_function(obj)
+
+
+def _extract_json_object(raw: str):
+    """Достаёт первый JSON-объект из ответа модели (терпимо к обёрткам/фенсам)."""
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    try:
+        v = json.loads(raw)
+        return v if isinstance(v, dict) else None
+    except Exception:
+        pass
+    m = re.search(r"\{[\s\S]*\}", raw)
+    if not m:
+        return None
+    try:
+        v = json.loads(m.group(0))
+        return v if isinstance(v, dict) else None
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------- биллинг (реселлинг)
@@ -4882,6 +5169,13 @@ class Handler(BaseHTTPRequestHandler):
                 "settings": load_settings(uid),
                 "memory": load_memory(uid),
             })
+        elif path == "/api/userconfig":
+            uid = (self._qs().get("user") or ["default"])[0]
+            # отдаём уже валидированный конфиг + контракт-справку для UI
+            self._json({"config": load_user_config(uid),
+                        "safe_tools": sorted(SAFE_TOOLS),
+                        "bases": sorted(ALLOWED_FUNCTION_BASES),
+                        "max_tokens": USERCFG_MAX_TOKENS})
         elif path == "/api/identity":
             self._json({"persona": _identity_custom(), "default": DEFAULT_IDENTITY,
                         "name": ASSISTANT_NAME})
@@ -4934,6 +5228,21 @@ class Handler(BaseHTTPRequestHandler):
             c = self._body()
             save_settings(c.get("user", "default"), c.get("settings") or {})
             self._json({"ok": True})
+        elif path == "/api/userconfig":
+            c = self._body()
+            uid = c.get("user", "default")
+            # ВАЛИДИРУЕМ перед сохранением — в БД ложится только очищенный конфиг.
+            clean = validate_user_config(c.get("config") or {})
+            save_user_config(uid, clean)
+            # отдаём именно сохранённую (очищенную) версию — UI видит, что прошло
+            self._json({"ok": True, "config": load_user_config(uid)})
+        elif path == "/api/build_function":
+            c = self._body()
+            fn = build_function_from_nl(c.get("description") or "")
+            if not fn:
+                self._json({"error": "не удалось собрать функцию по описанию"}, 422)
+            else:
+                self._json({"ok": True, "function": fn})
         elif path == "/api/save":
             c = self._body()
             uid = c.get("user", "default")
@@ -5794,6 +6103,22 @@ class Handler(BaseHTTPRequestHandler):
                 system += mprompt
         else:
             active_tools = {}
+
+        # 🔐 пер-юзер кастомизация: мержим сохранённый конфиг для текущего режима.
+        # Серверный страж — model только из каталога, maxTokens КАП на потолке,
+        # systemPrompt препенд (после scrub), tools ⊂ SAFE_TOOLS. Dev-тулзы недостижимы:
+        # apply_user_config никогда не добавляет DEV_TOOLS, а dev-ветка выше гейтится
+        # is_owner. Применяем только когда агент-режим (иначе tools не задействуются).
+        cfg_mode = "brain" if req.get("brain") else ("web" if agent else "chat")
+        model, max_tokens, system, active_tools = apply_user_config(
+            uid, cfg_mode, model, max_tokens, system, active_tools)
+        # конфиг мог сменить модель — повторяем защиты: vision + потолок токенов
+        if has_images and not vision_ok(model):
+            model = DEFAULTS["cheap"]
+        if is_reasoning(model):
+            max_tokens = max(max_tokens, 3000)
+        max_tokens = min(max_tokens, USERCFG_MAX_TOKENS)
+
         base_system = system          # чистый системный промпт — для эксперта (без брейн-обёртки)
 
         billing = load_billing()
