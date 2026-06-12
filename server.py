@@ -4636,11 +4636,18 @@ if _aiml_key():
     # но задача висит «QUEUED» вечно (нет денег на обработку) → юзер тупит у вечной очереди.
     # Поэтому при $0 ПРЯЧЕМ NanoGPT-видео целиком, оставляя только funded AIMLAPI.
     # Вернутся сами, если кошелёк пополнить (баланс-проверка при старте).
-    try:
-        _nano_usd = _nano_balance().get("usd")
-    except Exception:
-        _nano_usd = None
-    NANO_VIDEO_FUNDED = not (isinstance(_nano_usd, (int, float)) and _nano_usd <= 0)
+    # баланс при старте бывает флапает (таймаут среди прочих каталог-вызовов). Поэтому
+    # показываем NanoGPT-видео ТОЛЬКО при ПОДТВЕРЖДЁННОМ балансе > 0. Неизвестно/0 → прячем
+    # (иначе юзер утыкается в вечную очередь). Пара попыток, чтобы не прятать зря при флапе.
+    _nano_usd = None
+    for _try in range(2):
+        try:
+            _nano_usd = _nano_balance().get("usd")
+        except Exception:
+            _nano_usd = None
+        if isinstance(_nano_usd, (int, float)):
+            break
+    NANO_VIDEO_FUNDED = isinstance(_nano_usd, (int, float)) and _nano_usd > 0
     if NANO_VIDEO_FUNDED:
         VIDEO_MODELS = sorted(
             AIML_VIDEO + VIDEO_MODELS,
