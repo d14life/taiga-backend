@@ -10286,17 +10286,14 @@ class Handler(BaseHTTPRequestHandler):
             synth_model = good[0][0]["id"]
             skey, sbyok, skerr = resolve_key(uid, synth_model)
 
-        if beam:
-            self._sse({"type": "research_step", "stage": "write",
-                       "text": "Сверяю ответы и сплавляю в один выверенный…"})
-            synth_sys = taiga_identity() + "\n\n" + BEAM_FUSION_PROMPT
-            synth_ask = "Дай один сплавленный, выверенный ответ."
-        else:
-            self._sse({"type": "research_step", "stage": "write", "text": "Свожу мнения совета в один ответ…"})
-            synth_sys = (taiga_identity() + "\n\nТебе дали ответы нескольких ИИ-советников на ОДИН вопрос. "
-                         "Сравни их, возьми лучшее, отбрось ошибочное и противоречивое, и дай ОДИН связный "
-                         "лучший ответ пользователю на его языке. Не упоминай «советников», модели и этот процесс.")
-            synth_ask = "Дай лучший единый ответ."
+        # СЛИЯНИЕ = СОВЕТ (Damir 2026-06): оба = веер N моделей → синтез; разницы в механике нет,
+        # только в промте синтеза. Поэтому ВСЕГДА синтезируем фьюжн-критиком (строго лучше: сверяет
+        # ответы, берёт согласованное, отбрасывает то, что выдумала лишь одна модель). beam-флаг
+        # сохранён для обратной совместимости фронта, но поведение теперь единое.
+        self._sse({"type": "research_step", "stage": "write",
+                   "text": "Сверяю ответы и сплавляю в один выверенный…"})
+        synth_sys = taiga_identity() + "\n\n" + BEAM_FUSION_PROMPT
+        synth_ask = "Дай один сплавленный, выверенный ответ."
         if cfg_system_prefix:
             synth_sys = cfg_system_prefix + "\n\n" + synth_sys
         panel = "\n\n".join(f"[Ответ {i+1}]\n{t}" for i, (r, t, ti, to) in enumerate(good))[:16000]
