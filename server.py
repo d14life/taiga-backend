@@ -3208,6 +3208,52 @@ def best_n_for_task(task: str, n: int = 2, tier: str = None) -> list:
     return uniq or [_first_live("smart")]
 
 
+def _model_family(model_id: str, name: str = "") -> str:
+    """Семейство (бренд+линейка) для L23b прокси-деградации: при превышении бюджета шагаем на
+    БЛИЖАЙШУЮ модель ТОГО ЖЕ семейства (opus 4.8→4.7), а не на чужую — выбор юзера не затираем.
+    Линейки бренда — РАЗНЫЕ семейства (opus≠sonnet, gemini-pro≠flash, deepseek-r≠v): разный характер.
+    '' = семейство не распознано (тогда шаг внутри семейства невозможен → только авто-резерв/пометка)."""
+    s = ((model_id or "") + " " + (name or "")).lower()
+
+    def has(*xs):
+        return any(x in s for x in xs)
+
+    if has("opus"): return "claude-opus"
+    if has("sonnet"): return "claude-sonnet"
+    if has("haiku"): return "claude-haiku"
+    if has("claude"): return "claude"
+    if has("gpt-oss"): return "gpt-oss"
+    if has("gpt", "chatgpt", "o1-", "o3-", "o4-"): return "gpt"
+    if has("grok"): return "grok"
+    if has("gemma"): return "gemma"
+    if has("gemini"):
+        if has("flash"): return "gemini-flash"
+        if has("pro"): return "gemini-pro"
+        return "gemini"
+    if has("deepseek"):
+        return "deepseek-r" if has("-r1", "-r2", " r1", "reason") else "deepseek-v"
+    if has("kimi", "moonshot"): return "kimi"
+    if has("minimax"): return "minimax"
+    if has("qwen"):
+        if has("coder"): return "qwen-coder"
+        if has("-vl", " vl"): return "qwen-vl"
+        return "qwen"
+    if has("glm"): return "glm"
+    if has("llama"): return "llama"
+    if has("mistral", "mixtral", "magistral", "codestral", "ministral"): return "mistral"
+    if has("command"): return "command"
+    if has("hermes"): return "hermes"
+    if has("nemotron"): return "nemotron"
+    if has("hunyuan"): return "hunyuan"
+    if has("ernie"): return "ernie"
+    if has("qwq"): return "qwq"
+    if has("yi-", "yi "): return "yi"
+    if has("step-"): return "step"
+    if has("trinity"): return "trinity"
+    if has("arcee"): return "arcee"
+    return ""
+
+
 # Маркеры «трудного» запроса для авто-Мозга: вопросы/просьбы, где одна средняя модель
 # часто галлюцинирует или отвечает слабо (факты, код, рассуждения, многошаговость, точность).
 _HARD_HINTS = re.compile(
@@ -11069,6 +11115,7 @@ class Handler(BaseHTTPRequestHandler):
         # run_id адресует стрим для ручки /api/agent_permit. Берём клиентский, иначе генерим.
         run_id = str(req.get("run_id") or "").strip() or ("run_" + secrets.token_hex(8))
         max_tokens = int(req.get("max_tokens") or 2048)
+        _base_max_tokens = max_tokens     # L23b: сырой потолок выхода ДО reasoning-флора (для деградации глубины)
         system = taiga_identity() + "\n\n" + str(req.get("system") or DEFAULT_SYSTEM)
         # НАТИВНЫЙ дайл размышления (фича «Глубоко»): low/medium/high из запроса, либо deep→high.
         # В провайдер уходит ТОЛЬКО думающим моделям (model_reasons) и ТОЛЬКО как reasoning_effort.
@@ -11213,39 +11260,116 @@ class Handler(BaseHTTPRequestHandler):
         owner = is_owner(uid)
         key, byok, kerr = resolve_key(uid, model)        # ключ выбранной модели (в брейне — эксперт)
 
-        # 💸 GRACEFUL COST DEGRADATION (L23): дорогой запрос НЕ режем и НЕ блокируем — на «Авто» роутимся
-        # на сильнейшую модель ПОД ЗАДАЧУ, что влезает в бюджет (req.max_spend), и отвечаем ПОЛНОСТЬЮ
-        # (авто-продолжение в venice_stream добьёт длину). Честно сообщаем подменой. Трогаем ТОЛЬКО
-        # биллинг-юзера на «Авто» без спец-режима — явный выбор модели, владельца и BYOK не трогаем.
+        # 💸 GRACEFUL COST DEGRADATION (L23b): дорогой запрос НЕ режем и НЕ блокируем. ЛЕСТНИЦА
+        # МИНИМАЛЬНОГО УЩЕРБА — выбор юзера затираем как можно меньше:
+        #   1) СНАЧАЛА ниже ГЛУБИНА на ТОЙ ЖЕ модели (high→medium→low→off): меньше reasoning-токенов →
+        #      дешевле, а модель юзера остаётся прежней.
+        #   2) не хватило — шаг на БЛИЖАЙШУЮ модель ТОГО ЖЕ семейства (opus 4.8→4.7): самый близкий по
+        #      уму вариант, что влезает в бюджет (макс bench среди влезающих = минимальный шаг вниз).
+        #   3) последний резерв и ТОЛЬКО для авто-выбора (не явный выбор юзера): ближайшая по уму
+        #      модель в бюджете из ДРУГОГО семейства.
+        #   4) ничего не влезло — отвечаем ВЫБРАННОЙ моделью ПОЛНОСТЬЮ + честная пометка «дороже лимита».
+        # venice_stream добьёт длину (без обрезки). Трогаем только биллинг-юзера (не owner/BYOK/спец-режим/
+        # картинки/голос). Явный выбор юзера деградируем ТОЛЬКО внутри его семейства (шаги 1-2, без чужих).
         budget_note = ""
         try:
             _ms = float(req.get("max_spend") or 0)
         except (TypeError, ValueError):
             _ms = 0.0
-        if (_ms > 0 and not owner and not byok and not explicit_model and not _in_special_mode
+        if (_ms > 0 and not owner and not byok and not _in_special_mode
                 and not has_images and model_kind(model) not in ("image", "voice")):
             _in_tok = sum(len(str(m.get("content") or "")) for m in raw_messages) / 3.0  # ~токены входа
-            def _est_usd(mid):
+            _eff_rank = {"high": 0, "medium": 1, "low": 2, None: 3}
+            _o_rank = _eff_rank.get(req_reasoning_effort, 1)
+            # цепочка усилий НА УРОВНЕ ИЛИ НИЖЕ текущего — глубину только понижаем, не повышаем
+            _eff_chain = [e for e in ("high", "medium", "low", None) if _eff_rank[e] >= _o_rank]
+
+            def _est_usd(mid, mt):
                 pr = PRICE.get(mid)
                 if not pr:
                     return None
-                return (_in_tok * (pr[0] or 0) + max_tokens * (pr[1] or 0)) / 1e6  # вход + потолок выхода
-            _cur_est = _est_usd(model)
-            if _cur_est is not None and _cur_est > _ms:
-                _btask = detect_task(raw_messages, has_images)
-                _fits = [r for r in RICH
-                         if r.get("kind") in ("allround", "thinking", "code", "mid", "chat")
-                         and not is_phantom(r.get("id", ""))
-                         and (_est_usd(r.get("id", "")) is not None)
-                         and _est_usd(r.get("id", "")) <= _ms]
-                if _fits:
-                    _best = max(_fits, key=lambda r: bench(r.get("id", ""), _btask))
-                    if _best.get("id") and _best["id"] != model:
-                        _nk, _nbyok, _nkerr = resolve_key(uid, _best["id"])
-                        if _nk and not _nkerr:               # подменяем ТОЛЬКО на модель с живым ключом
-                            model, key, byok, kerr = _best["id"], _nk, _nbyok, _nkerr
-                            budget_note = (f"большой запрос — отвечаю моделью «{_best.get('name') or model}» "
+                return (_in_tok * (pr[0] or 0) + mt * (pr[1] or 0)) / 1e6     # вход + потолок выхода
+
+            def _mt_for(mid, eff):
+                return min(max(_base_max_tokens, reasoning_token_floor(mid, eff)), USERCFG_MAX_TOKENS)
+
+            def _fit(mid):
+                """Самое ВЫСОКОЕ усилие ≤ исходного, при котором mid влезает в бюджет → (eff, mt); иначе None."""
+                for e in _eff_chain:
+                    mt = _mt_for(mid, e)
+                    est = _est_usd(mid, mt)
+                    if est is not None and est <= _ms:
+                        return e, mt
+                return None
+
+            if (_est_usd(model, max_tokens) or 0) > _ms:
+                # ── шаг 1: понизить глубину на ТОЙ ЖЕ модели (модель юзера не трогаем)
+                _s1 = _fit(model)
+                if _s1:
+                    req_reasoning_effort, max_tokens = _s1
+                    budget_note = (f"большой запрос — снизил глубину размышления под бюджет "
+                                   f"(~${_ms:g}); модель оставил прежней")
+                else:
+                    # ── шаги 2/3: ближайшая модель (своё семейство → потом, только для авто, чужое)
+                    _btask = detect_task(raw_messages, has_images)
+                    _cur_name = next((r.get("name", "") for r in RICH if r.get("id") == model), "")
+                    _curfam = _model_family(model, _cur_name)
+                    _curb = bench(model, _btask)
+
+                    def _scan(same_family):
+                        out = []
+                        for r in RICH:
+                            mid = r.get("id", "")
+                            if not mid or mid == model:
+                                continue
+                            if r.get("kind") not in ("allround", "thinking", "code", "mid", "chat", "vision"):
+                                continue
+                            if is_phantom(mid):
+                                continue
+                            if has_images and not vision_ok(mid):
+                                continue
+                            if same_family and _model_family(mid, r.get("name", "")) != _curfam:
+                                continue
+                            f = _fit(mid)
+                            if not f:
+                                continue
+                            b = bench(mid, _btask)
+                            if _curb >= 0 and b > _curb:        # деградация = НЕ сильнее текущей
+                                continue
+                            # близость: ВНУТРИ семейства — самый ДОРОГОЙ из влезающих в бюджет
+                            # (= ближайший вниз: opus 4.7, а не 4.6 — цена надёжнее версии-строки);
+                            # МЕЖДУ семействами — самый УМНЫЙ из влезающих. При равенстве — глубже.
+                            if same_family:
+                                _key = (model_per1k(mid) or 0.0, b, -_eff_rank[f[0]])
+                            else:
+                                _key = (b, -_eff_rank[f[0]], 0.0)
+                            out.append((_key, mid, r, f))
+                        out.sort(key=lambda t: t[0], reverse=True)
+                        return out
+
+                    # своё семейство (даже у явного выбора); чужое — только если модель выбрал авто
+                    _pool = _scan(True) or ([] if explicit_model else _scan(False))
+                    _chosen = None
+                    for _key, _mid, _r, _f in _pool:
+                        _nk, _nbyok, _nkerr = resolve_key(uid, _mid)
+                        if _nk and not _nkerr:                  # только модель с ЖИВЫМ ключом
+                            _chosen = (_mid, _r, _f, _nk, _nbyok, _nkerr)
+                            break
+                    if _chosen:
+                        _mid, _r, (_eff, _mt), _nk, _nbyok, _nkerr = _chosen
+                        _samefam = _model_family(_mid, _r.get("name", "")) == _curfam
+                        model, key, byok, kerr = _mid, _nk, _nbyok, _nkerr
+                        req_reasoning_effort, max_tokens = _eff, _mt
+                        if _samefam:
+                            budget_note = (f"большой запрос — взял ближайшую модель того же семейства "
+                                           f"«{_r.get('name') or _mid}» под бюджет (~${_ms:g})")
+                        else:
+                            budget_note = (f"большой запрос — отвечаю моделью «{_r.get('name') or _mid}» "
                                            f"в рамках бюджета (~${_ms:g})")
+                    else:
+                        # ничего не влезло — отвечаем ВЫБРАННОЙ моделью, но честно предупреждаем
+                        budget_note = (f"этот запрос дороже твоего лимита (~${_ms:g}) — отвечаю выбранной "
+                                       f"моделью полностью; следи за расходом")
 
         # 🧠 МОЗГ: дешёвый ведущий триажит → умный эксперт отвечает на сложное.
         # Включается явным флагом brain ЛИБО авто-Мозгом (трудный запрос на «__auto__»).
