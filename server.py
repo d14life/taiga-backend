@@ -1356,6 +1356,25 @@ BRAIN_PROMPT = """\
 Никогда не показывай пользователю слова «эксперт», «инструмент», JSON и этот протокол."""
 
 
+# BEAM-FUSION: тот же веер моделей, что и у «совета», но синтезатор работает как
+# ФЬЮЖН-критик (паттерн big-AGI Beam). Он не просто «выбирает лучшее», а перекрёстно
+# сверяет ответы: где модели СОГЛАСНЫ — это высокая уверенность; где ПРОТИВОРЕЧАТ —
+# выбирает наиболее обоснованное; что выдумала лишь одна модель (галлюцинация) —
+# отбрасывает. Итог: один высоконадёжный ответ со «сплавленным» рассуждением.
+BEAM_FUSION_PROMPT = (
+    "Тебе дали НЕЗАВИСИМЫЕ ответы нескольких ИИ на ОДИН и тот же вопрос. "
+    "Твоя задача — СПЛАВИТЬ их в один максимально надёжный ответ, действуя как критик-верификатор:\n"
+    "1) Где ответы СОГЛАСНЫ между собой — считай это высокой уверенностью и бери в основу.\n"
+    "2) Где ответы ПРОТИВОРЕЧАТ — не усредняй: выбери версию, которая лучше всего обоснована "
+    "логикой и фактами, а слабые/ошибочные варианты отбрось.\n"
+    "3) Факт или утверждение, которое привёл ТОЛЬКО ОДИН ответ и которое не подтверждается "
+    "остальными и выглядит сомнительно — считай вероятной галлюцинацией и НЕ включай.\n"
+    "4) Собери из проверенного один связный, точный ответ пользователю на его языке.\n"
+    "Не упоминай эти ответы, «модели», «советников», голосование или этот процесс сверки — "
+    "пиши так, будто это твой собственный единый выверенный ответ."
+)
+
+
 # ---------------------------------------------------------------- ключи и безопасность
 
 RESALE_FORBIDDEN = set()   # в системе только комиссия-провайдеры; BYOK остаётся опцией для любого
@@ -1828,12 +1847,20 @@ def nano_sub_status() -> dict:
                 headers={"x-api-key": k, "Authorization": f"Bearer {k}"}, method="GET")
             d = json.load(urllib.request.urlopen(req, timeout=12))
             di = d.get("dailyImages") or {}
+            wt = d.get("weeklyInputTokens") or {}
+            lim = d.get("limits") or {}
             res = {
                 "active": bool(d.get("active")),
                 "img_used": di.get("used"),
                 "img_remaining": di.get("remaining"),
-                "img_limit": (d.get("limits") or {}).get("dailyImages"),
+                "img_limit": lim.get("dailyImages"),
                 "period_end": (d.get("period") or {}).get("currentPeriodEnd"),
+                # недельный лимит входных токенов (60М) — для sub-meters
+                "weeklyInputTokens": {
+                    "used": wt.get("used"),
+                    "remaining": wt.get("remaining"),
+                    "limit": lim.get("weeklyInputTokens") or wt.get("limit"),
+                },
             }
         except Exception:
             res = {"active": False}
@@ -4805,13 +4832,13 @@ SAFE_TOOLS = {"web_search", "super_search", "fetch_url", "wiki", "rates",
 
 # Примитивы, вокруг которых юзер собирает «свою функцию». Фиксированный список —
 # совпадает с реальными режимами чата (chat/brain/relay/council/compare/research/web/image).
-ALLOWED_FUNCTION_BASES = {"chat", "brain", "relay", "council", "compare",
+ALLOWED_FUNCTION_BASES = {"chat", "brain", "relay", "council", "compare", "beam",
                           "research", "web", "image"}
 
 # Серверный потолок вывода. Пользовательский конфиг НИКОГДА не поднимет maxTokens выше.
 USERCFG_MAX_TOKENS = 16384
 # Допустимые имена под-режимов в userConfig (фиксированный набор — чужие ключи дропаем).
-ALLOWED_CONFIG_MODES = {"chat", "brain", "relay", "council", "compare",
+ALLOWED_CONFIG_MODES = {"chat", "brain", "relay", "council", "compare", "beam",
                         "research", "web", "image", "default"}
 
 
@@ -6833,7 +6860,9 @@ class Handler(BaseHTTPRequestHandler):
         action = str(c.get("action") or "list")
         import scheduler
         if action == "add":
-            return self._json(scheduler.add_job(uid, c.get("task", ""), c.get("interval_sec", 3600), c.get("workers")))
+            return self._json(scheduler.add_job(
+                uid, c.get("task", ""), c.get("interval_sec", 3600), c.get("workers"),
+                kind=c.get("kind"), at_time=c.get("at_time"), weekdays=c.get("weekdays")))
         if action == "delete":
             return self._json({"jobs": scheduler.delete_job(uid, str(c.get("id", "")))})
         if action == "toggle":
@@ -7807,7 +7836,10 @@ class Handler(BaseHTTPRequestHandler):
         self._sse({"type": "done"})
 
     # --- 👥 СОВЕТ: N топ-моделей думают параллельно → синтезатор сводит лучший ответ ---
-    def chat_council(self, req):
+    def chat_council(self, req, beam=False):
+        # beam=True → BEAM-FUSION: тот же веер моделей + параллельный фан-аут, но синтез
+        # идёт ФЬЮЖН-промптом (перекрёстная сверка/дегаллюцинация), а не обычным «своди».
+        # Вся машинерия (валидация моделей, фан-аут, SSE-события, биллинг) переиспользуется.
         uid = req.get("user", "default")
         raw_messages = list(req.get("messages") or [])
         n = max(2, min(int(req.get("n") or 3), 5))
@@ -7817,19 +7849,21 @@ class Handler(BaseHTTPRequestHandler):
             synth_model = ""
         question = next((m.get("content") or "" for m in reversed(raw_messages)
                          if m.get("role") == "user"), "")
+        # пер-режим конфиг берём под именем режима: для beam — свой конфиг, иначе council.
+        cfg_mode = "beam" if beam else "council"
 
-        # 🔐 пер-режим конфиг юзера (council): оверрайд модели-СИНТЕЗАТОРА / maxTokens-капа /
+        # 🔐 пер-режим конфиг юзера (council/beam): оверрайд модели-СИНТЕЗАТОРА / maxTokens-капа /
         # системного промпта (препендится к промптам советников и синтезатора). Та же валидация.
         # Сентинель _NO_MODEL: apply_user_config меняет модель ТОЛЬКО если в конфиге задан
         # реальный id каталога; иначе вернёт сентинель и synth_model останется "" (лучший советник).
         _NO_MODEL = "\x00nomodel\x00"
         cfg_synth, max_tokens, _cfg_sys, _ = apply_user_config(
-            uid, "council", _NO_MODEL, max_tokens, "", {})
+            uid, cfg_mode, _NO_MODEL, max_tokens, "", {})
         if cfg_synth != _NO_MODEL:
             synth_model = cfg_synth               # конфиг явно задал валидного синтезатора
         cfg_system_prefix = _cfg_sys.strip()
         max_tokens = max(min(max_tokens, USERCFG_MAX_TOKENS), 1500)
-        temperature = user_config_temperature(uid, "council", req.get("temperature"))
+        temperature = user_config_temperature(uid, cfg_mode, req.get("temperature"))
 
         billing = load_billing()
         owner = is_owner(uid)
@@ -7845,7 +7879,7 @@ class Handler(BaseHTTPRequestHandler):
         if not owner and not rate_ok(uid, billing.get("rate_per_min", 20)):
             self._sse({"type": "error", "message": "Слишком часто — подожди минуту."}); return
         if abuse_check(question):
-            log_abuse(uid, "council")
+            log_abuse(uid, cfg_mode)
             self._sse({"type": "error", "message": "Запрос нарушает правила (запрещено у всех провайдеров)."}); return
         bill = billing["enabled"] and not owner
         if bill and user_balance(uid).get("balance", 0) <= 0:
@@ -7877,6 +7911,7 @@ class Handler(BaseHTTPRequestHandler):
         if not members:
             self._sse({"type": "error", "message": "Нет доступных моделей для совета."}); return
         self._sse({"type": "council_plan",
+                   "mode": "beam" if beam else "council",
                    "members": [strip_model_prefix(r["id"]).split("/")[-1] for r in members]})
 
         member_sys = taiga_identity() + "\n\nОтветь на вопрос по существу, точно и без воды."
@@ -7917,15 +7952,22 @@ class Handler(BaseHTTPRequestHandler):
             synth_model = good[0][0]["id"]
             skey, sbyok, skerr = resolve_key(uid, synth_model)
 
-        self._sse({"type": "research_step", "stage": "write", "text": "Свожу мнения совета в один ответ…"})
-        synth_sys = (taiga_identity() + "\n\nТебе дали ответы нескольких ИИ-советников на ОДИН вопрос. "
-                     "Сравни их, возьми лучшее, отбрось ошибочное и противоречивое, и дай ОДИН связный "
-                     "лучший ответ пользователю на его языке. Не упоминай «советников», модели и этот процесс.")
+        if beam:
+            self._sse({"type": "research_step", "stage": "write",
+                       "text": "Сверяю ответы и сплавляю в один выверенный…"})
+            synth_sys = taiga_identity() + "\n\n" + BEAM_FUSION_PROMPT
+            synth_ask = "Дай один сплавленный, выверенный ответ."
+        else:
+            self._sse({"type": "research_step", "stage": "write", "text": "Свожу мнения совета в один ответ…"})
+            synth_sys = (taiga_identity() + "\n\nТебе дали ответы нескольких ИИ-советников на ОДИН вопрос. "
+                         "Сравни их, возьми лучшее, отбрось ошибочное и противоречивое, и дай ОДИН связный "
+                         "лучший ответ пользователю на его языке. Не упоминай «советников», модели и этот процесс.")
+            synth_ask = "Дай лучший единый ответ."
         if cfg_system_prefix:
             synth_sys = cfg_system_prefix + "\n\n" + synth_sys
-        panel = "\n\n".join(f"[Советник {i+1}]\n{t}" for i, (r, t, ti, to) in enumerate(good))[:16000]
+        panel = "\n\n".join(f"[Ответ {i+1}]\n{t}" for i, (r, t, ti, to) in enumerate(good))[:16000]
         synth_msgs = [{"role": "system", "content": synth_sys},
-                      {"role": "user", "content": f"Вопрос: {question}\n\n{panel}\n\nДай лучший единый ответ."}]
+                      {"role": "user", "content": f"Вопрос: {question}\n\n{panel}\n\n{synth_ask}"}]
         self._sse({"type": "meta", "model": synth_model})
         ru, out_total = {}, ""
         try:
@@ -8072,6 +8114,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.chat_research(req)
         if req.get("compare"):
             return self.chat_compare(req)
+        if req.get("beam"):
+            # BEAM-FUSION: тот же фан-аут совета, но синтез — ФЬЮЖН-критик (дегаллюцинация).
+            return self.chat_council(req, beam=True)
         if req.get("council"):
             return self.chat_council(req)
         uid = req.get("user", "default")
@@ -8091,7 +8136,8 @@ class Handler(BaseHTTPRequestHandler):
         # смолток/«привет» остаётся на одной дешёвой модели (быстро и дёшево). Робастно: любой
         # сбой в этой ветке → обычный одно-модельный ответ (см. try/except ниже).
         _in_special_mode = bool(req.get("brain") or req.get("relay") or req.get("council")
-                                or req.get("compare") or req.get("research") or req.get("agent"))
+                                or req.get("compare") or req.get("beam")
+                                or req.get("research") or req.get("agent"))
         auto_brain = False
         if not explicit_model and not _in_special_mode and not has_images:
             try:

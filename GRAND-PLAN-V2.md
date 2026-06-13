@@ -7,7 +7,7 @@ Rule: ≤1 server.py lane + ≤1 chat.tsx lane per batch (god-file contention). 
 - [x] BATCH 1 — proxies+wirings, FTS5, themes — DONE (FE 930d121 / parent af5e1bb)
 - [x] BATCH 2 — stream-recovery, office-export, img2img, onboarding — DONE (FE 5d2d84c / parent 4fd3715)
 - [x] BATCH 3 — heuristic-tools, analytics, aux-models-UI, voice-picker — DONE (FE c65980a / parent 19fc2fd)
-- [ ] BATCH 4 — RAG-chunking, bg-tasks-panel, catalog-screen, agent-tabs
+- [x] BATCH 4 — RAG-chunking, bg-tasks-panel, catalog-screen, agent-tabs — DONE (FE 2350f4c / parent 2cec45b)
 - [ ] BATCH 5 — Beam-fusion, camera+Beam-UI, cron-triggers, sub-meters
 - [ ] BATCH 6 — Aider-editblock, OpenHands-risk-gate, richer-RAG-retrievers, model-catalog-badges
 - [ ] FINAL — full code review + smoke + report
