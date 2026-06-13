@@ -1858,6 +1858,96 @@ def rate_ok(uid: str, limit: int) -> bool:
     return True
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# АДДИТИВНОЕ усиление безопасности (анти-абуз / анти-разгон расходов).
+#
+# Существующий rate_ok() лимитит по uid (а uid в uid-режиме клиент шлёт сам — его
+# легко подделать). Ниже — НЕЗАВИСИМЫЙ слой по IP-адресу клиента: дешёвый sliding-
+# window для дорогих ручек (вызовы моделей / медиа / оркестратор / воркфлоу /
+# selftest / rag-ingest / поиск). Лимиты НАМЕРЕННО щедрые — настоящий пользователь
+# (и UI с авто-запросами) их НЕ достигает; они ловят только машинный разгон с
+# одного адреса. Владелец освобождён (RL_IP_OWNER_EXEMPT). Чтение (init/catalog)
+# НЕ лимитируется. Превышение → HTTP 429 {error, retry_after}.
+#
+# Все лимиты — КОНСТАНТЫ (тюнятся в одном месте, без правки логики).
+RL_IP_BURST = 30            # макс. дорогих запросов с одного IP за окно RL_IP_BURST_WINDOW
+RL_IP_BURST_WINDOW = 10     # сек — короткое окно «всплеска»
+RL_IP_SUSTAINED = 120       # макс. дорогих запросов с одного IP за RL_IP_SUSTAINED_WINDOW
+RL_IP_SUSTAINED_WINDOW = 60  # сек — длинное окно «устойчивого темпа»
+RL_IP_OWNER_EXEMPT = True   # владелец не лимитируется по IP
+RL_IP_MAX_TRACKED = 4096    # потолок числа IP в памяти (анти-разрастание словаря)
+
+_rl_ip = {}                 # ip -> [ts, ts, ...] (отсортированы по возрастанию)
+_rl_ip_lock = threading.Lock()
+
+
+def rate_ip_ok(ip: str):
+    """Sliding-window лимит на ДОРОГИЕ ручки по IP. Возвращает (ok, retry_after_sec).
+
+    Два окна: короткий всплеск (RL_IP_BURST/RL_IP_BURST_WINDOW) и устойчивый темп
+    (RL_IP_SUSTAINED/RL_IP_SUSTAINED_WINDOW). Превышение любого → (False, retry).
+    Потокобезопасно (Lock). При успехе фиксирует попытку (append). Только stdlib."""
+    ip = ip or "?"
+    now = _now_ts()
+    win = max(RL_IP_BURST_WINDOW, RL_IP_SUSTAINED_WINDOW)
+    with _rl_ip_lock:
+        # анти-разрастание: если словарь распух — чистим протухшие записи целиком
+        if len(_rl_ip) > RL_IP_MAX_TRACKED:
+            for k in [k for k, v in _rl_ip.items() if not v or now - v[-1] > win]:
+                _rl_ip.pop(k, None)
+        q = [t for t in _rl_ip.get(ip, []) if now - t < win]
+        burst = sum(1 for t in q if now - t < RL_IP_BURST_WINDOW)
+        sust = len(q)
+        if burst >= RL_IP_BURST:
+            _rl_ip[ip] = q
+            oldest_in_burst = min(t for t in q if now - t < RL_IP_BURST_WINDOW)
+            return False, max(1, int(RL_IP_BURST_WINDOW - (now - oldest_in_burst)) + 1)
+        if sust >= RL_IP_SUSTAINED:
+            _rl_ip[ip] = q
+            return False, max(1, int(RL_IP_SUSTAINED_WINDOW - (now - q[0])) + 1)
+        q.append(now)
+        _rl_ip[ip] = q
+    return True, 0
+
+
+# Потолки на размеры входа дорогих ручек (анти-DoS / анти-разгон расходов).
+# Намеренно ВЫШЕ любого реального запроса от UI — режут лишь абсурдный мусор.
+SEC_MAX_MESSAGES = 400              # макс. сообщений в одном чат/оркестр-запросе
+SEC_MAX_TOTAL_CHARS = 4_000_000     # суммарный размер текста сообщений (~4 МБ)
+SEC_MAX_PROMPT_CHARS = 200_000      # одиночный промпт/задача/запрос (image/video/orchestrate/search)
+SEC_MAX_RAG_TEXT_CHARS = 8_000_000  # текст документа на ingest (~8 МБ)
+SEC_MAX_RAG_RAW_BYTES = 25_000_000  # бинарный файл на ingest (~25 МБ)
+SEC_MAX_ORCH_WORKERS = 12           # потолок воркеров оркестратора за один прогон
+SEC_MAX_WORKFLOW_STEPS = 30         # потолок шагов воркфлоу
+SEC_MAX_CINEMA_SCENES = 60          # потолок сцен в одном экспорте фильма
+
+
+def _sec_messages_ok(messages):
+    """Грубая проверка размера списка сообщений. Возвращает (ok, error|None).
+    Режет только абсурд: >SEC_MAX_MESSAGES сообщений или >SEC_MAX_TOTAL_CHARS суммарно."""
+    if not isinstance(messages, list):
+        return True, None
+    if len(messages) > SEC_MAX_MESSAGES:
+        return False, f"слишком много сообщений (>{SEC_MAX_MESSAGES})"
+    total = 0
+    for m in messages:
+        if not isinstance(m, dict):
+            continue
+        c = m.get("content")
+        if isinstance(c, str):
+            total += len(c)
+        elif isinstance(c, list):
+            for p in c:
+                if isinstance(p, dict):
+                    total += len(str(p.get("text", "")))
+        for f in (m.get("files") or []):
+            if isinstance(f, dict):
+                total += len(str(f.get("text", "")))
+        if total > SEC_MAX_TOTAL_CHARS:
+            return False, "слишком большой объём текста в сообщениях"
+    return True, None
+
+
 # --- защита ключей: блок универсально-запрещённого (несовершеннолетние + секс) ---
 # Не цензура легального 18+, а только то, что банят ВСЕ провайдеры — иначе один
 # юзер подставит твой ключ под бан. Базовый предохранитель (точную модерацию — позже).
@@ -7262,6 +7352,49 @@ class Handler(BaseHTTPRequestHandler):
     def _qs(self):
         return urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
 
+    def _client_ip(self) -> str:
+        """IP клиента для пер-IP лимита. За обратным прокси берём первый из
+        X-Forwarded-For (если задан), иначе — адрес сокета. Только для лимита."""
+        xff = self.headers.get("X-Forwarded-For") or ""
+        if xff.strip():
+            return xff.split(",")[0].strip()
+        try:
+            return self.client_address[0]
+        except Exception:
+            return "?"
+
+    def _ip_guard(self, uid: str) -> bool:
+        """Пер-IP лимит для ДОРОГОЙ ручки. Владелец освобождён. При превышении сам
+        шлёт JSON-429 {error, retry_after} и возвращает False (вызывающий делает return).
+        Возвращает True → можно продолжать. Для НЕ-SSE ручек."""
+        if RL_IP_OWNER_EXEMPT and is_owner(uid):
+            return True
+        ok, retry = rate_ip_ok(self._client_ip())
+        if not ok:
+            self.send_response(429)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Retry-After", str(retry))
+            body = json.dumps({"error": "слишком часто — подожди немного",
+                               "retry_after": retry}, ensure_ascii=False).encode()
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return False
+        return True
+
+    def _ip_guard_sse(self, uid: str) -> bool:
+        """Как _ip_guard, но для SSE-ручки (заголовки уже отправлены) — отдаёт
+        событие об ошибке в поток. Владелец освобождён. False → вызывающий делает return."""
+        if RL_IP_OWNER_EXEMPT and is_owner(uid):
+            return True
+        ok, retry = rate_ip_ok(self._client_ip())
+        if not ok:
+            self._sse({"type": "error",
+                       "message": f"слишком часто — подожди ~{retry}с",
+                       "retry_after": retry})
+            return False
+        return True
+
     # --- видео (submit -> poll, SSE прогресс) ---
     def api_video(self):
         req = self._body()
@@ -7274,6 +7407,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.end_headers()
 
+        if not self._ip_guard_sse(uid):
+            return
+        if len(prompt) > SEC_MAX_PROMPT_CHARS:
+            self._sse({"type": "error", "message": "слишком длинный промпт"})
+            return
         if abuse_check(prompt):
             log_abuse(uid, model)
             self._sse({"type": "error", "message": "Запрос нарушает правила."})
@@ -7395,6 +7533,8 @@ class Handler(BaseHTTPRequestHandler):
     def api_audio(self):
         req = self._body()
         uid = req.get("user", "default")
+        if not self._ip_guard(uid):
+            return
         text = str(req.get("text") or req.get("input") or "")
         if not text.strip():
             return self._json({"error": "пустой текст"}, 400)
@@ -7460,6 +7600,11 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         if not prompt.strip():
             self._sse({"type": "error", "message": "опиши музыку: стиль, настроение, темп"})
+            return
+        if not self._ip_guard_sse(uid):
+            return
+        if len(prompt) > SEC_MAX_PROMPT_CHARS or len(str(lyrics or "")) > SEC_MAX_PROMPT_CHARS:
+            self._sse({"type": "error", "message": "слишком длинный промпт/текст"})
             return
         if abuse_check(prompt + " " + (lyrics or "")):
             log_abuse(uid, "music")
@@ -7541,6 +7686,8 @@ class Handler(BaseHTTPRequestHandler):
         req = self._body()
         uid = req.get("user", "default")
         model = str(req.get("model") or "aiml:triposr")
+        if not self._ip_guard(uid):
+            return
         image = req.get("image") or req.get("imageDataUrl") or req.get("imageUrl") or ""
         if not image:
             return self._json({"error": "нужна картинка — 3D делается из фото"}, 400)
@@ -7576,6 +7723,10 @@ class Handler(BaseHTTPRequestHandler):
         neg = str(req.get("negative_prompt") or "").strip() or None
         if not prompt:
             return self._json({"error": "пустой промпт"}, 400)
+        if not self._ip_guard(uid):
+            return
+        if len(prompt) > SEC_MAX_PROMPT_CHARS or (neg and len(neg) > SEC_MAX_PROMPT_CHARS):
+            return self._json({"error": "слишком длинный промпт"}, 400)
         if abuse_check(prompt) or (neg and abuse_check(neg)):
             log_abuse(uid, model or "image")
             return self._json({"error": "Запрос нарушает правила."}, 400)
@@ -7599,8 +7750,8 @@ class Handler(BaseHTTPRequestHandler):
         used_seed = None
         sub_free = False  # картинка сгенерилась бесплатно из подписки NanoGPT
         try:
-            w = int(req.get("width") or 1024)
-            h = int(req.get("height") or 1024)
+            w = int(_clamp(req.get("width") or 1024, 64, 4096, 1024))
+            h = int(_clamp(req.get("height") or 1024, 64, 4096, 1024))
             if model.startswith("ng:"):
                 mid = model[3:]
                 try:
@@ -7649,6 +7800,8 @@ class Handler(BaseHTTPRequestHandler):
         req = self._body()
         uid = req.get("user", "default")
         tool = str(req.get("tool") or "").strip()
+        if not self._ip_guard(uid):
+            return
         image = req.get("image") or ""
         if not image:
             return self._json({"error": "нет картинки"}, 400)
@@ -7667,7 +7820,8 @@ class Handler(BaseHTTPRequestHandler):
             if user_balance(uid).get("balance", 0) < need:
                 return self._json({"error": f"Недостаточно средств: ~${need}. Пополни счёт.", "need": need}, 402)
         try:
-            url = venice_image_tool(tool, image, prompt=prompt, scale=int(req.get("scale") or 2))
+            url = venice_image_tool(tool, image, prompt=prompt,
+                                    scale=int(_clamp(req.get("scale") or 2, 1, 4, 2)))
         except urllib.error.HTTPError as e:
             return self._json({"error": f"{tool} {e.code}: {e.read().decode('utf-8','ignore')[:200]}"}, 502)
         except Exception as e:
@@ -7687,6 +7841,10 @@ class Handler(BaseHTTPRequestHandler):
         # 🔐 анти-абуз: эндпоинт качает URL (SSRF) и жжёт ffmpeg-CPU. Гейтим как медиа-ручки:
         # владелец/баланс + rate-limit. Иначе любой превратит его в бесплатный compute/SSRF-прокси.
         uid = req.get("user", "default")
+        if not self._ip_guard(uid):
+            return
+        if not isinstance(scenes, list) or len(scenes) > SEC_MAX_CINEMA_SCENES:
+            return self._json({"error": f"слишком много сцен (>{SEC_MAX_CINEMA_SCENES})"}, 400)
         owner = is_owner(uid)
         if not owner:
             billing = load_billing()
@@ -7765,17 +7923,27 @@ class Handler(BaseHTTPRequestHandler):
     def api_rag_ingest(self):
         c = self._body()
         uid = c.get("user", "default")
+        if not self._ip_guard(uid):
+            return
         name = str(c.get("name") or "doc")
         ws = c.get("workspace", c.get("chat_id"))  # опц. рабочее пространство/чат; пусто → global
         text = c.get("text") or ""
+        if isinstance(text, str) and len(text) > SEC_MAX_RAG_TEXT_CHARS:
+            return self._json({"error": "документ слишком большой"}, 400)
         source = None          # пометка кусков; остаётся None для обычных текстовых доков
         # клиент прислал готовый текст → текстовый док, ничего нового не дёргаем (как раньше)
         raw = b""
         if not text and c.get("raw_b64"):
+            rb = c.get("raw_b64")
+            # base64 раздувается ~4/3 → ограничиваем размер ДО декода (анти-DoS по памяти)
+            if isinstance(rb, str) and len(rb) > SEC_MAX_RAG_RAW_BYTES * 4 // 3 + 16:
+                return self._json({"error": "файл слишком большой"}, 400)
             try:
-                raw = base64.b64decode(c["raw_b64"])
+                raw = base64.b64decode(rb)
             except Exception as e:
                 return self._json({"error": f"не декодировал файл: {e}"}, 400)
+            if len(raw) > SEC_MAX_RAG_RAW_BYTES:
+                return self._json({"error": "файл слишком большой"}, 400)
             try:
                 text = extract_file_text(name, raw)
             except Exception as e:
@@ -7867,10 +8035,15 @@ class Handler(BaseHTTPRequestHandler):
     def api_recall(self):
         c = self._body()
         uid = c.get("user", "default")
+        if not self._ip_guard(uid):
+            return
         q = str(c.get("query") or "").strip()
         if not q:
             return self._json({"error": "пустой запрос"}, 400)
-        return self._json({"hits": episodic_recall(uid, q, int(c.get("k") or 5))})
+        if len(q) > SEC_MAX_PROMPT_CHARS:
+            return self._json({"error": "слишком длинный запрос"}, 400)
+        k = int(_clamp(c.get("k") or 5, 1, 50, 5))
+        return self._json({"hits": episodic_recall(uid, q, k)})
 
     # --- скиллы-маркетплейс (ECC 358+): поиск/загрузка/импорт ---
     def api_skills(self):
@@ -7911,6 +8084,8 @@ class Handler(BaseHTTPRequestHandler):
         c = self._body()
         url = str(c.get("url") or "").strip()
         uid = c.get("user", "default")
+        if not self._ip_guard(uid):
+            return
         token = str(c.get("token") or "").strip()     # опц. GitHub-токен для приватного репо
         if not url:
             return self._json({"ok": False, "error": "нет url"}, 400)
@@ -7924,6 +8099,8 @@ class Handler(BaseHTTPRequestHandler):
         c = self._body()
         url = str(c.get("url") or "").strip()
         uid = c.get("user", "default")
+        if not self._ip_guard(uid):
+            return
         if not url:
             return self._json({"ok": False, "error": "нет url"}, 400)
         res = install_agent_from_url(uid, url)
@@ -7935,6 +8112,8 @@ class Handler(BaseHTTPRequestHandler):
         c = self._body()
         url = str(c.get("url") or "").strip()
         uid = c.get("user", "default")
+        if not self._ip_guard(uid):
+            return
         token = str(c.get("token") or "").strip()      # опц. GitHub-токен (приватный/лимиты)
         if not url:
             return self._json({"ok": False, "error": "нет url"}, 400)
@@ -7944,9 +8123,13 @@ class Handler(BaseHTTPRequestHandler):
     # --- медиа-поиск для in-chat браузера: web + YouTube + картинки ---
     def api_websearch(self):
         c = self._body()
+        if not self._ip_guard(c.get("user", "default")):
+            return
         q = str(c.get("query") or "").strip()
         if not q:
             return self._json({"error": "пустой запрос"}, 400)
+        if len(q) > SEC_MAX_PROMPT_CHARS:
+            return self._json({"error": "слишком длинный запрос"}, 400)
         kinds = c.get("kinds") or ["web", "videos", "images"]
         out = {"query": q}
         if "web" in kinds:
@@ -7970,9 +8153,13 @@ class Handler(BaseHTTPRequestHandler):
     def api_supersearch(self):
         c = self._body()
         uid = c.get("user", "default")
+        if not self._ip_guard(uid):
+            return
         q = str(c.get("query") or "").strip()
         if not q:
             return self._json({"error": "пустой запрос"}, 400)
+        if len(q) > SEC_MAX_PROMPT_CHARS:
+            return self._json({"error": "слишком длинный запрос"}, 400)
         owner = is_owner(uid)
         if not owner:                              # платный (зовём 3+ онлайн-модели) — гейт баланса
             need = round(0.02 * (1 + load_billing().get("markup_pct", 50) / 100), 6)
@@ -8136,9 +8323,16 @@ class Handler(BaseHTTPRequestHandler):
     def api_orchestrate(self):
         c = self._body()
         uid = c.get("user", "default")
+        if not self._ip_guard(uid):
+            return
         task = str(c.get("task") or "").strip()
         if not task:
             return self._json({"error": "пустая задача"}, 400)
+        if len(task) > SEC_MAX_PROMPT_CHARS:
+            return self._json({"error": "слишком длинная задача"}, 400)
+        wk = c.get("workers")
+        if isinstance(wk, list) and len(wk) > SEC_MAX_ORCH_WORKERS:
+            return self._json({"error": f"слишком много воркеров (>{SEC_MAX_ORCH_WORKERS})"}, 400)
         owner = is_owner(uid)
         if not owner:                          # мульти-модельный прогон — гейт баланса
             need = round(0.05 * (1 + load_billing().get("markup_pct", 50) / 100), 6)
@@ -8202,8 +8396,12 @@ class Handler(BaseHTTPRequestHandler):
         внутренний примитив (и его charge/owner-логику), без дублирования кода/обхода списаний."""
         c = self._body()
         uid = c.get("user", "default")
+        if not self._ip_guard(uid):
+            return
         owner = is_owner(uid)
         user_input = str(c.get("input") or "").strip()
+        if len(user_input) > SEC_MAX_PROMPT_CHARS:
+            return self._json({"ok": False, "error": "слишком длинный input", "steps": []}, 200)
         # шаги: из шаблона по id ЛИБО кастомный массив из тела
         steps = c.get("steps")
         if not steps:
@@ -8214,6 +8412,10 @@ class Handler(BaseHTTPRequestHandler):
             steps = tpl["steps"]
         if not isinstance(steps, list) or not steps:
             return self._json({"ok": False, "error": "нет шагов для запуска", "steps": []}, 200)
+        if len(steps) > SEC_MAX_WORKFLOW_STEPS:
+            return self._json({"ok": False,
+                               "error": f"слишком много шагов (>{SEC_MAX_WORKFLOW_STEPS})",
+                               "steps": []}, 200)
         if not user_input:
             return self._json({"ok": False, "error": "пустой input", "steps": []}, 200)
 
@@ -8857,6 +9059,9 @@ class Handler(BaseHTTPRequestHandler):
         model = str(body.get("model") or DEFAULTS["chat"])
         stream = bool(body.get("stream"))
         messages = body.get("messages") or []
+        _ok, _emsg = _sec_messages_ok(messages)
+        if not _ok:
+            return self._json({"error": {"message": _emsg}}, 400)
         last = next((m.get("content") or "" for m in reversed(messages)
                      if m.get("role") == "user"), "")
         if isinstance(last, list):
@@ -8864,6 +9069,11 @@ class Handler(BaseHTTPRequestHandler):
         billing = load_billing()
         owner = is_owner(uid)
 
+        if not owner:
+            _ip_ok, _retry = rate_ip_ok(self._client_ip())
+            if not _ip_ok:
+                return self._json({"error": {"message": "rate limit exceeded"},
+                                   "retry_after": _retry}, 429)
         if not owner and not rate_ok(uid, billing.get("rate_per_min", 20)):
             return self._json({"error": {"message": "rate limit exceeded"}}, 429)
         if abuse_check(last):
@@ -9509,6 +9719,16 @@ class Handler(BaseHTTPRequestHandler):
     # --- агентский цикл с SSE ---
     def chat(self):
         req = self._body()
+        # ── единый чокпойнт для ВСЕХ режимов чата (plain/relay/research/compare/beam/council):
+        # пер-IP лимит дорогой ручки (владелец освобождён) + санити-проверка размера входа.
+        # Заголовки ещё не отправлены → можем вернуть чистый JSON 429/400. НЕ меняет поведение
+        # легитимных запросов: лимиты щедрые, потолки выше любого реального диалога.
+        _uid = req.get("user", "default")
+        if not self._ip_guard(_uid):
+            return
+        _ok, _emsg = _sec_messages_ok(req.get("messages"))
+        if not _ok:
+            return self._json({"error": _emsg}, 400)
         if req.get("relay"):
             return self.chat_relay(req)
         if req.get("research"):
