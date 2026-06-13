@@ -10,6 +10,8 @@ Rule: ≤1 server.py lane + ≤1 chat.tsx lane per batch (god-file contention). 
 - [x] BATCH 4 — RAG-chunking, bg-tasks-panel, catalog-screen, agent-tabs — DONE (FE 2350f4c / parent 2cec45b)
 - [x] BATCH 5 — Beam-fusion, camera+Beam-UI, cron-triggers, sub-meters — DONE (FE 07ba126 / parent c6fc7d5)
 - [x] BATCH 6 — Aider-editblock, OpenHands-risk-gate, richer-RAG-retrievers, model-catalog-badges — DONE (FE b561887 / parent 0f163f2)
+- [ ] BATCH 7 — wire smart-RAG+risk-gate, usage-log refactor, MCP-at-creation+memory-budget, custom-instructions+changelog
+- [ ] BATCH 8 — per-chat RAG workspace, assistant-ui tool-cards, workflow-marketplace, MCP-picker-in-builders
 - [ ] FINAL — full code review + smoke + report
 
 ## LANES (each = dedicated agent; detailed prompt at dispatch)
@@ -48,6 +50,18 @@ Rule: ≤1 server.py lane + ≤1 chat.tsx lane per batch (god-file contention). 
 - 6B lib/decision.ts(+server risk): OpenHands-style self risk-gate (analyze action risk → auto plan/auto/full).
 - 6C lib/rag.ts+rag-manage.ts: MultiQuery/Ensemble retriever patterns (frontend RAG controls).
 - 6D NEW components/model-catalog.tsx: dedicated catalog page wired from 4C (badges new/cheapest/TEE/uncensored%).
+
+### BATCH 7 (follow-ups — make shipped features real)
+- 7A chat.tsx: wire smart multi-query RAG behind a «умный поиск» toggle into the send path; wire OpenHands risk-gate (riskOf/policyFor) into the agent permission flow (keep back-compat with toolRisk).
+- 7B lib/usage-log.ts (NEW) + usage-analytics.tsx + use-taiga-chat.ts: move recordUsage/loadUsage/UsageEntry/USAGE_EVENT to lib; component + hook import from lib (architecture tidy).
+- 7C server.py: MCP-connector-at-creation (skill/agent builder can attach an MCP connector by id/url) + memory budget control (protected-recent N messages + max memory chars per request).
+- 7D NEW components/custom-instructions.tsx + components/whats-new.tsx (mounted in settings): ChatGPT-style «что Тайге знать о тебе / как отвечать» → master-prompt/profile; changelog feed.
+
+### BATCH 8 (parity polish)
+- 8A server.py: per-chat RAG workspace scope (tag rag chunks by chat_id; optional query-within-this-chat) — AnythingLLM pattern.
+- 8B NEW components/tool-card.tsx + wire in chat timeline: assistant-ui-style structured tool-call cards (name/args/result, collapsible).
+- 8C NEW components/workflows.tsx (mounted): Templates/Мои/Опубликованные — workflow gallery built on existing pipelines/lib.
+- 8D agent-builder.tsx + skill-builder.tsx: MCP-connector picker in the builders (frontend of 7C) — attach a connector while building.
 
 ## DEFERRED / BLOCKED (accounted-for, NOT building autonomously — reason)
 - Real payments (СБП/BTCPay/crypto) — Damir-deferred until decensor; needs processor account.

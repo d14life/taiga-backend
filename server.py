@@ -5218,6 +5218,19 @@ def validate_user_config(raw) -> dict:
                     clean_aux[task] = m
         if clean_aux:
             out["aux_models"] = clean_aux
+    # Бюджет памяти (гранулярная память) — владелец/юзер настраивает явно, иначе дефолты.
+    #   protected_recent  — сколько свежих сообщений auto_compact НИКОГДА не сжимает (2..40)
+    #   memory_max_chars  — кап на инъекцию memory_block в символах (200..2000)
+    pr = raw.get("protected_recent")
+    if pr is not None:
+        v = _clamp(pr, 2, 40, None)
+        if v is not None:
+            out["protected_recent"] = int(v)
+    mmc = raw.get("memory_max_chars")
+    if mmc is not None:
+        v = _clamp(mmc, 200, 2000, None)
+        if v is not None:
+            out["memory_max_chars"] = int(v)
     return out
 
 
@@ -5233,6 +5246,26 @@ def load_user_config(uid: str) -> dict:
 def save_user_config(uid: str, cfg: dict):
     # ВСЕГДА валидируем перед записью — в БД попадает только очищенный конфиг.
     _db_put_json("userconfig", "uid", uid, validate_user_config(cfg))
+
+
+# Дефолты бюджета памяти (если юзер ничего не настроил — поведение как раньше).
+MEM_DEFAULT_PROTECTED_RECENT = 6
+MEM_DEFAULT_MAX_CHARS = 600
+
+
+def user_memory_budget(uid: str) -> dict:
+    """Настройки бюджета памяти юзера (гранулярная память). Читаем из его userconfig,
+    значения уже валидированы/заклампены при сохранении; на всякий случай клампим снова
+    (defense-in-depth) и подставляем дефолты, если ключей нет.
+      protected_recent — N свежих сообщений, которые auto_compact НИКОГДА не сжимает
+      memory_max_chars — кап на инъекцию memory_block (символы)"""
+    try:
+        cfg = load_user_config(uid)
+    except Exception:
+        cfg = {}
+    pr = _clamp(cfg.get("protected_recent"), 2, 40, MEM_DEFAULT_PROTECTED_RECENT)
+    mmc = _clamp(cfg.get("memory_max_chars"), 200, 2000, MEM_DEFAULT_MAX_CHARS)
+    return {"protected_recent": int(pr), "memory_max_chars": int(mmc)}
 
 
 def apply_user_config(uid: str, mode: str, model, max_tokens, system, agent_tools):
@@ -5671,9 +5704,16 @@ def break_repeat_loop(messages: list, min_chars: int = 400) -> list:
     return out if dropped else messages
 
 
-def auto_compact(messages: list, max_chars: int = 24000, keep_recent: int = 6) -> list:
+def auto_compact(messages: list, max_chars: int = 24000, keep_recent: int = 6,
+                 uid: str = None) -> list:
     """Длинный диалог → старую часть заменяем краткой сводкой (экономия токенов).
-    Свежие keep_recent сообщений — дословно. Картинки в старой части = НЕ сжимаем (зрение)."""
+    Свежие keep_recent сообщений — дословно. Картинки в старой части = НЕ сжимаем (зрение).
+
+    Если передан uid — число защищённых свежих сообщений берём из настройки юзера
+    protected_recent (гранулярная память); иначе keep_recent. Так последние N сообщений
+    ВСЕГДА остаются дословными и никогда не уходят в сводку."""
+    if uid is not None:
+        keep_recent = user_memory_budget(uid)["protected_recent"]
     # Сначала гасим copy-loop (повторяющиеся большие блоки ассистента) — даже если по объёму
     # сжатие ещё не нужно. Иначе модель пере-кармливается собственным эхом и зацикливается.
     messages = break_repeat_loop(messages)
@@ -5836,10 +5876,14 @@ def memory_block(uid: str, messages=None, limit: int = 6, max_chars: int = 600) 
     ответе. Поэтому: (1) отбираем несколько самых релевантных текущему запросу фактов
     (пересечение по ключевым словам + свежесть как тай-брейк), (2) предпочтения по СТИЛЮ
     подаём как СОВЕТ («по умолчанию…, НО если вопрос требует разбора — отвечай развёрнуто»),
-    а не как жёсткий приказ, (3) общий объём капаем ~max_chars символов."""
+    а не как жёсткий приказ, (3) общий объём капаем ~max_chars символов.
+
+    Кап max_chars — настраиваемый через memory_max_chars в userconfig (гранулярная память):
+    читаем настройку юзера, заклампленную в 200..2000; если её нет — остаётся дефолт 600."""
     mem = load_memory(uid)
     if not mem:
         return ""
+    max_chars = user_memory_budget(uid)["memory_max_chars"]   # настраиваемый кап (дефолт 600)
     query = _last_user_text(messages)
     qterms = set(t.lower() for t in _MEM_WORD_RE.findall(query))
     n = len(mem)
@@ -7236,7 +7280,11 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"config": load_user_config(uid),
                         "safe_tools": sorted(SAFE_TOOLS),
                         "bases": sorted(ALLOWED_FUNCTION_BASES),
-                        "max_tokens": USERCFG_MAX_TOKENS})
+                        "max_tokens": USERCFG_MAX_TOKENS,
+                        # бюджет памяти (гранулярная память): диапазоны/дефолты для UI
+                        "memory_budget": {
+                            "protected_recent": {"default": MEM_DEFAULT_PROTECTED_RECENT, "min": 2, "max": 40},
+                            "memory_max_chars": {"default": MEM_DEFAULT_MAX_CHARS, "min": 200, "max": 2000}}})
         elif path == "/api/identity":
             self._json({"persona": _identity_custom(), "default": DEFAULT_IDENTITY,
                         "name": ASSISTANT_NAME})
@@ -7544,7 +7592,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, "name": nm, "enabled": en})
             if action == "catalog":           # явный запрос каталога маркетплейса
                 return self._json({"catalog": MCP_CATALOG})
-            if action == "ensure":            # подключить коннектор при создании скилла/агента (id+опц.url)
+            if action in ("ensure", "attach"):  # подключить коннектор при создании скилла/агента (id+опц.url)
+                # «attach» — алиас «ensure» для билдера скиллов/агентов: идемпотентно
+                # подключает коннектор каталога (по id) ИЛИ свой (name+url), принимает токен
+                # и возвращает число инструментов. Гарды (владелец + анти-SSRF) — те же.
                 hdrs = c.get("headers") if isinstance(c.get("headers"), dict) else None
                 return self._json(ensure_mcp_connector(str(c.get("id") or c.get("name") or ""),
                                                        url=c.get("url"), headers=hdrs,
@@ -8343,7 +8394,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.chat_council(req)
         uid = req.get("user", "default")
         raw_messages = list(req.get("messages") or [])
-        raw_messages = auto_compact(raw_messages)     # длинный диалог → старое в сводку (экономия токенов)
+        raw_messages = auto_compact(raw_messages, uid=uid)  # длинный диалог → старое в сводку; свежие protected_recent — дословно
         agent = bool(req.get("agent"))
         dev = bool(req.get("dev")) and is_owner(uid)   # shell/run_code/файлы — ТОЛЬКО владелец (анти-RCE)
         max_tokens = int(req.get("max_tokens") or 2048)
