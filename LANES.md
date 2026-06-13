@@ -17,7 +17,7 @@ ANOTHER claude session may also work this repo — collision-guard before EVERY 
    Tick the checkbox here. Restart backend if server.py changed.
 5. Append ONE casual plain-English line to WHATS-NEW.md: "✨ <feature> — <what it does for the user>".
 Rules: NEVER auto-pick dead models. server.py edits sequential. L13 BLOCKED on Damir's harness repo link = skip.
-Priority: L4a-ui · L4b · L4c · L19 · L20 · L4f · L6 · L7 · L8 · L9 · L10 · L11 · L12 · L18 · L15 · L16 · L14 · L3 · L21 · L22
+Priority: L4a-ui · L23 (no-truncation/budget-routing) · L4b · L4c · L19 · L20 · L4f · L6 · L7 · L8 · L9 · L10 · L11 · L12 · L18 · L15 · L16 · L14 · L3 · L21 · L22
 
 ## DONE (committed)
 - [x] L0 Agent S identity rename + name-stamp fix + default-leak fix        (5f8c24e)
@@ -32,6 +32,15 @@ Priority: L4a-ui · L4b · L4c · L19 · L20 · L4f · L6 · L7 · L8 · L9 · L
 - [ ] L3 reasoning dial: for models that IGNORE reasoning_effort (grok-nano, deepseek),
         try alternate params (reasoning:{effort}, thinking, extra_body); measure low-vs-high;
         store per-model which param actually deepens. Fall back to prompt-nudge + token floor.
+- [ ] L23 NO MID-ANSWER TRUNCATION + budget-aware routing (Damir — HIGH priority, core output UX).
+        PRINCIPLE: a cap shapes the PLAN (which model / continue-or-not), it NEVER chops the output.
+        (a) AUTO-CONTINUE: capture finish_reason in venice_stream; if "length" (answer cut), auto-issue a
+            continuation (append assistant partial + "продолжи ровно с места обрыва") and stitch seamlessly
+            → user NEVER sees a cut sentence. 16k stays a per-CHUNK ceiling, not an answer limit.
+        (b) GRACEFUL COST DEGRADATION: sendEstimate already estimates cost pre-flight. If it would exceed the
+            user's spend-cap/balance, DON'T cut/block — route to a cheaper model that fits (cost_tier via
+            best_for_task, the L4a backend) and answer FULLY but cheaper, told transparently
+            ("большой запрос — отвечаю моделью X в рамках бюджета"). No truncation, ever.
 - [~] L4a TIERS (Damir): BACKEND DONE (1a1ad02) — cost_tier(model) + best_for_task(task,tier) wired into
         auto + auto-Brain; tier_cost exposed per model. REMAINING: UI tier-selector chip (cheap/mid/top)
         on the main pad → send req.tier. "best CHEAP model for this code task" works (deepseek-v4 bench 95).
