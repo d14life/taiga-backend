@@ -19,6 +19,8 @@ github-tree, store-helpers) приходят ПАРАМЕТРАМИ из server.
 import json
 import re
 import os
+import threading
+import time as _time
 from pathlib import Path
 
 # ── Капы (анти-DoS / анти-abuse) ──
@@ -300,6 +302,54 @@ def run_in_cloud_sandbox(code, lang):
                 sbx.kill()
         except Exception:
             pass
+
+
+# ── ПЕРСИСТЕНТНАЯ E2B-СЕССИЯ НА ЧАТ ── ОБЩАЯ ПЕСОЧНИЦА: терминал юзера + run_code ИИ → ОДНА сессия,
+# cd/env/файлы живут между командами, ИИ и юзер делят одну ФС. E2B сам гасит по таймауту (1ч).
+_E2B_SESSIONS = {}                       # chat_id -> {"id": sandbox_id, "ts": float}
+_E2B_SESS_LOCK = threading.Lock()
+
+
+def sandbox_session_run(chat_id, cmd):
+    """Команда в ПЕРСИСТЕНТНОЙ E2B-сессии чата (reconnect к той же песочнице по id → состояние сохранено).
+    cd/env/файлы живут между вызовами; ИИ (run_code) и юзер (терминал) делят ОДНУ сессию.
+    Возврат: {ok, output|error, sandbox_id}."""
+    key = _e2b_api_key()
+    if not key:
+        return {"ok": False, "error": "E2B не настроен (нет ключа ~/.e2b_key)"}
+    try:
+        from e2b_code_interpreter import Sandbox
+    except Exception:
+        return {"ok": False, "error": "E2B SDK не установлен"}
+    os.environ.setdefault("E2B_API_KEY", key)
+    cid = str(chat_id or "default")
+    with _E2B_SESS_LOCK:
+        prev = _E2B_SESSIONS.get(cid)
+    sbx = None
+    try:
+        if prev:
+            try:
+                sbx = Sandbox.connect(prev["id"])         # та же сессия → cd/env/файлы на месте
+                try:
+                    sbx.set_timeout(3600)
+                except Exception:
+                    pass
+            except Exception:
+                sbx = None                                # сессия умерла → создаём новую ниже
+        if sbx is None:
+            sbx = Sandbox.create()
+            try:
+                sbx.set_timeout(3600)
+            except Exception:
+                pass
+        with _E2B_SESS_LOCK:
+            _E2B_SESSIONS[cid] = {"id": sbx.sandbox_id, "ts": _time.time()}
+        r = sbx.commands.run(cmd)
+        out = ((r.stdout or "") + ("\n" + r.stderr if (r.stderr or "").strip() else "")).strip()
+        return {"ok": True, "output": out[:20000], "sandbox_id": sbx.sandbox_id}
+    except Exception as e:
+        return {"ok": False, "error": f"sandbox: {str(e)[:300]}"}
+    # НЕ убиваем — сессия персистентна; E2B сам закроет по таймауту.
 
 
 def run_skill_script(user_dir, uid, sid, script_rel, *, is_owner, run_code_lang):

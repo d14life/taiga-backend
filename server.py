@@ -10121,25 +10121,30 @@ class Handler(BaseHTTPRequestHandler):
             if not is_owner(c.get("user", "default")):
                 return self._json({"error": "Запуск кода — только владелец."}, 403)
             self._json({"output": run_code_lang(c.get("code", ""), c.get("lang", "python"))})
-        elif path == "/api/terminal":         # ВИЗУАЛЬНЫЙ ТЕРМИНАЛ: команда → вывод
+        elif path == "/api/terminal":         # ВИЗУАЛЬНЫЙ ТЕРМИНАЛ → ОБЩАЯ ПЕРСИСТЕНТНАЯ E2B-СЕССИЯ ЧАТА
             c = self._body()
             uid = c.get("user", "default")
             cmd = str(c.get("cmd") or c.get("command") or "")
+            chat_id = str(c.get("chat_id") or c.get("chat") or "default")
             if not cmd.strip():
                 return self._json({"output": ""})
             if abuse_check(cmd):
                 return self._json({"output": "[заблокировано правилами]"}, 400)
+            if not is_owner(uid) and user_balance(uid).get("balance", 0) <= 0:
+                return self._json({"output": "", "error": "Баланс исчерпан."}, 402)
+            # ПЕРСИСТЕНТНАЯ сессия чата: cd/env/файлы живут между командами; ИИ (run_code) и юзер делят ОДНУ.
+            import skills_run
+            res = skills_run.sandbox_session_run(chat_id, cmd)
+            if res.get("ok"):
+                if not is_owner(uid):
+                    charge_media(uid, 0.002, kind="terminal")
+                return self._json({"output": res.get("output", ""), "owner": is_owner(uid),
+                                   "sandbox_id": res.get("sandbox_id"), "persistent": True})
+            # E2B недоступен → владельцу фолбэк на локальный shell (терминал работает и без E2B)
             if is_owner(uid):
-                out = run_code_lang(cmd, "bash", timeout=20)     # владелец → локальный shell (доверенный)
-            else:
-                # НЕ-владелец → E2B-песочница (анти-RCE), гейт баланса
-                if user_balance(uid).get("balance", 0) <= 0:
-                    return self._json({"output": "", "error": "Баланс исчерпан."}, 402)
-                import skills_run
-                res = skills_run.run_in_cloud_sandbox(cmd, "bash")
-                out = res.get("output") if res.get("ok") else ("[песочница] " + (res.get("error") or "недоступна"))
-                charge_media(uid, 0.002, kind="terminal")
-            self._json({"output": out, "owner": is_owner(uid)})
+                out = run_code_lang(cmd, "bash", timeout=20)
+                return self._json({"output": out, "owner": True, "local": True})
+            self._json({"output": "", "error": res.get("error", "песочница недоступна")}, 502)
         elif path == "/api/identity":
             c = self._body()
             uid = c.get("user", "default")
