@@ -44,6 +44,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from pathlib import Path
 import ad_gen                       # L14: UGC-видеореклама (сценарии по брифу) — pure helpers, lazy server ref
+import screen_copilot               # L21: со-пилот по экрану (кадр→зрячая модель→подсказка) — pure helpers
 
 ROOT = Path(__file__).parent
 BASE = Path("~/.mostik-ai").expanduser()
@@ -9945,6 +9946,26 @@ class Handler(BaseHTTPRequestHandler):
                     sys.modules[__name__], brief,
                     n=c.get("n", 3), url=str(c.get("url") or ""),
                     product=str(c.get("product") or ""), tone=str(c.get("tone") or "")))
+        elif path == "/api/screen_copilot":   # L21: кадр экрана → зрячая модель → короткая подсказка
+            c = self._body()
+            uid = c.get("user", "default")
+            if not self._ip_guard(uid):
+                return
+            frame = str(c.get("frame") or c.get("image") or "")
+            if len(frame) > 12_000_000:        # ~9МБ base64-кадр — потолок (редкие кадры, не спам)
+                return self._json({"error": "кадр слишком большой"}, 400)
+            goal = str(c.get("goal") or "")
+            if abuse_check(goal):
+                log_abuse(uid, "screen_copilot")
+                return self._json({"error": "Запрос нарушает правила."}, 400)
+            owner = is_owner(uid)
+            if not owner and user_balance(uid).get("balance", 0) <= 0:
+                return self._json({"error": "Баланс исчерпан. Пополни счёт."}, 402)
+            out = screen_copilot.screen_guidance(
+                sys.modules[__name__], frame, goal=goal, last_tip=str(c.get("last_tip") or ""))
+            if not owner and not out.get("error"):  # один зрячий вызов — дёшево, как поиск
+                out.update(charge_media(uid, 0.01, kind="screen-copilot"))
+            self._json(out)
         elif path == "/api/rag_ingest":       # RAG: документ → эмбеддинги (бэкенд)
             self.api_rag_ingest()
         elif path == "/api/rag_query":        # RAG: семантический поиск по докам
