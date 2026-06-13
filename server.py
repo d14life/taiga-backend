@@ -11247,6 +11247,27 @@ class Handler(BaseHTTPRequestHandler):
         max_tokens = max(max_tokens, reasoning_token_floor(model, req_reasoning_effort))
         max_tokens = min(max_tokens, USERCFG_MAX_TOKENS)
 
+        # fix2: ДАЁМ ИИ «ВИДЕТЬ» UI — реальная модель ответа + выбор/режим юзера. Чтобы он перестал
+        # говорить «я не вижу роутинг/интерфейс». Без ключей/провайдеров — только модель + состояние.
+        try:
+            _ui = req.get("ui") or {}
+            _served = next((r.get("name") for r in RICH if r.get("id") == model), None) or model
+            _ctx = ("\n\nТЕКУЩЕЕ СОСТОЯНИЕ ИНТЕРФЕЙСА (это ты ВИДИШЬ — отвечай по нему точно, не говори "
+                    "«не вижу роутинг»):\n"
+                    f"- модель, которой ты сейчас фактически отвечаешь: {_served} ({model})\n")
+            if _ui.get("modelLabel"):
+                _ctx += f"- в пикере у пользователя выбрано: {_ui.get('modelLabel')}\n"
+            _mode = _ui.get("mode") or req.get("mode")
+            if _mode:
+                _ctx += f"- активный режим: {_mode}\n"
+            _on = [k for k in ("deep", "web", "council", "research", "compare", "relay",
+                               "super", "smartrag", "agent", "brain") if _ui.get(k) or req.get(k)]
+            if _on:
+                _ctx += f"- включено пользователем: {', '.join(_on)}\n"
+            system += _ctx
+        except Exception:
+            pass
+
         # ── L3: ПРОМПТ-ЭМУЛЯЦИЯ ГЛУБИНЫ для «глухих» к reasoning_effort моделей (grok-nano/deepseek-chat/…).
         # Юзер выкрутил «Глубоко», но эта модель параметр игнорирует → вшиваем преамбулу «думай пошагово»
         # + даём запас токенов под размышление. Думающим моделям (нативный reasoning_effort) НЕ трогаем —
