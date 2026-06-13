@@ -8012,6 +8012,105 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"jobs": scheduler.toggle_job(uid, str(c.get("id", "")), bool(c.get("enabled")))})
         return self._json({"jobs": scheduler.list_jobs(uid)})
 
+    # --- /sprint: смоук-самопроверка собственного бэкенда (owner-only) ---
+    def api_selftest(self):
+        """GET/POST /api/selftest {user} → быстрый внутренний смоук-тест подсистем.
+
+        OWNER-ONLY: один из чеков касается ПЛАТНОГО пути (тривиальный вызов модели с
+        max_tokens=1), поэтому обычному юзеру отдаём 403 — чтобы /sprint никогда не жёг
+        деньги/квоты от лица пользователя. Каждый чек дешёвый и ограничен по времени:
+        используем ВНУТРЕННИЕ callables (без shell-out, без сети там, где можно обойтись).
+
+        Контракт ответа:
+          { ok: bool,                       # все ли чеки зелёные
+            passed: int, failed: int,       # счётчики
+            total_ms: int,                  # суммарное время прогона
+            checks: [ {name, ok, ms, detail} ] }
+        """
+        # owner-гейт: GET берёт user из query, POST — из тела
+        if self.command == "POST":
+            try:
+                uid = self._body().get("user", "default")
+            except Exception:
+                uid = "default"
+        else:
+            uid = (self._qs().get("user") or ["default"])[0]
+        if not is_owner(uid):
+            return self._json({"error": "Самопроверка /sprint — только владелец."}, 403)
+
+        checks = []
+
+        def _run(name: str, fn):
+            """Прогнать один чек: меряем мс, ловим исключения → {name, ok, ms, detail}."""
+            t0 = time.time()
+            ok = False
+            detail = ""
+            try:
+                ok, detail = fn()
+            except Exception as e:
+                ok, detail = False, f"исключение: {e}"
+            checks.append({"name": name, "ok": bool(ok), "detail": str(detail)[:200],
+                           "ms": int((time.time() - t0) * 1000)})
+
+        # 1) Каталог моделей грузится (витрина + полный список + обогащённый RICH).
+        def _chk_catalog():
+            cur = curated_payload()
+            full = full_catalog_payload()
+            n_rich = len(RICH)
+            ok = bool(cur) and bool(full)
+            return ok, f"витрина {len(cur)}, полный {len(full)}, RICH {n_rich}"
+        _run("Каталог моделей", _chk_catalog)
+
+        # 2) Биллинг/баланс читаются (локальные чтения БД/настроек — без медленной внешней сети).
+        def _chk_billing():
+            b = load_billing()
+            ub = user_balance(uid)
+            ok = isinstance(b, dict) and "enabled" in b and isinstance(ub, dict)
+            return ok, f"тарификация {'вкл' if b.get('enabled') else 'выкл'}, баланс ${ub.get('balance', 0)}"
+        _run("Биллинг и баланс", _chk_billing)
+
+        # 3) RAG-хранилище доступно (список доков — без эмбеддингов, дёшево).
+        def _chk_rag():
+            docs = rag_docs(uid)
+            ok = isinstance(docs, list)
+            return ok, f"документов в базе: {len(docs)}"
+        _run("База знаний (RAG)", _chk_rag)
+
+        # 4) Поиск сконфигурирован (есть движки + хотя бы один grounding-ключ).
+        #    НЕ запускаем реальный фан-аут (сеть/деньги) — проверяем готовность пути.
+        def _chk_search():
+            engines = list(SUPER_ENGINES or [])
+            have_key = bool(global_key("venice")) or _GEMINI_KEY.exists() or bool(global_key("openrouter"))
+            ok = bool(engines) and have_key
+            return ok, f"движков {len(engines)}, ключ для поиска {'есть' if have_key else 'нет'}"
+        _run("Супер-поиск", _chk_search)
+
+        # 5) Планировщик жив (раннер подключён + список джобов читается).
+        def _chk_scheduler():
+            import scheduler
+            jobs = scheduler.list_jobs(uid)
+            wired = scheduler._RUNNER is not None
+            ok = wired and isinstance(jobs, list)
+            return ok, f"раннер {'подключён' if wired else 'НЕ подключён'}, джобов {len(jobs)}"
+        _run("Планировщик агентов", _chk_scheduler)
+
+        # 6) Путь вызова модели достижим (САМЫЙ дешёвый: max_tokens=1, тривиальный промпт).
+        #    Если ключа провайдера нет — это не «красный» провал теста, а пропуск (нечем звать).
+        def _chk_model():
+            mid = aux_model("main")
+            if not global_key(provider_name(mid)):
+                return True, f"пропуск: нет ключа для {mid}"
+            out = venice_complete(mid, [{"role": "user", "content": "ping"}], max_tokens=1)
+            ok = isinstance(out, str)   # пустая строка = вызов прошёл, но провайдер не дал текста
+            return ok, (f"{mid}: ответ получен" if out else f"{mid}: путь жив (пустой ответ)")
+        _run("Вызов модели", _chk_model)
+
+        passed = sum(1 for c in checks if c["ok"])
+        failed = len(checks) - passed
+        total_ms = sum(c["ms"] for c in checks)
+        self._json({"ok": failed == 0, "passed": passed, "failed": failed,
+                    "total_ms": total_ms, "checks": checks})
+
     # --- ручной триггер sleep-time уплотнения памяти (owner-only) ---
     def api_memory_consolidate(self):
         """POST /api/memory_consolidate {user, [target], [all]} → owner-only.
@@ -8346,6 +8445,8 @@ class Handler(BaseHTTPRequestHandler):
                        200 if obj is not None else 404)
         elif path == "/api/workflow":         # воркфлоу-раннер: список встроенных шаблонов
             self._json({"templates": WORKFLOW_TEMPLATES})
+        elif path == "/api/selftest":         # /sprint: смоук-самопроверка подсистем (owner-only)
+            self.api_selftest()
         else:
             self._json({"error": "not found"}, 404)
 
@@ -8500,6 +8601,8 @@ class Handler(BaseHTTPRequestHandler):
             self.api_workflow()
         elif path == "/api/jobs":             # планировщик фоновых/расписание-агентов
             self.api_jobs()
+        elif path == "/api/selftest":         # /sprint: смоук-самопроверка подсистем (owner-only)
+            self.api_selftest()
         elif path == "/api/memory_consolidate":  # owner: ручной sleep-time проход уплотнения памяти
             self.api_memory_consolidate()
         elif path == "/api/catalog_refresh":  # owner: ручной пересбор каталога
