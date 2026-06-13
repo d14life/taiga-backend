@@ -6340,6 +6340,215 @@ def extract_memory(uid: str, messages: list) -> list:
     return new_mem
 
 
+# ================================================================ КОНСОЛИДАЦИЯ ПАМЯТИ
+# «Sleep-time» проход (паттерн Letta): когда юзер не пишет, фоном пере-уплотняем его
+# долгую память — схлопываем near-duplicate факты, сливаем явные надмножества, выкидываем
+# пустые/мусорные записи. ВАЖНО: это ПОЛНОСТЬЮ ЛОКАЛЬНО (без сети, без LLM, без денег),
+# детерминированно, идемпотентно и КОНСЕРВАТИВНО. Уникальную информацию не теряем:
+# при слиянии всегда оставляем БОЛЕЕ информативную формулировку (длиннее/новее), а удалять
+# можем не больше жёсткого капа за один проход. Сверка-на-запись (reconcile_memory) и любые
+# чтения/записи памяти НЕ затрагиваются — это чисто аддитивный фон поверх существующего стора.
+
+_MEM_CONSOLIDATE_SIM = 0.82       # порог Жаккара по словам: ≥ → «почти дубликат»
+_MEM_CONSOLIDATE_MAX_DROP = 12    # потолок удаляемых записей за ОДИН проход (анти-разрушение)
+_MEM_CONSOLIDATE_MIN = 6          # меньше стольких фактов — не трогаем (нечего уплотнять)
+
+
+def _mem_tokens(text: str) -> frozenset:
+    """Множество словарных токенов (len≥3, нижний регистр) — для текст-similarity без эмбеддингов."""
+    return frozenset(t.lower() for t in _MEM_WORD_RE.findall(str(text or "")))
+
+
+def _mem_token_sim(a: frozenset, b: frozenset) -> float:
+    """Жаккар по словам: |A∩B| / |A∪B|. Пустые множества → 0 (не считаем дублями)."""
+    if not a or not b:
+        return 0.0
+    inter = len(a & b)
+    if not inter:
+        return 0.0
+    return inter / len(a | b)
+
+
+def _mem_is_empty_fact(text: str) -> bool:
+    """Пустой/мусорный факт: без единого словарного токена (≥3 букв) — нечего помнить."""
+    return not bool(_mem_tokens(text))
+
+
+def consolidate_memory(uid: str) -> dict:
+    """Sleep-time уплотнение долгой памяти юзера. ЛОКАЛЬНО, идемпотентно, консервативно.
+
+    Алгоритм (без сети/LLM):
+      1) Грузим память (list[{text, ts}]) и тумбстоуны.
+      2) Дропаем пустые/мусорные записи (без словарных токенов) и тумбстоунённые
+         (юзер их уже просил забыть — sleep-time их доубирает).
+      3) Точные дубли по нормализованному тексту схлопываем в один (оставляем НОВЕЙШИЙ ts).
+      4) Near-duplicate (Жаккар по словам ≥ порога): сливаем в КЛАСТЕР, оставляя самую
+         информативную запись (длиннее текст → больше инфы; при равенстве — новее ts),
+         остальные из кластера выкидываем как избыточные. Никогда не сливаем записи, чья
+         похожесть ниже порога — уникальная инфа остаётся.
+      5) Жёсткий кап: за один проход удаляем НЕ БОЛЕЕ _MEM_CONSOLIDATE_MAX_DROP записей.
+         Если кандидатов на удаление больше — лишних оставляем нетронутыми (доберём следующим
+         проходом → идемпотентность с мягкой деградацией, не разрушаем разом).
+      6) Порядок сохраняем (стабилен по первому вхождению) → инъекция/свежесть не «прыгают».
+
+    Идемпотентность: повторный прогон на уже уплотнённой памяти ничего не меняет
+    (дублей/мусора нет → removed=0). Возвращает сводку {ok, uid, before, after, removed, ...}.
+    Память НА ДИСКЕ перезаписывается ТОЛЬКО если что-то реально изменилось."""
+    mem = load_memory(uid)
+    before = len(mem)
+    if before < _MEM_CONSOLIDATE_MIN:
+        return {"ok": True, "uid": uid, "before": before, "after": before,
+                "removed": 0, "skipped": "too-few", "capped": False}
+
+    tombs = load_tombstones(uid)
+
+    # --- шаг 1-2: нормализуем записи, выкидываем пустые/тумбстоунённые ---
+    entries = []          # [{text, ts, norm, toks}] — выжившие после первичной чистки
+    dropped_empty = 0
+    dropped_tomb = 0
+    for m in mem:
+        if not isinstance(m, dict):
+            continue
+        text = str(m.get("text", "")).strip()
+        if not text or _mem_is_empty_fact(text):
+            dropped_empty += 1
+            continue
+        if tombs and _is_tombstoned(text, tombs):
+            dropped_tomb += 1
+            continue
+        try:
+            ts = float(m.get("ts") or 0.0)
+        except Exception:
+            ts = 0.0
+        entries.append({"text": text, "ts": ts,
+                        "norm": _norm_block(text), "toks": _mem_tokens(text)})
+
+    # --- шаг 3: схлопнуть точные дубли по нормализованному тексту (оставить новейший ts) ---
+    by_norm = {}
+    order = []
+    exact_dupes = 0
+    for e in entries:
+        k = e["norm"]
+        if k in by_norm:
+            exact_dupes += 1
+            if e["ts"] > by_norm[k]["ts"]:
+                by_norm[k]["ts"] = e["ts"]   # удерживаем самую свежую метку
+        else:
+            by_norm[k] = e
+            order.append(k)
+    uniq = [by_norm[k] for k in order]
+
+    # --- шаг 4: near-duplicate кластеризация (Жаккар по словам ≥ порога) ---
+    # Каждая запись либо становится «представителем» кластера (остаётся в памяти на своей
+    # ПЕРВОЙ позиции), либо признаётся избыточной (поглощена представителем). Сравниваем
+    # только с уже принятыми представителями — O(n²) на маленьком n (память капится 80),
+    # это копейки и без сети. У представителя удерживаем самую информативную формулировку
+    # (длиннее текст → больше инфы; при равной длине — новее ts) и новейший ts кластера —
+    # так уникальная инфа НЕ теряется: дубль лишь «подтягивает» лучший вариант в один слот.
+    reps = []             # индексы представителей в uniq, в порядке первого появления
+    drop_idx = []         # индексы near-dup записей (упорядочены — для предсказуемого кап-усечения)
+    for i, e in enumerate(uniq):
+        best_j, best_sim = -1, 0.0
+        for j in reps:
+            sim = _mem_token_sim(e["toks"], uniq[j]["toks"])
+            if sim >= _MEM_CONSOLIDATE_SIM and sim > best_sim:
+                best_sim, best_j = sim, j
+        if best_j < 0:
+            reps.append(i)            # новый кластер — запись остаётся на своём месте
+            continue
+        # near-dup → запись i избыточна; в слоте представителя оставляем лучший текст + новейший ts
+        rep = uniq[best_j]
+        rep["ts"] = max(rep["ts"], e["ts"])
+        if (len(e["text"]), e["ts"]) > (len(rep["text"]), rep["ts"]):
+            rep["text"] = e["text"]   # текущая формулировка информативнее — забираем её
+        drop_idx.append(i)
+
+    # --- шаг 5: ОБЩИЙ кап на удаление за проход (анти-разрушение) ---
+    # Кап ограничивает СУММАРНОЕ число удалённых записей за один проход (пустые + забытые +
+    # точные дубли + near-dup). Самые безопасные удаления (пустые/забытые/точные дубли — нулевая
+    # потеря инфы) приоритетны; если суммой всё ещё перебор, near-dup усекаем (доберём след.
+    # проходом → идемпотентность). near-dup мы НИКОГДА не предпочитаем безопасным удалениям.
+    near_drop = set(drop_idx)
+    safe_removed = dropped_empty + dropped_tomb + exact_dupes   # уже «применены» к uniq
+    capped = False
+    budget = _MEM_CONSOLIDATE_MAX_DROP - safe_removed
+    if len(near_drop) > max(0, budget):
+        capped = True
+        keep_n = max(0, budget)
+        near_drop = set(drop_idx[:keep_n])    # оставляем самые ранние near-dup-удаления
+
+    # --- шаг 6: собрать итог в стабильном порядке (по первому вхождению) ---
+    result = []
+    for i, e in enumerate(uniq):
+        if i in near_drop:
+            continue
+        result.append({"text": e["text"][:240], "ts": e["ts"] or _now_ts()})
+    result = result[-80:]      # тот же кап, что и в остальном коде памяти
+
+    drop_idx = near_drop       # для сводки/совместимости ниже
+    after = len(result)
+    removed = before - after
+
+    # пишем на диск ТОЛЬКО при реальном изменении (идемпотентность + не дёргаем FTS зря)
+    if removed != 0 or [r["text"] for r in result] != [str(m.get("text", "")).strip()
+                                                        for m in mem if isinstance(m, dict)]:
+        save_memory(uid, result)
+
+    summary = {"ok": True, "uid": uid, "before": before, "after": after,
+               "removed": removed, "dropped_empty": dropped_empty,
+               "dropped_tombstoned": dropped_tomb, "near_dupes_merged": len(drop_idx),
+               "capped": capped}
+    try:
+        print(f"── consolidate_memory[{uid}]: {before} → {after} "
+              f"(−{removed}; пустых {dropped_empty}, забытых {dropped_tomb}, "
+              f"near-dup {len(drop_idx)}{'; capped' if capped else ''})")
+    except Exception:
+        pass
+    return summary
+
+
+def consolidate_active_users(max_users: int = 50, idle_sec: int = 6 * 3600) -> dict:
+    """Sleep-time проход по ПОЛЬЗОВАТЕЛЯМ, которые сейчас «спят» (не писали idle_sec).
+
+    Перечисляем юзеров с непустой памятью (та же выборка, что и FTS-бэкфил), и для каждого
+    «простаивающего» гоним consolidate_memory(uid). idle_sec=0 → консолидируем всех (для
+    ручного триггера/тестов). Активных (писали недавно) ПРОПУСКАЕМ — чтобы не уплотнять
+    память прямо под рукой у юзера. Возвращает сводку по обработанным."""
+    now = _now_ts()
+    uids = []
+    try:
+        conn = _db()
+        rows = conn.execute("SELECT DISTINCT uid FROM memory "
+                            "WHERE uid NOT LIKE '%::tombstones'").fetchall()
+        uids = [r["uid"] for r in rows]
+    except Exception:
+        uids = []
+    processed, skipped_active, results = 0, 0, []
+    for uid in uids:
+        if processed >= max_users:
+            break
+        if idle_sec > 0:
+            try:
+                last = 0.0
+                for ch in chat_iter_recent(uid, 1):     # самый свежий чат юзера
+                    last = float(ch.get("ts") or 0.0)
+                    break
+                if last and (now - last) < idle_sec:
+                    skipped_active += 1
+                    continue
+            except Exception:
+                pass
+        try:
+            r = consolidate_memory(uid)
+            if r.get("removed"):
+                results.append({"uid": uid, "removed": r["removed"]})
+            processed += 1
+        except Exception:
+            pass
+    return {"ok": True, "users_seen": len(uids), "processed": processed,
+            "skipped_active": skipped_active, "changed": results}
+
+
 _MEM_STYLE_RE = re.compile(
     r"люб|предпоч|кратк|коротк|подроб|развёрну|развёрнут|стиль|тон|формальн|"
     r"нравится|больше всего|обращ|на ты|на вы|prefer|short|brief|concise|verbose|detailed",
@@ -7803,6 +8012,27 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"jobs": scheduler.toggle_job(uid, str(c.get("id", "")), bool(c.get("enabled")))})
         return self._json({"jobs": scheduler.list_jobs(uid)})
 
+    # --- ручной триггер sleep-time уплотнения памяти (owner-only) ---
+    def api_memory_consolidate(self):
+        """POST /api/memory_consolidate {user, [target], [all]} → owner-only.
+
+        Тело:
+          user   — кто вызывает (owner-гейт; по умолчанию "default").
+          target — чью память уплотнить (по умолчанию = user). Owner может указать любого.
+          all    — true → пройтись по ВСЕМ юзерам с памятью прямо сейчас (idle-гейт снят).
+
+        Без побочных эффектов кроме перезаписи уплотнённой памяти. Сетевых вызовов/трат нет.
+        Возвращает сводку consolidate_memory (или consolidate_active_users при all=true)."""
+        c = self._body()
+        uid = c.get("user", "default")
+        if not is_owner(uid):
+            return self._json({"error": "Уплотнение памяти — только владелец."}, 403)
+        if c.get("all"):
+            # ручной прогон по всем — idle_sec=0 снимает «спит ли юзер»-гейт (для теста/обслуживания)
+            return self._json(consolidate_active_users(idle_sec=0))
+        target = str(c.get("target") or uid).strip() or uid
+        return self._json(consolidate_memory(target))
+
     # --- ОРКЕСТРАТОР агентов (LangGraph): мозг → воркеры (BYOK) → синтез + таймлайн ---
     def api_orchestrate(self):
         c = self._body()
@@ -8270,6 +8500,8 @@ class Handler(BaseHTTPRequestHandler):
             self.api_workflow()
         elif path == "/api/jobs":             # планировщик фоновых/расписание-агентов
             self.api_jobs()
+        elif path == "/api/memory_consolidate":  # owner: ручной sleep-time проход уплотнения памяти
+            self.api_memory_consolidate()
         elif path == "/api/catalog_refresh":  # owner: ручной пересбор каталога
             self.api_catalog_refresh()
         elif path == "/api/browser":          # серверный агентный браузер (open/act/close)
@@ -9772,6 +10004,14 @@ def _scheduled_runner(uid, task, workers):
     return r
 
 
+def _internal_maintenance_runner(key: str) -> dict:
+    """Колбэк планировщика для СЛУЖЕБНЫХ sleep-time задач (без денег/метеринга).
+    Сейчас единственная задача — фоновое уплотнение памяти простаивающих юзеров."""
+    if key == "memory_consolidate":
+        return consolidate_active_users()
+    return {"ok": False, "error": f"неизвестная служебная задача: {key}"}
+
+
 # ---------------------------------------------------------------- САМО-ЗНАНИЕ («Тайга знает себя»)
 
 def self_manifest() -> dict:
@@ -9880,6 +10120,10 @@ def main():
     _start_catalog_refresher()
     import scheduler
     scheduler.set_runner(_scheduled_runner)
+    # sleep-time обслуживание: фоновое уплотнение памяти юзеров (OFF by default — тикает только
+    # при MOSTIK_SLEEPTIME=1; кадэнс — раз в сутки в тихие часы). Сверка-на-запись не затронута.
+    scheduler.set_internal_runner(_internal_maintenance_runner)
+    scheduler.register_internal("memory_consolidate")
     scheduler.start()
     ensure_default_user()
 

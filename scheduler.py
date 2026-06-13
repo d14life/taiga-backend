@@ -20,11 +20,68 @@ import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import os
+
 BASE = Path("~/.mostik-ai").expanduser()
 _JOBS = BASE / "jobs.json"
 _MIN_INTERVAL = 600          # не чаще раза в 10 минут (анти-абуз/стоимость)
 _RUNNER = None               # callback(uid, task, workers) -> dict; ставит server.py
 _LOCK = threading.Lock()
+
+# --------------------------------------------------------------------------- #
+#  ВНУТРЕННИЕ системные джобы (sleep-time обслуживание, не юзерские агенты)
+# --------------------------------------------------------------------------- #
+# Отдельный реестр служебных задач самой Тайги (напр. фоновое уплотнение памяти юзеров).
+# НЕ персистится в jobs.json и НЕ ходит через _RUNNER (который метрит/списывает баланс):
+# у системных задач свой колбэк _INTERNAL_RUNNER без денег. По умолчанию ВЫКЛЮЧЕНО —
+# включается только переменной окружения MOSTIK_SLEEPTIME=1, чтобы фон никогда не стартовал
+# сам по себе на каждом инстансе. Кадэнс — раз в сутки (не на каждый запрос/тик).
+_INTERNAL_RUNNER = None      # callback(key) -> dict; ставит server.py через set_internal_runner
+_INTERNAL_JOBS = {}          # key -> {"schedule": dict, "next_run": float, "last_run", "last_result"}
+_INTERNAL_LOCK = threading.Lock()
+
+
+def set_internal_runner(fn):
+    """server.py регистрирует колбэк, который исполняет служебную задачу по её ключу."""
+    global _INTERNAL_RUNNER
+    _INTERNAL_RUNNER = fn
+
+
+def _sleeptime_on() -> bool:
+    """Sleep-time обслуживание включается ТОЛЬКО явным флагом окружения (OFF by default)."""
+    return str(os.environ.get("MOSTIK_SLEEPTIME", "")).strip().lower() in ("1", "true", "yes", "on")
+
+
+def register_internal(key: str, schedule: dict = None):
+    """Зарегистрировать рекуррентную служебную задачу. Дефолт-кадэнс — ежедневно в 04:00
+    (локальное время сервера, тихие часы). Идемпотентно: повторная регистрация того же
+    ключа не плодит дублей. Реально тикает только при включённом sleep-time (см. _sleeptime_on)."""
+    schedule = schedule or {"kind": "time", "at_time": "04:00", "weekdays": "daily"}
+    with _INTERNAL_LOCK:
+        if key in _INTERNAL_JOBS:
+            return
+        _INTERNAL_JOBS[key] = {"schedule": schedule,
+                               "next_run": compute_next_run(schedule, time.time()),
+                               "last_run": None, "last_result": None}
+
+
+def _tick_internal():
+    """Прогнать due служебные задачи. No-op, если sleep-time выключен или раннер не задан."""
+    if not _sleeptime_on() or not _INTERNAL_RUNNER:
+        return
+    now = time.time()
+    with _INTERNAL_LOCK:
+        items = list(_INTERNAL_JOBS.items())
+    for key, job in items:
+        if job.get("next_run", 0) > now:
+            continue
+        try:
+            r = _INTERNAL_RUNNER(key) or {}
+            job["last_result"] = str(r)[:300]
+        except Exception as e:
+            job["last_result"] = f"error: {e}"
+        job["last_run"] = now
+        job["next_run"] = compute_next_run(job["schedule"], now)
 
 # Канонический порядок дней недели; индекс совпадает с datetime.weekday() (пн=0 … вс=6)
 _WEEKDAY_NAMES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
@@ -207,6 +264,10 @@ def start():
             time.sleep(60)
             try:
                 _tick()
+            except Exception:
+                pass
+            try:
+                _tick_internal()      # служебные sleep-time задачи (OFF by default, см. флаг)
             except Exception:
                 pass
     threading.Thread(target=_loop, daemon=True).start()
