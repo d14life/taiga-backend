@@ -43,6 +43,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from pathlib import Path
+import ad_gen                       # L14: UGC-видеореклама (сценарии по брифу) — pure helpers, lazy server ref
 
 ROOT = Path(__file__).parent
 BASE = Path("~/.mostik-ai").expanduser()
@@ -9927,6 +9928,23 @@ class Handler(BaseHTTPRequestHandler):
             self.api_image_tool()
         elif path == "/api/cinema-export":    # склейка фильма в MP4 (ffmpeg)
             self.api_cinema_export()
+        elif path == "/api/ad_gen":           # L14: UGC-видеореклама — сценарии по брифу (orchestrate)
+            c = self._body()
+            uid = c.get("user", "default")
+            action = str(c.get("action") or "scripts")
+            if action == "avatars":           # avatar-модели «фото→говорит» из живого каталога
+                self._json(ad_gen.ad_avatar_models(sys.modules[__name__]))
+            else:                             # scripts: модель пишет N UGC-сценариев по брифу
+                brief = str(c.get("brief") or c.get("text") or "")
+                if abuse_check(brief):
+                    log_abuse(uid, "ad_gen")
+                    return self._json({"error": "Запрос нарушает правила."}, 400)
+                if len(brief) > SEC_MAX_PROMPT_CHARS:
+                    return self._json({"error": "слишком длинный бриф"}, 400)
+                self._json(ad_gen.ad_scripts(
+                    sys.modules[__name__], brief,
+                    n=c.get("n", 3), url=str(c.get("url") or ""),
+                    product=str(c.get("product") or ""), tone=str(c.get("tone") or "")))
         elif path == "/api/rag_ingest":       # RAG: документ → эмбеддинги (бэкенд)
             self.api_rag_ingest()
         elif path == "/api/rag_query":        # RAG: семантический поиск по докам
