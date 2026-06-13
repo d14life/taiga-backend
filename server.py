@@ -2513,7 +2513,8 @@ def _clean_temperature(temperature):
 
 
 def venice_stream(model: str, messages: list, max_tokens: int, usage_out: dict = None,
-                  key: str = None, temperature=None, reasoning_effort: str = None):
+                  key: str = None, temperature=None, reasoning_effort: str = None,
+                  reasoning_cb=None, _max_continues: int = 4):
     """Генератор дельт текста. key — конкретный ключ (BYOK/пул); если None — общий пул.
     usage_out — складываем реальный расход токенов для биллинга. Доп. ключ
     usage_out["__finished__"]=True ставится ТОЛЬКО при ЧИСТОМ финише апстрима
@@ -2579,7 +2580,17 @@ def venice_stream(model: str, messages: list, max_tokens: int, usage_out: dict =
                     # finish_reason на последнем choice — признак ЧИСТОГО завершения, а "length" → обрезка.
                     if choice0.get("finish_reason"):
                         round_finish = choice0["finish_reason"]
-                    delta = (choice0.get("delta") or {}).get("content") or ""
+                    _d = choice0.get("delta") or {}
+                    # L6: «думанье» (reasoning_content / reasoning) → ОТДЕЛЬНЫЙ канал через reasoning_cb,
+                    # НЕ примешиваем к видимому тексту. Только если вызывающий попросил (cb задан).
+                    if reasoning_cb is not None:
+                        _r = _d.get("reasoning_content") or _d.get("reasoning") or ""
+                        if _r:
+                            try:
+                                reasoning_cb(_r)
+                            except Exception:
+                                pass
+                    delta = _d.get("content") or ""
                     if delta:
                         acc += delta
                         yield delta
@@ -10883,7 +10894,8 @@ class Handler(BaseHTTPRequestHandler):
                     for delta in venice_stream(stream_model, msgs, max_tokens, u, stream_key,
                                                temperature=temperature,
                                                reasoning_effort=(req_reasoning_effort
-                                                                 if model_reasons(stream_model) else None)):
+                                                                 if model_reasons(stream_model) else None),
+                                               reasoning_cb=lambda rt: self._sse({"type": "reasoning", "text": rt})):
                         got_any = True
                         out_total += delta
                         if buffering:

@@ -19,7 +19,7 @@ ANOTHER claude session may also work this repo — collision-guard before EVERY 
    Tick the checkbox here. Restart backend if server.py changed.
 5. Append ONE casual plain-English line to WHATS-NEW.md: "✨ <feature> — <what it does for the user>".
 Rules: NEVER auto-pick dead models. server.py edits sequential. L13 BLOCKED on Damir's harness repo link = skip.
-Priority: L6 · L7 · L8 · L9 · L10 · L11 · L12 · L18 · L15 · L16 · L14 · L3 · L21 · L22
+Priority: L7 · L8 · L9 · L10 · L11 · L12 · L18 · L15 · L16 · L14 · L3 · L21 · L22
 
 ## DONE (committed)
 - [x] L0 Agent S identity rename + name-stamp fix + default-leak fix        (5f8c24e)
@@ -44,7 +44,9 @@ Priority: L6 · L7 · L8 · L9 · L10 · L11 · L12 · L18 · L15 · L16 · L14 
             best_for_task, the L4a backend) and answer FULLY but cheaper, told transparently
             ("большой запрос — отвечаю моделью X в рамках бюджета"). No truncation, ever.
         VERIFIED: (a) venice_stream auto-continues on finish_reason=='length' → 64-tok chunk cap produced a
-        6239-char COMPLETE answer (ends cleanly, no cut). (b) non-owner max_spend=0.003 → opus→deepseek-v4-
+        6239-char answer — BUT that run didn't truly test continue (model ignored the cap); FIXED a latent
+        NameError (_max_continues was undefined) in commit w/ L6 and RE-VERIFIED PROPERLY: cap=120 → 1164-char
+        COMPLETE answer via multi-round continue, clean ending, no error. (b) non-owner max_spend=0.003 → opus→deepseek-v4-
         pro-cheaper + transparent meta.note (shown in UI). (a) live for ALL; (b) for billed users only
         (owner = free opus → not budget-limited; taiga-web currently sends user=default=owner → (b) dormant).
 - [x] L4a TIERS (Damir): BACKEND (1a1ad02) + UI CHIP (taiga-web 3bcc8eb). cost_tier(model) +
@@ -124,7 +126,10 @@ Priority: L6 · L7 · L8 · L9 · L10 · L11 · L12 · L18 · L15 · L16 · L14 
 - [ ] L16 Harden MY build-loop with the 5 subsystems (LANES=feature-list, verify-before-commit, scoped).
 
 ## PRODUCT UI (backend + frontend, each needs a visible button)
-- [ ] L6 ChatGPT-style thinking display: capture reasoning_content from stream → separate SSE
+- [x] L6 ChatGPT-style thinking display — DONE (server.py reasoning_cb + taiga-web 7ffe7ae): venice_stream
+        surfaces reasoning_content on a SEPARATE channel → SSE {type:"reasoning"} → collapsible «Думает…/
+        Подумал Nс» box, not mixed into the answer. VERIFIED: thinking model → 172 reasoning events. Original ask:
+        capture reasoning_content from stream → separate SSE
         channel → collapsible "Думает…→Подумал Nс" box (empty-safe for models w/o trace).
 - [ ] L7 Verify-against-reality button: hallucination(vs web) + chat-drift + memory-vs-reality;
         verdict ✅/⚠️N/❌ + fixes. Reuse BEAM_FUSION_PROMPT + tool_web_search. (no name-stamp check)
