@@ -29,4 +29,13 @@ DECIDED — HYBRID:
   Foundations exist (/api/browser · run_code/shell/DEV_TOOLS · studio APIs); L15 = orchestrate them with
   multi-model deliberation → tool action → verify loops → memory layering → session-level agent mode.
 
+## SKILL STORAGE (Damir asked) — SERVER-SIDE per account, NOT the extension
+  TODAY: user skills persist in user_dir(uid)/skills/index.json + <skill>.md (per-user, survives sessions). ✓
+  DECIDED: canonical store = SERVER, account-bound → syncs across ALL devices, no quota, survives reinstalls.
+    For full skills: store whole folder (SKILL.md + scripts + resources) server-side per account.
+    Chrome extension storage = WRONG (device-local, no sync, ~5-10MB, lost on uninstall). NOT the store.
+  RUNTIME: store=server → light run = push script to browser-WASM in the web-app TAB (no extension needed);
+    heavy run = mount skill folder into the user's cloud sandbox. The cobrowse-extension is for the
+    BROWSER-AGENT (co-browsing real tabs) ONLY, not skill storage/exec.
+
 ## MCP CONNECTORS = ✅ ALREADY BUILT (full client + catalog + mcp-panel UI + agent integration). Not a gap.
