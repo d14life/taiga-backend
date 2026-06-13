@@ -44,8 +44,11 @@ Priority: L4a-ui · L4b · L4c · L19 · L20 · L4f · L6 · L7 · L8 · L9 · L
         Council members/Brain-expert now get the FULL chat history (memory), inherit effort
         (deep→reasoning_effort, gated), scaled token budget, + optional per-head master prompt
         (memberPrompts). venice_complete += reasoning_effort. Heads work independent → then fuse.
-- [ ] L4c BRAIN = 2× (Damir): Brain stays its own architecture (driver triages → ONE expert). Double
-        master prompts (both editable), double tier-cost. On auto: pick the 2 best-for-task in the tier.
+- [ ] L4c BRAIN = ORCHESTRATOR (Damir, updated): Brain's lead doesn't just delegate to ONE expert — it
+        ORCHESTRATES MULTIPLE models like the agent feature (manager → directs N specialists, hierarchical).
+        This is the clean split vs Council (Council = N equals deliberate→fuse, flat). Lead breaks the task,
+        routes pieces to best-for-task models (in the chosen tier), combines. Editable lead + per-model
+        master prompts; count = L19 (how many models it orchestrates). Each model inherits pad + chat memory.
 - [ ] L4f Multi-engine UI: SHOW which model each head uses (per Damir "needs to be shown"), per-head
         master-prompt editor, heads visibly obey the main pad (Auto/Deep/Fast/tier). "independent→together".
 - [x] L17 Model-picker SORT: Мощнее (benchmark) / Новые (created) / Дешевле (per1k).  (fe 99ce78d / 58157dd)
@@ -70,6 +73,9 @@ Priority: L4a-ui · L4b · L4c · L19 · L20 · L4f · L6 · L7 · L8 · L9 · L
         ACT→typed tools as code-as-action (inspectable/reversible) · VERIFY→run it, only passing checks=done ·
         STATE→memory layering (working/semantic/experiential/long-term) + resumable progress ·
         SCOPE→one sub-goal at a time, explicit done. Build on existing agent-mode + tools + council.
+        SESSION-LEVEL (Damir): a NEW chat can START as a full agent session depending on SETTINGS (setting
+        "new chats = agent mode" → the whole session orchestrates models+tools multi-step from msg 1, not
+        just per-message). Brain-orchestrator (L4c) is the per-turn version; this is the whole-session version.
 - [ ] L16 Harden MY build-loop with the 5 subsystems (LANES=feature-list, verify-before-commit, scoped).
 
 ## PRODUCT UI (backend + frontend, each needs a visible button)
