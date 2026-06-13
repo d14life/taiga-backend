@@ -29,3 +29,5 @@ identity.txt
 # os
 .DS_Store
 Thumbs.db
+*.out
+probe*.py

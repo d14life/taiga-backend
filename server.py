@@ -9695,7 +9695,24 @@ class Handler(BaseHTTPRequestHandler):
     def _do_GET_inner(self):
         path = urllib.parse.urlparse(self.path).path
         if path == "/":
-            body = (ROOT / "index.html").read_bytes()
+            # NEW-1: единственный продукт — taiga-web (:3000). Легаси index.html больше НЕ отдаём
+            # как приложение. Этот процесс остаётся ТОЛЬКО бэкендом (/api/*). В проде задать
+            # TAIGA_APP_URL=<адрес taiga-web> → редиректим корень на приложение; иначе — короткая заметка.
+            app_url = os.environ.get("TAIGA_APP_URL", "").strip()
+            if app_url:
+                self.send_response(307)
+                self.send_header("Location", app_url)
+                self.end_headers()
+                return
+            body = ("<!doctype html><meta charset=utf-8><title>Тайга</title>"
+                    "<style>body{background:#0a0a0f;color:#e8e8ef;font:16px/1.6 system-ui;"
+                    "display:grid;place-items:center;min-height:100vh;margin:0}"
+                    "a{color:#a78bfa}</style>"
+                    "<div style='text-align:center;max-width:30rem;padding:2rem'>"
+                    "<h1 style='font-weight:600'>Тайга</h1>"
+                    "<p>Это бэкенд-API Тайги. Приложение — отдельный веб-клиент (taiga-web).</p>"
+                    "<p style='opacity:.6;font-size:.85em'>API доступно на <code>/api/*</code>.</p>"
+                    "</div>").encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
