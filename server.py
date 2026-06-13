@@ -22,6 +22,7 @@ import html as html_mod
 import ipaddress
 import json
 import operator
+import os
 import re
 import secrets
 import shutil
@@ -31,6 +32,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 import http.client
 import urllib.error
 import urllib.parse
@@ -2092,6 +2094,72 @@ def build_api_messages(messages: list) -> list:
         else:
             out.append({"role": role, "content": text})
     return out
+
+
+# ── НАБЛЮДАЕМОСТЬ (lane 20A): структурный лог запроса + единый конверт ошибок ──
+# Включается переменной TAIGA_LOG (дефолт ON). Уровни: TAIGA_LOG=0 — выкл,
+# =1/on — обычный (по строке на запрос), =2/debug — то же (зарезервировано под детали).
+# Лог ОДНОЙ строкой в stderr формата key=value: method/path/status/ms/uid и при
+# ошибке err_type/err. Секреты НЕ логируем — только путь+статус+тайминг; деталь ошибки
+# усекаем. Логирование НИКОГДА не роняет запрос (всё под try/except).
+def _log_enabled():
+    v = (os.environ.get("TAIGA_LOG") or "1").strip().lower()
+    return v not in ("0", "off", "false", "no", "")
+
+
+def _log_kv(s):
+    """Экранируем значение под key=value: схлопываем пробелы/переводы строк, режем длину."""
+    s = str(s).replace("\n", " ").replace("\r", " ").replace('"', "'")
+    s = " ".join(s.split())
+    return s[:200]
+
+
+def log_request(method, path, status, ms, uid=None, err_type=None, err=None):
+    """Одна разборчивая строка в stderr на запрос. Безопасно к сбоям — глотает всё."""
+    try:
+        if not _log_enabled():
+            return
+        parts = ['req',
+                 'method=%s' % method,
+                 'path=%s' % _log_kv(path),
+                 'status=%s' % status,
+                 'ms=%s' % ms]
+        if uid:
+            parts.append('uid=%s' % _log_kv(uid))
+        if err_type:
+            parts.append('err_type=%s' % _log_kv(err_type))
+        if err:
+            parts.append('err="%s"' % _log_kv(err))
+        sys.stderr.write(" ".join(parts) + "\n")
+        sys.stderr.flush()
+    except Exception:
+        pass
+
+
+# Маппинг HTTP-статуса → короткий машинный код для конверта {error, code}.
+_ERR_CODE_BY_STATUS = {
+    400: "bad_request",
+    401: "unauthorized",
+    403: "forbidden",
+    404: "not_found",
+    402: "no_balance",
+    422: "unprocessable",
+    429: "rate_limited",
+    500: "internal",
+    502: "upstream",
+    503: "unavailable",
+}
+
+
+def error_code_for(status):
+    """Короткий код для конверта ошибки по HTTP-статусу (additive поле `code`)."""
+    if status in _ERR_CODE_BY_STATUS:
+        return _ERR_CODE_BY_STATUS[status]
+    if status and status >= 500:
+        return "internal"
+    if status and status >= 400:
+        return "error"
+    return "error"
 
 
 def friendly_api_error(code, detail="", has_images=False):
@@ -7421,7 +7489,81 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    # — НАБЛЮДАЕМОСТЬ (lane 20A) —
+    # _resp_started: ставится в True, как только мы НАЧАЛИ слать ответ (любые заголовки).
+    # Бэкстоп необработанных исключений по нему понимает: можно ли ещё отдать чистый
+    # JSON-500, или ответ/SSE-поток уже пошёл (тогда второй ответ слать НЕЛЬЗЯ — это
+    # сломало бы протокол; ошибку в этом случае только логируем).
+    def send_response(self, code, *a, **kw):
+        self._resp_started = True
+        self._status = code
+        return super().send_response(code, *a, **kw)
+
+    def _safe_uid(self):
+        """uid для строки лога — БЕЗ повторного чтения тела (тело уже прочитано хендлером,
+        и re-read сломал бы стрим). Берём из query-строки, если есть; иначе None."""
+        try:
+            v = self._qs().get("user")
+            return v[0] if v else None
+        except Exception:
+            return None
+
+    def _dispatch(self, method, fn):
+        """Единая обёртка do_GET/do_POST: тайминг + структурный лог + бэкстоп
+        необработанных исключений. SUCCESS-путь и SSE-стримы НЕ меняются — fn
+        выполняется как раньше; меняется лишь: (1) добавилась строка лога,
+        (2) необработанное исключение даёт чистый 500 {error,code} (если ответ
+        ещё не начат) вместо стектрейса/обрыва сокета, а реальный трейс уходит в stderr."""
+        self._resp_started = False
+        self._status = None
+        t0 = time.monotonic()
+        path = "?"
+        err_type = err_msg = None
+        try:
+            path = urllib.parse.urlparse(self.path).path
+        except Exception:
+            pass
+        try:
+            fn()
+        except json.JSONDecodeError as e:
+            # битый JSON в теле — чистый 400 (если ответ ещё не пошёл)
+            err_type, err_msg = "JSONDecodeError", str(e)
+            if not self._resp_started:
+                try:
+                    self._json({"error": "тело должно быть корректным JSON",
+                                "code": "bad_json"}, 400)
+                except Exception:
+                    pass
+        except (BrokenPipeError, ConnectionResetError) as e:
+            # клиент отвалился/закрыл стрим — глотаем тихо, отвечать уже некому
+            err_type, err_msg = type(e).__name__, "client disconnected"
+        except Exception as e:
+            # НЕОБРАБОТАННОЕ исключение — реальный трейс в stderr (сервер-сайд),
+            # юзеру — дружелюбный 500 {error,code} ТОЛЬКО если ответ ещё не начат.
+            err_type, err_msg = type(e).__name__, str(e)
+            try:
+                traceback.print_exc(file=sys.stderr)
+            except Exception:
+                pass
+            if not self._resp_started:
+                try:
+                    self._json({"error": "внутренняя ошибка, попробуй ещё раз",
+                                "code": "internal"}, 500)
+                except Exception:
+                    pass
+        finally:
+            ms = int((time.monotonic() - t0) * 1000)
+            log_request(method, path, self._status, ms,
+                        uid=self._safe_uid(), err_type=err_type, err=err_msg)
+
     def _json(self, obj, code=200):
+        # Единый конверт ошибок (additive): для HTTP-ошибок (status>=400) с полем
+        # `error` дополняем коротким машинным `code`, НЕ трогая существующий `error`.
+        # SUCCESS-ответы (2xx) и in-band {ok:False,...} с HTTP-200 остаются БАЙТ-В-БАЙТ
+        # прежними — мы их не касаемся. Если `code` уже задан вручную — уважаем его.
+        if code >= 400 and isinstance(obj, dict) and obj.get("error") and "code" not in obj:
+            obj = {**obj, "code": error_code_for(code)}
+        self._status = code            # для строки лога запроса (см. _dispatch)
         body = json.dumps(obj, ensure_ascii=False).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -7651,7 +7793,7 @@ class Handler(BaseHTTPRequestHandler):
         except urllib.error.HTTPError as e:
             return self._json({"error": f"озвучка {e.code}: {e.read().decode('utf-8','ignore')[:200]}"}, 502)
         except Exception as e:
-            return self._json({"error": str(e)}, 502)
+            return self._json({"error": friendly_api_error(None, str(e))}, 502)
         if not ctype.startswith("audio"):
             ctype = "audio/wav"
         data_url = "data:" + ctype + ";base64," + base64.b64encode(audio).decode()
@@ -7795,7 +7937,7 @@ class Handler(BaseHTTPRequestHandler):
         except urllib.error.HTTPError as e:
             return self._json({"error": f"3D API {e.code}: {e.read().decode('utf-8','ignore')[:200]}"}, 502)
         except Exception as e:
-            return self._json({"error": str(e)}, 502)
+            return self._json({"error": friendly_api_error(None, str(e))}, 502)
         url = res.get("url")
         if not url:
             return self._json({"error": "3D готово, но url не пришёл"}, 502)
@@ -7876,7 +8018,7 @@ class Handler(BaseHTTPRequestHandler):
         except urllib.error.HTTPError as e:
             return self._json({"error": f"картинка {e.code}: {e.read().decode('utf-8','ignore')[:200]}"}, 502)
         except Exception as e:
-            return self._json({"error": str(e)}, 502)
+            return self._json({"error": friendly_api_error(None, str(e), has_images=True)}, 502)
         # бесплатная subscription-картинка нашему кошельку стоит $0 → юзера не метрим
         if sub_free:
             info = {"cost": 0, "charge": 0, "subscription": True, "model": model}
@@ -7917,7 +8059,7 @@ class Handler(BaseHTTPRequestHandler):
         except urllib.error.HTTPError as e:
             return self._json({"error": f"{tool} {e.code}: {e.read().decode('utf-8','ignore')[:200]}"}, 502)
         except Exception as e:
-            return self._json({"error": str(e)}, 502)
+            return self._json({"error": friendly_api_error(None, str(e), has_images=True)}, 502)
         info = {"cost": price, "charge": 0}
         if not owner:
             info = charge_media(uid, price, kind=f"tool-{tool}")
@@ -8260,7 +8402,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             r = super_search(q, engines=c.get("engines"), depth=c.get("depth", "normal"))
         except Exception as e:
-            return self._json({"error": str(e)}, 502)
+            return self._json({"error": friendly_api_error(None, str(e))}, 502)
         if not owner:
             r.update(charge_media(uid, 0.02, kind="search"))
         return self._json(r)
@@ -8474,7 +8616,7 @@ class Handler(BaseHTTPRequestHandler):
                                   mode=c.get("mode", "parallel"), tools={"search": super_search},
                                   verify=verifier)
         except Exception as e:
-            return self._json({"error": str(e)}, 502)
+            return self._json({"error": friendly_api_error(None, str(e))}, 502)
         r["steps"] = steps
         if not owner:
             r.update(charge_media(uid, 0.05, kind="orchestrate"))
@@ -8629,6 +8771,10 @@ class Handler(BaseHTTPRequestHandler):
 
     # --- GET ---
     def do_GET(self):
+        # Тонкая обёртка: тайминг + лог + бэкстоп необработанных исключений (см. _dispatch).
+        self._dispatch("GET", self._do_GET_inner)
+
+    def _do_GET_inner(self):
         path = urllib.parse.urlparse(self.path).path
         if path == "/":
             body = (ROOT / "index.html").read_bytes()
@@ -8746,17 +8892,11 @@ class Handler(BaseHTTPRequestHandler):
 
     # --- POST ---
     def do_POST(self):
-        # Внешний страж: битый JSON в теле (json.loads в _body) НЕ должен ронять сокет
-        # без HTTP-ответа — отдаём чистый 400. Обрыв соединения клиентом глотаем тихо.
-        try:
-            self._do_POST_inner()
-        except json.JSONDecodeError:
-            try:
-                self._json({"error": "bad json — тело должно быть корректным JSON"}, 400)
-            except Exception:
-                pass
-        except (BrokenPipeError, ConnectionResetError):
-            pass
+        # Внешний страж теперь в _dispatch: тайминг + структурный лог + единый бэкстоп.
+        # Битый JSON в теле → чистый 400 {error,code}; обрыв соединения глотается тихо;
+        # любое необработанное исключение → чистый 500 (если ответ ещё не пошёл) с трейсом
+        # в stderr, а НЕ голый стектрейс/сброс сокета.
+        self._dispatch("POST", self._do_POST_inner)
 
     def _do_POST_inner(self):
         path = urllib.parse.urlparse(self.path).path
