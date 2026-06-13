@@ -673,16 +673,130 @@ def _fame(s: str) -> int:
 
 _TIER_RANK = {"frontier": 4, "large": 3, "mid": 2, "small": 1, "unknown": 2}
 
+# ── БЕНЧМАРК-МАТРИЦА ИНТЕЛЛЕКТА (источник правды для «ум» и авто-роутинга) ──────────────
+# Балл 0-100 ПО ЗАДАЧАМ, а не по строковой эвристике имени. Якорь: GPT-5 ≈ 95 (general).
+# Столбцы: general(MMLU/chat) · code(SWE/HumanEval) · reason(GPQA/AIME/MATH) · vision(MMMU) · write(креатив).
+# vision=0 → модель НЕ видит. Файнтюн наследует балл базовой модели (матч по семейству).
+# Матчим по САМОМУ ДЛИННОМУ совпавшему паттерну (specific > general). Суффиксы-даунгрейды —
+# с ДЕФИСОМ ('-mini'), поэтому НЕ цепляют geMINI/miniMax (та самая коллизия). Свежие бенчи 2026 —
+# обновляется вручную/из live-данных, БЕЗ угадывания по имени.
+_TASKS = ("general", "code", "reason", "vision", "write")
+_BENCH = (
+    # pattern,                    (general, code, reason, vision, write)
+    ("grok-4.2",                  (98, 96, 97, 94, 88)),
+    ("grok-4-20",                 (98, 96, 97, 94, 90)),
+    ("grok-4.1",                  (95, 93, 93, 90, 88)),
+    ("grok-4",                    (95, 93, 94, 90, 88)),
+    ("grok",                      (88, 86, 86, 84, 84)),
+    ("gpt-5.5",                   (98, 97, 97, 93, 85)),
+    ("gpt-5.4",                   (97, 96, 96, 92, 84)),
+    ("gpt-5",                     (95, 95, 94, 92, 82)),
+    ("gpt-oss",                   (84, 86, 85,  0, 78)),
+    ("gpt-4o",                    (82, 80, 78, 85, 80)),
+    ("gpt-4",                     (80, 80, 76,  0, 78)),
+    ("claude-opus-4.8",           (98, 98, 96, 92, 92)),
+    ("claude-opus-4",             (96, 97, 95, 90, 92)),
+    ("opus",                      (96, 97, 95, 90, 92)),
+    ("claude-sonnet-4",           (92, 93, 90, 88, 90)),
+    ("sonnet",                    (90, 92, 88, 86, 90)),
+    ("claude",                    (90, 92, 88, 86, 90)),
+    ("gemini-3.1-pro",            (97, 94, 96, 97, 86)),
+    ("gemini-3-pro",              (96, 93, 95, 96, 85)),
+    ("gemini-3.5",                (90, 86, 88, 92, 82)),
+    ("gemini-3",                  (94, 90, 93, 95, 84)),
+    ("gemini-2.5",                (82, 80, 80, 88, 80)),
+    ("gemini",                    (85, 82, 83, 90, 82)),
+    ("deepseek-v4-pro",           (94, 95, 95,  0, 84)),
+    ("deepseek-v4",               (92, 93, 93,  0, 83)),
+    ("deepseek-r1",               (90, 90, 94,  0, 80)),
+    ("deepseek-v3",               (86, 88, 85,  0, 80)),
+    ("deepseek",                  (84, 86, 84,  0, 78)),
+    ("kimi-k2.5",                 (92, 90, 90,  0, 86)),
+    ("kimi-k2",                   (89, 88, 87,  0, 85)),
+    ("kimi",                      (86, 85, 84,  0, 84)),
+    ("moonshot",                  (86, 85, 84,  0, 84)),
+    ("minimax-m3",                (92, 88, 90, 85, 86)),
+    ("minimax-m2",                (89, 86, 87, 82, 85)),
+    ("minimax-01",                (80, 76, 78, 78, 80)),
+    ("minimax-m1",                (82, 78, 80,  0, 82)),
+    ("minimax",                   (87, 84, 85, 80, 84)),
+    ("qwen3-max",                 (89, 88, 88,  0, 82)),
+    ("qwen-3-7-max",              (89, 88, 88,  0, 82)),
+    ("qwen3-coder",               (84, 93, 80,  0, 72)),
+    ("qwen3-vl",                  (82, 78, 80, 88, 76)),
+    ("qwen3",                     (82, 84, 83,  0, 78)),
+    ("qwen",                      (80, 82, 80,  0, 76)),
+    ("glm-5",                     (90, 88, 88,  0, 86)),
+    ("glm-4",                     (84, 84, 82,  0, 84)),
+    ("glm",                       (82, 82, 80,  0, 82)),
+    ("llama-4",                   (84, 82, 82, 80, 80)),
+    ("llama-3.3",                 (76, 74, 72,  0, 74)),
+    ("llama",                     (72, 70, 68,  0, 72)),
+    ("mistral-large",             (82, 80, 78,  0, 80)),
+    ("mistral",                   (74, 74, 70,  0, 74)),
+    ("command-a",                 (80, 76, 74,  0, 78)),
+    ("hermes-3-llama-3.1-405b",   (80, 76, 76,  0, 86)),
+    ("hermes",                    (74, 70, 70,  0, 82)),
+    ("nemotron",                  (80, 78, 80,  0, 76)),
+    ("hunyuan",                   (78, 74, 74,  0, 74)),
+    ("ernie",                     (78, 74, 76,  0, 72)),
+    ("step-3",                    (80, 76, 78,  0, 76)),
+    ("yi-large",                  (76, 72, 72,  0, 74)),
+    ("trinity",                   (84, 78, 88,  0, 78)),
+    ("arcee",                     (80, 76, 82,  0, 76)),
+    ("venice-uncensored",         (72, 66, 64,  0, 84)),
+    ("gemma-4",                   (70, 66, 64, 70, 76)),
+    ("gemma",                     (66, 62, 60, 66, 74)),
+    ("mixtral",                   (70, 70, 66,  0, 70)),
+)
+# суффиксы-даунгрейды: ТОЛЬКО с дефисом, иначе подстрока цепляет «geMINI»/«MINImax»/« MINImax».
+# (' mini' со ПРОБЕЛОМ цеплял ' minimax' и зря резал 14 — убрано; '-mini' с дефисом безопасен.)
+_BENCH_SUFFIX = (("-mini", 14), ("-lite", 16), ("-air", 16), ("flash-lite", 18),
+                 ("-nano", 28), ("-8b", 20), ("-7b", 24), ("-4b", 30), ("-3b", 34), ("-1b", 40))
+
+
+def _bench_row(s: str):
+    """Бенч-строка (5 баллов) модели по самому длинному совпавшему паттерну, минус суффикс-штраф.
+    None — если семейство неизвестно (тогда решает эвристический фолбэк)."""
+    s = s.lower()
+    best = None
+    blen = -1
+    for pat, row in _BENCH:
+        if pat in s and len(pat) > blen:
+            best, blen = row, len(pat)
+    if best is None:
+        return None
+    pen = 0
+    for suf, p in _BENCH_SUFFIX:
+        if suf in s:
+            pen = max(pen, p)
+    if pen:
+        best = tuple(max(0, x - pen) if x > 0 else 0 for x in best)
+    return best
+
+
+def bench(model_id: str, task: str = "general", name: str = "") -> float:
+    """Бенчмарк-балл модели 0-100 для задачи (general/code/reason/vision/write). -1 = неизвестна.
+    Для не-vision задач балл=0 в матрице → откатываемся на general; для vision 0 = реально не видит."""
+    row = _bench_row((model_id or "") + " " + (name or ""))
+    if row is None:
+        return -1.0
+    i = _TASKS.index(task) if task in _TASKS else 0
+    v = row[i]
+    if v == 0 and task != "vision":
+        v = row[0]
+    return float(v)
+
 
 def _smart_score(r: dict) -> float:
-    """Балл «по уму»: тир → известность бренда → размер → контекст. Не подделывает размер."""
+    """«Ум» = бенчмарк-балл (general), 0-100. Источник — _BENCH, не строковая эвристика.
+    Незнакомое семейство → мягкий фолбэк по тиру/размеру в той же шкале 0-100."""
+    b = bench(r["id"], "general", r.get("name", ""))
+    if b >= 0:
+        return b
     tr = _TIER_RANK.get(r.get("tier"), 2)
-    fame = _fame(r["id"] + " " + r.get("name", ""))
     params = min(r.get("params", 0) or 0, 2000)
-    if 0 < params < 120:          # маленькая модель с именем бренда — это дистилл, не флагман
-        fame = 0
-    ctx = r.get("ctx", 0) or 0
-    return tr * 10_000_000 + fame * 1_000_000 + params * 100 + ctx / 1000
+    return float({4: 80, 3: 66, 2: 54, 1: 42}.get(tr, 50) + min(8, params / 100))
 
 
 def _council_models(n: int) -> list:
@@ -2915,6 +3029,44 @@ def route_model(messages: list, has_images: bool) -> str:
     if len(last) > 8000:
         return _first_live("cheap")             # 256k контекст
     return _first_live("chat")                  # дефолт — флагман без цензуры
+
+
+def detect_task(messages: list, has_images: bool) -> str:
+    """Тип задачи последнего сообщения → ключ бенч-матрицы (general/code/reason/vision)."""
+    if has_images:
+        return "vision"
+    last = ""
+    for mm in reversed(messages):
+        if mm.get("role") == "user":
+            last = (mm.get("content") or "").lower()
+            break
+    if "```" in last or re.search(r"\b(код|програм|функци|python|javascript|sql|регуляр|bug|debug|компил)\w*", last):
+        return "code"
+    if re.search(r"\b(докажи|реши|почему|логич|сложн|пошагов|рассужд|задач|матем|уравн|интеграл|вероятн)\w*", last):
+        return "reason"
+    return "general"
+
+
+_EXPERT_POOL_CACHE = []
+
+
+def _expert_pool() -> list:
+    """Пул кандидатов-экспертов = объединение дефолт-цепочек (там и код/reason/smart-спецы)."""
+    if not _EXPERT_POOL_CACHE:
+        for chain in _MODEL_FALLBACK.values():
+            for mid in chain:
+                if mid not in _EXPERT_POOL_CACHE:
+                    _EXPERT_POOL_CACHE.append(mid)
+    return _EXPERT_POOL_CACHE
+
+
+def best_for_task(task: str, pool=None) -> str:
+    """Лучшая НЕ-фантомная модель под задачу ПО БЕНЧМАРКАМ (_BENCH). Это и есть «авто ищет
+    лучшую модель под задачу». pool=None → дефолтный экспертный пул. Все фантомы → _first_live."""
+    cands = [mid for mid in (pool or _expert_pool()) if not is_phantom(mid)]
+    if not cands:
+        return _first_live("smart")
+    return max(cands, key=lambda x: bench(x, task))
 
 
 # Маркеры «трудного» запроса для авто-Мозга: вопросы/просьбы, где одна средняя модель
@@ -10361,7 +10513,9 @@ class Handler(BaseHTTPRequestHandler):
         # Владельцу — сильная модель бесплатно через подписку (ng:claude-opus-4-8); остальным —
         # обычный сильный дефолт. Стрим всё равно ведёт дешёвый ведущий (см. брейн-ветку ниже).
         if auto_brain:
-            model = "ng:claude-opus-4-8" if is_owner(uid) else _first_live("smart")
+            # авто-Мозг: эксперт = ЛУЧШАЯ модель ПОД ЗАДАЧУ по бенчмаркам (код→кодер, reason→думающая,
+            # vision→зрячая). Владельцу — opus бесплатно через подписку (он силён почти везде).
+            model = "ng:claude-opus-4-8" if is_owner(uid) else best_for_task(detect_task(raw_messages, has_images))
         # картинки есть, а модель их не понимает — переключаем на зрячую (не-фантомную)
         if has_images and not vision_ok(model):
             model = _first_live("cheap")
