@@ -635,8 +635,10 @@ def _tier(model_id: str, params: float, name: str = "") -> str:
         return "mid"
     if params > 0:
         return "small"
-    # размер не указан (часто закрытые флагманы) — сперва явно мелкие, потом бренд
-    if any(k in s for k in ("mini", "nano", "tiny", "-air")):
+    # размер не указан (часто закрытые флагманы) — сперва явно мелкие, потом бренд.
+    # КРИТИЧНО: \bmini\b со словарной границей — иначе подстрока «mini» ловит «geMINI» и «MINImax»
+    # (это ФРОНТИРЫ!) и зарывает их в «small» → «ум 28». Так же tiny/nano/micro как слова.
+    if re.search(r"\b(mini|nano|tiny|micro)\b", s) or "-air" in s:
         return "small"
     if any(k in s for k in _FRONTIER):
         return "frontier"
@@ -655,7 +657,8 @@ _FAME = (
     ("kimi-k2", 5), ("glm-5", 5), ("qwen3-max", 5), ("qwen-3-7-max", 5), ("qwen3.7", 5),
     ("kimi", 5), ("glm-4", 4), ("glm4", 4),
     ("claude", 4), ("gpt-4", 4), ("o3", 4), ("o1", 4), ("gemini", 4), ("grok", 4),
-    ("deepseek", 4), ("llama-4", 4), ("llama4", 4), ("minimax", 3), ("mistral-large", 3),
+    ("minimax-m", 5), ("minimax", 5),       # MiniMax — фронтир 2M (M2/M3); раньше зря стоял 3
+    ("deepseek", 4), ("llama-4", 4), ("llama4", 4), ("mistral-large", 3),
     ("command-a", 3), ("ernie", 3), ("hunyuan", 3), ("qwen3", 2),
 )
 
