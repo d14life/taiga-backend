@@ -11221,7 +11221,12 @@ class Handler(BaseHTTPRequestHandler):
                 system += mprompt
             active_tools = {**active_tools, **skill_tools}   # L12: run_skill_script (если навык со скриптом сматчен)
         else:
-            active_tools = {}
+            # ИИ может ДЕЙСТВОВАТЬ и в обычном чате: даём БЕЗОПАСНЫЕ тулзы (веб-поиск/супер-поиск/фетч/
+            # вики/курсы/расчёты/время/поиск-навыков) — чтобы он САМ искал и считал, а не отвечал «сделай
+            # это сам через UI». RCE-тулзы (код/shell/файлы) — ТОЛЬКО агент-режим/песочница (анти-RCE).
+            active_tools = {k: TOOLS[k] for k in SAFE_TOOLS if k in TOOLS}
+            if active_tools:
+                system += "\n" + TOOLS_PROMPT
             # Подключённые (включённые) MCP-коннекторы работают и в обычном чате —
             # интеграции (GitHub/Notion/ComfyUI) доступны без явного агент-режима.
             mtools, mprompt = mcp_agent_tools()
@@ -11252,9 +11257,11 @@ class Handler(BaseHTTPRequestHandler):
         try:
             _ui = req.get("ui") or {}
             _served = next((r.get("name") for r in RICH if r.get("id") == model), None) or model
-            _ctx = ("\n\nТЕКУЩЕЕ СОСТОЯНИЕ ИНТЕРФЕЙСА (это ты ВИДИШЬ — отвечай по нему точно, не говори "
-                    "«не вижу роутинг»):\n"
-                    f"- модель, которой ты сейчас фактически отвечаешь: {_served} ({model})\n")
+            _ctx = ("\n\nТЕКУЩЕЕ СОСТОЯНИЕ ИНТЕРФЕЙСА (это ты ВИДИШЬ — отвечай по нему точно, НЕ говори "
+                    "«не вижу роутинг/чип/что выбрано»):\n"
+                    f"- модель этого ответа: {_served} ({model}). ЭТО И ЕСТЬ применённый выбор модели "
+                    "после роутинга — если пользователь спрашивает «какую модель ты видишь / что у меня "
+                    "выбрано / какой чип», отвечай ИМЕННО ЭТОЙ моделью, это и есть его эффективный выбор.\n")
             if _ui.get("modelLabel"):
                 _ctx += f"- в пикере у пользователя выбрано: {_ui.get('modelLabel')}\n"
             _mode = _ui.get("mode") or req.get("mode")
