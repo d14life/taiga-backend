@@ -60,6 +60,12 @@ Priority: L4a-ui · L23 (no-truncation/budget-routing) · L4b · L4c · L19 · L
         • Each preset ALSO controls output length (presets carry output caps). Native routing: Deep/thinking
           → only reasoning-capable models, real dial not faked.
         Also: drop separate "Слияние" button (== Совет); "more engines" (Brain/Council) = MODE, not effort.
+        CRITICAL (Damir asked twice): Heavy ≠ Brain. TWO INDEPENDENT AXES:
+          • EFFORT axis = Fast/Heavy/Deep + 5-slider → how hard ONE model works + output length (single model).
+          • MODE axis   = Solo/Brain/Council → how MANY models + how they combine.
+          Today Heavy SECRETLY turns on Brain (===, the bug). Fix: Heavy stays ONLY on the effort axis
+          (1 model, thorough, long). Brain is the MODE. They must be combinable (Brain+Heavy = 2 models each
+          working hard). Output caps per preset are DEFAULTS — user can override them.
         NOTE: temperature already forwards main path (comment fixed 63fc8b8); pipeline-step temp = todo.
 - [x] L4e Multi-engine heads inherit main-pad spec + see chat memory (Damir).  (90daf3e)
         Council members/Brain-expert now get the FULL chat history (memory), inherit effort
