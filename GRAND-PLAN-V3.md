@@ -11,7 +11,7 @@ Batches of ≤4 disjoint-file lanes. ≤1 server.py lane + ≤1 chat.tsx lane pe
 - [x] BATCH 11 — stream-recovery holdback (S) + hands-free voice loop (C) + real OOXML docx + per-model playground — DONE (FE 6e30c3a / parent next)
 - [x] BATCH 12 — agent typed-events+permission-gate (S) + permission-modal + agent timeline + ACL-for-tools — DONE (FE 6d1d4ff / parent next)
 - [x] BATCH 13 — RAG multimodal ingest (S) + image-studio param-form wire + catalog deep-filters + empty/error states pass — DONE (FE 180bb53 / parent next)
-- [ ] BATCH 14 — TaskPacket per-subtask model (S+orchestrator) + mobile/responsive deep polish (C) + onboarding depth + settings IA cleanup
+- [x] BATCH 14 — TaskPacket per-subtask model (S+orchestrator) + mobile/responsive deep polish (C) + onboarding depth + settings IA cleanup — DONE (FE a989525 / parent next)
 - [ ] BATCH 15 — sleep-time memory consolidation (S+scheduler) + RU i18n/copy pass + delight/micro-interactions + sub-meters depth
 - [ ] BATCH 16 — /sprint self-test (S+builtins) + frontend unit tests (vitest: decision/rag/money/usage-log) + tool-card polish + changelog depth
 - [ ] BATCH 17 — security hardening (S: rate-limit/validation/owner-gate audit) + accessibility pass (C: focus/keyboard/ARIA) + a11y on panels + error-boundary

@@ -105,10 +105,22 @@ class OrchState(TypedDict):
     final: str
 
 
-def run_orchestration(task: str, workers: list = None, emit=None, mode: str = "parallel", tools: dict = None) -> dict:
-    """Запуск оркестрации. workers = [{model, skill, key?, base?}, ...]; emit(kind, data) → таймлайн.
+def run_orchestration(task: str, workers: list = None, emit=None, mode: str = "parallel", tools: dict = None,
+                      verify=None) -> dict:
+    """Запуск оркестрации. workers = [{model, provider?, skill, key?, base?, accept?}, ...];
+    emit(kind, data) → таймлайн.
     mode='parallel'|'sequential' (sequential = воркеры видят результаты прошлых, для зависимых задач).
-    tools={'search': fn} → воркер-researcher реально ищет через супер-поиск."""
+    tools={'search': fn} → воркер-researcher реально ищет через супер-поиск.
+
+    TaskPacket (аддитивно, обратно-совместимо):
+    - У каждого воркера может быть свой `model` (и `provider`) — тогда именно эта модель работает
+      на эту подзадачу; без него — DEFAULT_WORKER_MODEL (поведение как раньше).
+      ВАЛИДАЦИЯ model/provider — НА СТОРОНЕ server.py (там живой каталог + owner-gating): он
+      санитизирует список воркеров ДО вызова, поэтому сюда приходят уже сверенные id.
+    - У воркера может быть критерий приёмки `accept` (короткая инструкция). Если он задан И передан
+      колбэк verify(accept, sub, result) -> {"verified": bool, "reason": str} — после прогона подзадачи
+      делается дешёвая проверка результата против `accept`, и в результат кладутся поля
+      verified / verify_reason. Нет accept ИЛИ нет verify → проверка НЕ запускается (как раньше)."""
     emit = emit or (lambda *a, **k: None)
     tools = tools or {}
     explicit_workers = bool(workers)          # юзер явно задал воркеров → уважаем их число
@@ -130,9 +142,12 @@ def run_orchestration(task: str, workers: list = None, emit=None, mode: str = "p
 
     def _worker(i, sub, prior=""):
         w = workers[i % len(workers)]
-        model = w.get("model") or DEFAULT_WORKER_MODEL
+        model = w.get("model") or DEFAULT_WORKER_MODEL    # per-subtask override; иначе общий дефолт
+        provider = w.get("provider")                       # необязательный провайдер (аддитивно)
+        accept = (w.get("accept") or "").strip()           # критерий приёмки (envelope); пусто → без verify
         skill = w.get("skill", "general")
-        emit("agent", {"worker": i, "model": model, "skill": skill, "status": "running", "task": sub})
+        emit("agent", {"worker": i, "model": model, "provider": provider, "skill": skill,
+                       "status": "running", "task": sub})
         ctx = ""
         if skill == "researcher" and tools.get("search"):     # researcher реально ищет
             emit("agent", {"worker": i, "status": "searching"})
@@ -160,7 +175,23 @@ def run_orchestration(task: str, workers: list = None, emit=None, mode: str = "p
         except Exception as e:
             res = f"[ошибка воркера: {e}]"
         emit("agent", {"worker": i, "status": "done", "result": res[:160]})
-        return {"worker": i, "skill": skill, "model": model, "task": sub, "result": res}
+        out = {"worker": i, "skill": skill, "model": model, "task": sub, "result": res}
+        if provider:
+            out["provider"] = provider
+        # Envelope приёмки: только если задан accept И есть колбэк verify (иначе — как раньше).
+        if accept and verify:
+            out["accept"] = accept
+            emit("agent", {"worker": i, "status": "verifying", "accept": accept})
+            try:
+                v = verify(accept, sub, res) or {}
+                out["verified"] = bool(v.get("verified"))
+                out["verify_reason"] = str(v.get("reason") or "")[:300]
+            except Exception as e:
+                out["verified"] = None     # проверка упала — не врём «прошло/не прошло»
+                out["verify_reason"] = f"[проверка недоступна: {str(e)[:120]}]"
+            emit("agent", {"worker": i, "status": "verified",
+                           "verified": out["verified"], "verify_reason": out["verify_reason"]})
+        return out
 
     def workers_node(state):
         plan = state["plan"]

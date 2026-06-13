@@ -3384,6 +3384,79 @@ def _valid_model_or_auto(mid) -> str:
     return "__auto__"
 
 
+def _sanitize_orchestrate_workers(workers, uid):
+    """TaskPacket: санитайз списка воркеров оркестратора ДО передачи в orchestrator.py.
+    Тот же контракт валидации, что и в чате/совете (сверка с живым каталогом _valid_model_ids),
+    плюс owner-gating: обычному юзеру нельзя подставить модель, которой нет в ЕГО витрине
+    (visible_catalog_for) — иначе чужой/бесплатной моделью можно было бы обойти тарифы.
+
+    Невалидный/чужой `model` → поле просто УБИРАЕТСЯ (воркер падает на DEFAULT_WORKER_MODEL,
+    т.е. поведение как раньше — не роняем прогон из-за стале-id). BYOK (key/base) не трогаем:
+    свой ключ юзера — его право, как и в существующем BYOK-пути воркера.
+    Возвращает новый список (исходный не мутируем) либо None, если workers не задан."""
+    if not isinstance(workers, list) or not workers:
+        return workers
+    valid = _valid_model_ids()
+    owner = is_owner(uid)
+    # id, видимые ИМЕННО этому юзеру (без провайдер-префикса) — для owner-gating не-владельца
+    visible = None if owner else {strip_model_prefix(r.get("id", "")) for r in visible_catalog_for(uid)}
+    out = []
+    for w in workers:
+        if not isinstance(w, dict):
+            continue                      # мусор в списке — пропускаем, не роняем прогон
+        w2 = dict(w)
+        mid = str(w2.get("model") or "").strip()
+        if mid:
+            bare = strip_model_prefix(mid)
+            ok = (mid in valid or bare in valid)
+            # не-владелец: модель ДОЛЖНА быть в его витрине (нельзя протащить бесплатную/скрытую)
+            if ok and visible is not None and bare not in visible:
+                ok = False
+            if w2.get("key") or w2.get("base"):
+                ok = True                 # BYOK: свой ключ/эндпоинт — валидируем не мы, а провайдер юзера
+            if not ok:
+                w2.pop("model", None)      # назад к дефолту воркера (back-compat), без ошибки
+        prov = str(w2.get("provider") or "").strip()
+        if prov and prov not in PROVIDERS:
+            w2.pop("provider", None)       # неизвестный провайдер → игнор (дефолтный путь)
+        out.append(w2)
+    return out
+
+
+def _orchestrate_verifier(uid):
+    """TaskPacket: дешёвый verify-колбэк для envelope приёмки подзадач оркестратора.
+    Переиспользует существующий служебный хелпер venice_complete на ДЕШЁВОЙ модели
+    (aux_model('plan') → обычно CHEAP_MODEL), как и прочая служебка (память/план/стиль).
+    Возвращает callable(accept, sub, result) -> {"verified": bool|None, "reason": str}.
+    Один JSON-вызов: судит результат против критерия приёмки. Парс терпим к обёрткам/мусору."""
+    judge_model = aux_model("plan")     # дешёвая служебная модель (не жжём дорогую)
+
+    def _verify(accept, sub, result):
+        sys = ("Ты строгий приёмщик. Проверь, удовлетворяет ли РЕЗУЛЬТАТ критерию приёмки. "
+               "Верни ТОЛЬКО JSON: {\"verified\": true|false, \"reason\": \"кратко почему\"}.")
+        usr = (f"ПОДЗАДАЧА:\n{sub}\n\nКРИТЕРИЙ ПРИЁМКИ:\n{accept}\n\n"
+               f"РЕЗУЛЬТАТ:\n{str(result)[:4000]}")
+        raw = venice_complete(judge_model, [
+            {"role": "system", "content": sys},
+            {"role": "user", "content": usr}], max_tokens=200) or ""
+        s = raw.strip()
+        a, b = s.find("{"), s.rfind("}")
+        if a != -1 and b > a:
+            try:
+                d = json.loads(s[a:b + 1])
+                return {"verified": bool(d.get("verified")),
+                        "reason": str(d.get("reason") or "")[:300]}
+            except Exception:
+                pass
+        # не распарсили строгий JSON — эвристика по тексту, чтобы не врать «прошло»
+        low = s.lower()
+        passed = ("true" in low or "да" in low or "прош" in low) and not (
+            "false" in low or "не прош" in low or "нет" in low[:20])
+        return {"verified": bool(passed), "reason": s[:300] or "нет внятного вердикта"}
+
+    return _verify
+
+
 def install_agent_from_url(uid: str, url: str) -> dict:
     """Скачать КОНФИГ агента по ссылке и вернуть его фронту (НЕ сохраняем на сервере — стор
     у фронта). Возвращает {ok:True, config:{name,emoji,driver,expert,inst}} либо
@@ -7747,6 +7820,11 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             return self._json({"error": f"оркестратор недоступен: {e}"}, 503)
 
+        # TaskPacket: сверяем per-subtask модели с каталогом+витриной юзера (нет workers → None,
+        # поведение как раньше) и даём дешёвый verify-колбэк для envelope приёмки подзадач.
+        safe_workers = _sanitize_orchestrate_workers(c.get("workers"), uid)
+        verifier = _orchestrate_verifier(uid)
+
         if c.get("stream"):                    # SSE: живой таймлайн для панели (как Copilot Agents)
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -7761,8 +7839,9 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
             try:
-                r = run_orchestration(task, workers=c.get("workers"), emit=emit_sse,
-                                      mode=c.get("mode", "parallel"), tools={"search": super_search})
+                r = run_orchestration(task, workers=safe_workers, emit=emit_sse,
+                                      mode=c.get("mode", "parallel"), tools={"search": super_search},
+                                      verify=verifier)
             except Exception as e:
                 emit_sse("error", {"error": str(e)})
                 return
@@ -7776,8 +7855,9 @@ class Handler(BaseHTTPRequestHandler):
         def emit(kind, data):
             steps.append({"kind": kind, **data})
         try:
-            r = run_orchestration(task, workers=c.get("workers"), emit=emit,
-                                  mode=c.get("mode", "parallel"), tools={"search": super_search})
+            r = run_orchestration(task, workers=safe_workers, emit=emit,
+                                  mode=c.get("mode", "parallel"), tools={"search": super_search},
+                                  verify=verifier)
         except Exception as e:
             return self._json({"error": str(e)}, 502)
         r["steps"] = steps
@@ -9684,7 +9764,9 @@ def _scheduled_runner(uid, task, workers):
     if not is_owner(uid) and user_balance(uid).get("balance", 0) <= 0:
         return {"final": "[пропущено: нулевой баланс]"}
     from orchestrator import run_orchestration
-    r = run_orchestration(task, workers=workers, tools={"search": super_search})
+    # TaskPacket: тот же санитайз per-subtask моделей + verify-колбэк, что и в /api/orchestrate
+    r = run_orchestration(task, workers=_sanitize_orchestrate_workers(workers, uid),
+                          tools={"search": super_search}, verify=_orchestrate_verifier(uid))
     if not is_owner(uid):
         charge_media(uid, 0.05, kind="scheduled")
     return r
