@@ -9126,6 +9126,117 @@ class Handler(BaseHTTPRequestHandler):
         target = str(c.get("target") or uid).strip() or uid
         return self._json(consolidate_memory(target))
 
+    # ── L15/L13 ТАЙГА AGENT-OS: тонкий мост к agent_os.py (вся логика — там) ──
+    # Собираем dependency-injection контекст из СУЩЕСТВУЮЩИХ функций сервера и передаём
+    # в харнес. agent_os.py НЕ импортирует server.py (нет цикла) — отсюда минимум правок.
+    def _agent_os_deps(self, uid):
+        import agent_os
+        return agent_os.HarnessDeps(
+            complete=venice_complete,
+            resolve_key=resolve_key,
+            best_for_task=best_for_task,
+            best_n_for_task=best_n_for_task,
+            detect_task=detect_task,
+            tools={**TOOLS},                  # dev-тулзы НЕ даём по умолчанию (анти-RCE)
+            aux_model=aux_model("plan"),
+            model_reasons=model_reasons,
+            user_dir=user_dir,
+            is_owner=is_owner,
+            rag_context=rag_context,
+        )
+
+    def api_agent_os(self):
+        """L15 — прогон харнеса по цели: SCOPE→THINK→ACT→VERIFY→STATE. SSE-таймлайн."""
+        import agent_os
+        c = self._body()
+        uid = c.get("user", "default")
+        if not self._ip_guard_sse(uid):
+            return
+        goal = str(c.get("goal") or c.get("task") or "").strip()
+        if not goal:
+            return self._json({"error": "пустая цель"}, 400)
+        if len(goal) > SEC_MAX_PROMPT_CHARS:
+            return self._json({"error": "слишком длинная цель"}, 400)
+        owner = is_owner(uid)
+        if not owner:                          # мульти-модельный агент — гейт баланса (как orchestrate)
+            need = round(0.05 * (1 + load_billing().get("markup_pct", 50) / 100), 6)
+            if user_balance(uid).get("balance", 0) < need:
+                return self._json({"error": f"Недостаточно средств: ~${need}.", "need": need}, 402)
+        _tier = str(c.get("tier") or "").lower()
+        tier = _tier if _tier in ("cheap", "mid", "top") else None
+        context = str(c.get("context") or "")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        def emit(kind, data):
+            try:
+                self.wfile.write(("data: " + json.dumps({"kind": kind, **data}, ensure_ascii=False) + "\n\n").encode())
+                self.wfile.flush()
+            except Exception:
+                pass
+        try:
+            deps = self._agent_os_deps(uid)
+            r = agent_os.run(deps, uid, goal, context=context, emit=emit, tier=tier)
+        except Exception as e:
+            traceback.print_exc(file=sys.stderr)
+            emit("error", {"error": str(e)[:300]})
+            return
+        if not owner:
+            charge_media(uid, 0.05, kind="agent_os")
+        emit("done", {"final": r.get("final"), "plan": r.get("plan"),
+                      "sub_goals": r.get("sub_goals"), "run_id": r.get("run_id")})
+
+    def api_agent_fanout(self):
+        """L13 — N изолированных под-агентов → чистый мерж. SSE-таймлайн."""
+        import agent_os
+        c = self._body()
+        uid = c.get("user", "default")
+        if not self._ip_guard_sse(uid):
+            return
+        goal = str(c.get("goal") or c.get("task") or "").strip()
+        if not goal:
+            return self._json({"error": "пустая задача"}, 400)
+        if len(goal) > SEC_MAX_PROMPT_CHARS:
+            return self._json({"error": "слишком длинная задача"}, 400)
+        n = c.get("n")
+        try:
+            n = max(2, min(int(n or 3), SEC_MAX_ORCH_WORKERS))
+        except Exception:
+            n = 3
+        owner = is_owner(uid)
+        if not owner:
+            need = round(0.05 * n * (1 + load_billing().get("markup_pct", 50) / 100), 6)
+            if user_balance(uid).get("balance", 0) < need:
+                return self._json({"error": f"Недостаточно средств: ~${need}.", "need": need}, 402)
+        _tier = str(c.get("tier") or "").lower()
+        tier = _tier if _tier in ("cheap", "mid", "top") else None
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        def emit(kind, data):
+            try:
+                self.wfile.write(("data: " + json.dumps({"kind": kind, **data}, ensure_ascii=False) + "\n\n").encode())
+                self.wfile.flush()
+            except Exception:
+                pass
+        try:
+            deps = self._agent_os_deps(uid)
+            r = agent_os.fan_out(deps, uid, goal, emit=emit, n=n, tier=tier)
+        except Exception as e:
+            traceback.print_exc(file=sys.stderr)
+            emit("error", {"error": str(e)[:300]})
+            return
+        if not owner:
+            charge_media(uid, 0.05 * n, kind="agent_fanout")
+        emit("done", {"merged": r.get("merged"), "agents": r.get("agents"),
+                      "subtasks": r.get("subtasks")})
+
     # --- ОРКЕСТРАТОР агентов (LangGraph): мозг → воркеры (BYOK) → синтез + таймлайн ---
     def api_orchestrate(self):
         c = self._body()
@@ -9609,6 +9720,10 @@ class Handler(BaseHTTPRequestHandler):
             self.api_supersearch()
         elif path == "/api/orchestrate":      # оркестратор агентов (LangGraph: мозг→воркеры→синтез)
             self.api_orchestrate()
+        elif path == "/api/agent_os":         # L15 ТАЙГА AGENT-OS харнес: scope→think→act→verify→state
+            self.api_agent_os()
+        elif path == "/api/agent_fanout":     # L13 мульти-агент: N изолированных под-агентов → мерж
+            self.api_agent_fanout()
         elif path == "/api/workflow":         # воркфлоу-раннер: шаблонный мульти-шаг пайплайн
             self.api_workflow()
         elif path == "/api/jobs":             # планировщик фоновых/расписание-агентов
