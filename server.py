@@ -4009,6 +4009,71 @@ def _safety_hook(name: str, args: dict):
 register_hook("pre", _safety_hook)
 
 
+# --- Интерактивный пермишен-гейт (опт-ин: agent_events + interactive_perms) ---
+# In-memory решения клиента по конкретным tool-вызовам, ключ (run_id, tool_id).
+# Заполняется ручкой POST /api/agent_permit; читается агент-циклом коротким поллом.
+# Чисто-stdlib: dict + Lock + time.sleep-полл; ThreadingHTTPServer => ручка и стрим
+# живут в разных потоках, поэтому ожидание в стриме не блокирует приём решения.
+_AGENT_PERMITS = {}            # (run_id, tool_id) -> "allow_once" | "always" | "deny"
+_AGENT_PERMITS_ALWAYS = {}     # run_id -> set(tool_name)  («always» помнится на весь прогон)
+_AGENT_PERMITS_LOCK = threading.Lock()
+_AGENT_PERMIT_TIMEOUT = 30.0   # сек: верхний предел ожидания решения; затем — безопасный дефолт
+_AGENT_PERMIT_POLL = 0.25      # сек: шаг полла
+
+
+def _perm_needs_ask(perm: str, name: str) -> bool:
+    """True, если вызов МУТИРУЮЩИЙ/рисковый и при этом _perm_check его НЕ запрещает наотрез
+    (т.е. он в «разрешённой» полосе, где уместно спросить пользователя). Хард-деноды
+    (_perm_check вернул строку) сюда не попадают — их клиент переопределить не может."""
+    return name in _MUTATING_TOOLS and _perm_check(perm, name) is None
+
+
+def _agent_permit_set(run_id: str, tool_id: str, decision: str):
+    """Сохранить клиентское решение по вызову (зовётся ручкой /api/agent_permit)."""
+    with _AGENT_PERMITS_LOCK:
+        _AGENT_PERMITS[(run_id, tool_id)] = decision
+        if decision == "always":
+            _AGENT_PERMITS_ALWAYS.setdefault(run_id, set())
+
+
+def _agent_permit_get(run_id: str, tool_id: str):
+    with _AGENT_PERMITS_LOCK:
+        return _AGENT_PERMITS.get((run_id, tool_id))
+
+
+def _agent_permit_always(run_id: str, name: str) -> bool:
+    with _AGENT_PERMITS_LOCK:
+        return name in _AGENT_PERMITS_ALWAYS.get(run_id, set())
+
+
+def _agent_permit_remember_always(run_id: str, name: str):
+    with _AGENT_PERMITS_LOCK:
+        _AGENT_PERMITS_ALWAYS.setdefault(run_id, set()).add(name)
+
+
+def _agent_permit_cleanup(run_id: str):
+    """Снести все решения этого прогона (вызывается в finally стрима — без утечки памяти)."""
+    with _AGENT_PERMITS_LOCK:
+        for k in [k for k in _AGENT_PERMITS if k[0] == run_id]:
+            _AGENT_PERMITS.pop(k, None)
+        _AGENT_PERMITS_ALWAYS.pop(run_id, None)
+
+
+def _agent_permit_wait(run_id: str, tool_id: str, name: str,
+                       timeout: float = _AGENT_PERMIT_TIMEOUT):
+    """Короткий полл клиентского решения. Возвращает строку decision ИЛИ None по таймауту.
+    Никогда не блокирует дольше timeout — поток стрима не «зависает»."""
+    deadline = time.time() + max(0.0, timeout)
+    while time.time() < deadline:
+        d = _agent_permit_get(run_id, tool_id)
+        if d:
+            if d == "always":
+                _agent_permit_remember_always(run_id, name)
+            return d
+        time.sleep(_AGENT_PERMIT_POLL)
+    return None
+
+
 def _repair_tool_json(text: str):
     """Попытка починить ОБРЕЗАННЫЙ/переогороженный JSON вызова инструмента (stream-recovery).
     Чистый Python, без зависимостей: снимаем код-фенсы и спец-теги, берём от первой «{»,
@@ -8081,10 +8146,28 @@ class Handler(BaseHTTPRequestHandler):
             self.api_apikeys()
         elif path == "/v1/chat/completions":
             self.openai_proxy()
+        elif path == "/api/agent_permit":
+            self.api_agent_permit()
         elif path == "/api/chat":
             self.chat()
         else:
             self._json({"error": "not found"}, 404)
+
+    def api_agent_permit(self):
+        """Интерактивное решение клиента по конкретному tool-вызову агент-цикла.
+        Контракт: POST {run_id, tool_id, decision:"allow_once"|"always"|"deny"}.
+        Ответ {ok:true}. Решение кладётся в in-memory стор по (run_id, tool_id);
+        ожидающий поток стрима подхватит его коротким поллом. Если стрим уже истёк
+        по таймауту/завершился — решение просто осиротеет и снесётся в cleanup прогона."""
+        c = self._body()
+        run_id = str(c.get("run_id") or "").strip()
+        tool_id = str(c.get("tool_id") or "").strip()
+        decision = str(c.get("decision") or "").strip()
+        if not run_id or not tool_id or decision not in ("allow_once", "always", "deny"):
+            return self._json({"error": "нужно run_id, tool_id и decision из "
+                               "allow_once|always|deny"}, 400)
+        _agent_permit_set(run_id, tool_id, decision)
+        self._json({"ok": True, "run_id": run_id, "tool_id": tool_id, "decision": decision})
 
     def api_topup(self):
         """Пополнение баланса самим пользователем (ползунок «купить токены»).
@@ -8863,6 +8946,13 @@ class Handler(BaseHTTPRequestHandler):
         raw_messages = auto_compact(raw_messages, uid=uid)  # длинный диалог → старое в сводку; свежие protected_recent — дословно
         agent = bool(req.get("agent"))
         dev = bool(req.get("dev")) and is_owner(uid)   # shell/run_code/файлы — ТОЛЬКО владелец (анти-RCE)
+        # ── Опт-ин типизированной агент-таймлайны (100% обратно-совместимо) ──
+        # agent_events=false (дефолт) → НИ ОДНОГО нового SSE-события, поведение байт-в-байт как было.
+        # interactive_perms работает только ПОВЕРХ agent_events; без обоих гейт не активируется.
+        agent_events = bool(req.get("agent_events"))
+        interactive_perms = agent_events and bool(req.get("interactive_perms"))
+        # run_id адресует стрим для ручки /api/agent_permit. Берём клиентский, иначе генерим.
+        run_id = str(req.get("run_id") or "").strip() or ("run_" + secrets.token_hex(8))
         max_tokens = int(req.get("max_tokens") or 2048)
         system = taiga_identity() + "\n\n" + str(req.get("system") or DEFAULT_SYSTEM)
 
@@ -9023,8 +9113,13 @@ class Handler(BaseHTTPRequestHandler):
             self._sse({"type": "error", "message": "Баланс исчерпан. Пополни счёт, чтобы продолжить."})
             return
 
-        # сообщаем интерфейсу, какая модель реально отвечает (для АВТО-режима)
-        if not self._sse({"type": "meta", "model": model}):
+        # сообщаем интерфейсу, какая модель реально отвечает (для АВТО-режима).
+        # agent_events ON → добавляем run_id (адрес для /api/agent_permit); поле extra,
+        # старый клиент его просто игнорирует. agent_events OFF → meta байт-в-байт прежняя.
+        _meta = {"type": "meta", "model": model}
+        if agent_events:
+            _meta["run_id"] = run_id
+        if not self._sse(_meta):
             return
 
         # 🎨 модель-генератор картинок — отдельный путь (не чат-стрим)
@@ -9063,254 +9158,297 @@ class Handler(BaseHTTPRequestHandler):
             self._sse({"type": "done"})
             return
 
-        usage_total = {"prompt_tokens": 0, "completion_tokens": 0}
-        expert_usage = {"prompt_tokens": 0, "completion_tokens": 0}
-        out_total = ""
-        steps = 0
-        # сколько ПРОЗЫ уже реально ушло юзеру (без учёта холдбэка). Если поток оборвут после того,
-        # как видимый текст уже полился, рестарт запрещён (иначе дубль) — финализируем мягко.
-        emitted_chars = 0
-        drop_retries = 0              # счётчик тихих ретраев именно на ОБРЫВ/ОБРЕЗ стрима (анти-цикл)
-        HOLDBACK = 24                 # хвост прозы держим до следующей дельты / чистого финиша
-        tried = {stream_model}        # модели, что уже пробовали (для тихой подмены при сбое провайдера)
-        while True:
-            buf, buffering, got_any = "", True, False
-            hold = ""                 # ХОЛДБЭК: ещё не отданный хвост прозы (≤HOLDBACK симв.)
-            u = {}
+        # ── агент-цикл обёрнут try/finally: гарантированная чистка in-memory
+        # пермишенов этого прогона + run_done (agent_events) на ЛЮБОМ выходе. ──
+        try:
+            usage_total = {"prompt_tokens": 0, "completion_tokens": 0}
+            expert_usage = {"prompt_tokens": 0, "completion_tokens": 0}
+            out_total = ""
+            steps = 0
+            # сколько ПРОЗЫ уже реально ушло юзеру (без учёта холдбэка). Если поток оборвут после того,
+            # как видимый текст уже полился, рестарт запрещён (иначе дубль) — финализируем мягко.
+            emitted_chars = 0
+            drop_retries = 0              # счётчик тихих ретраев именно на ОБРЫВ/ОБРЕЗ стрима (анти-цикл)
+            HOLDBACK = 24                 # хвост прозы держим до следующей дельты / чистого финиша
+            tried = {stream_model}        # модели, что уже пробовали (для тихой подмены при сбое провайдера)
+            while True:
+                buf, buffering, got_any = "", True, False
+                hold = ""                 # ХОЛДБЭК: ещё не отданный хвост прозы (≤HOLDBACK симв.)
+                u = {}
 
-            def _emit_prose(text):
-                """Отдать прозу через холдбэк: всё, кроме последних HOLDBACK символов, уходит
-                сразу; хвост придерживаем — обрезок tool-call-головы не утечёт видимой прозой до
-                того, как сработает восстановление. Возвращает False, если клиент отвалился."""
-                nonlocal hold, emitted_chars
-                hold += text
-                if len(hold) > HOLDBACK:
-                    send, hold = hold[:-HOLDBACK], hold[-HOLDBACK:]
-                    if send:
+                def _emit_prose(text):
+                    """Отдать прозу через холдбэк: всё, кроме последних HOLDBACK символов, уходит
+                    сразу; хвост придерживаем — обрезок tool-call-головы не утечёт видимой прозой до
+                    того, как сработает восстановление. Возвращает False, если клиент отвалился."""
+                    nonlocal hold, emitted_chars
+                    hold += text
+                    if len(hold) > HOLDBACK:
+                        send, hold = hold[:-HOLDBACK], hold[-HOLDBACK:]
+                        if send:
+                            emitted_chars += len(send)
+                            if not self._sse({"type": "delta", "text": send}):
+                                return False
+                    return True
+
+                def _flush_prose():
+                    """Чистый финиш: выпускаем удержанный хвост. После этого видимый текст
+                    ПОБАЙТОВО идентичен тому, что отдавалось раньше без холдбэка."""
+                    nonlocal hold, emitted_chars
+                    if hold:
+                        send, hold = hold, ""
                         emitted_chars += len(send)
                         if not self._sse({"type": "delta", "text": send}):
                             return False
-                return True
+                    return True
 
-            def _flush_prose():
-                """Чистый финиш: выпускаем удержанный хвост. После этого видимый текст
-                ПОБАЙТОВО идентичен тому, что отдавалось раньше без холдбэка."""
-                nonlocal hold, emitted_chars
-                if hold:
-                    send, hold = hold, ""
-                    emitted_chars += len(send)
-                    if not self._sse({"type": "delta", "text": send}):
-                        return False
-                return True
-
-            try:
-                for delta in venice_stream(stream_model, msgs, max_tokens, u, stream_key,
-                                           temperature=temperature):
-                    got_any = True
-                    out_total += delta
-                    if buffering:
-                        buf += delta
-                        head = buf.lstrip()
-                        if not head:
-                            pass                       # ещё только пробелы — ждём первого значимого символа
-                        elif not head.startswith(("{", "`", "<")):
-                            # обычная проза — отдаём (как и раньше), но через холдбэк-хвост
-                            buffering = False
-                            if not _emit_prose(buf):
-                                return
-                            buf = ""
-                        elif not _looks_like_tool_head(head, active_tools, steps):
-                            # фенс/тег/«{», но это ЯВНО не зреющий tool-call (markdown-код, html, JSON-проза) →
-                            # отпускаем как обычный текст, не держим до конца стрима
-                            buffering = False
-                            if not _emit_prose(buf):
-                                return
-                            buf = ""
-                        # иначе: голова всё ещё похожа на tool-call JSON — ДЕРЖИМ (даже хвост-обрезок не утечёт)
-                    else:
-                        if not _emit_prose(delta):
-                            return
-            except urllib.error.HTTPError as e:
-                detail = e.read().decode("utf-8", "ignore")[:300]
-                # провайдер лёг (502/429/5xx) И мы ещё НИЧЕГО видимого не отдали → молча на следующую funded.
-                # Видимым считаем уже отданную прозу (emitted_chars): рестарт не должен дублировать текст.
-                if emitted_chars == 0 and e.code in (408, 409, 425, 429, 500, 502, 503, 504):
-                    nxt = _next_fallback_model(stream_model, tried, uid, has_images)
-                    if nxt:
-                        tried.add(nxt[0]); stream_model, stream_key = nxt
-                        # откатываем ВЕСЬ ещё-не-отданный текст этой попытки (буфер + удержанный хвост),
-                        # иначе он склеится с ответом запасной модели и испортит биллинг/контекст инструмента
-                        out_total = out_total[:len(out_total) - len(buf) - len(hold)]
-                        continue
-                self._sse({"type": "error", "message": friendly_api_error(e.code, detail, has_images)})
-                return
-            except Exception as e:
-                # сетевой обрыв/таймаут ПОСРЕДИ потока или до первого байта.
-                # Если видимого текста ещё не было — тихо пробуем запасную (двойной отправки нет).
-                if emitted_chars == 0:
-                    nxt = _next_fallback_model(stream_model, tried, uid, has_images)
-                    if nxt:
-                        tried.add(nxt[0]); stream_model, stream_key = nxt
-                        out_total = out_total[:len(out_total) - len(buf) - len(hold)]
-                        continue
-                # видимая проза уже полилась → НЕ рестартим (был бы дубль). Мягко финализируем:
-                # выпускаем удержанный хвост и доводим до биллинга/done на том, что успели получить.
-                if not _flush_prose():
-                    return
-                buffering = False
-                break
-            else:
-                # цикл завершился БЕЗ исключения — стрим апстрима закончился (чисто ИЛИ обрезан).
-                clean_finish = bool(u.get("__finished__"))
-                # видимого текста ещё не было (вся выдача — в буфере/холдбэке), значит рестарт без дубля возможен.
-                # Решаем, что это именно ОБРЕЗ (а не короткий полный ответ без finish-маркера):
-                #   • незавершённая голова tool-call (buffering ещё True) — почти всегда обрезок; ЛИБО
-                #   • удержанный хвост прозы обрывается НЕ на естественной границе (нет .!?…»)»`)
-                #     и провайдер не прислал чистого финиша.
-                _tail = (buf if buffering else hold).rstrip()
-                _looks_cut = bool(_tail) and _tail[-1] not in ".!?…»)\"'`}»。！？"
-                truncated = (not clean_finish and emitted_chars == 0
-                             and (buffering or _looks_cut) and drop_retries < 2)
-                if truncated:
-                    # ОБРЫВ/ОБРЕЗ SSE до видимого текста → ровно как существующий «провайдер лёг → молча
-                    # подменяем»: один тихий ретрай на запасной (или ту же) модель, без сырой ошибки
-                    # юзеру. Анти-цикл: ≤2 ретрая. Двойной отправки нет — видимого текста ещё не было.
-                    nxt = _next_fallback_model(stream_model, tried, uid, has_images)
-                    drop_retries += 1
-                    # сбрасываем ВЕСЬ ещё-не-отданный текст (недособранный буфер + удержанный хвост)
-                    out_total = out_total[:len(out_total) - len(buf) - len(hold)]
-                    if nxt:
-                        tried.add(nxt[0]); stream_model, stream_key = nxt
-                    # запасной нет → ретраим ту же модель (короткий обрыв у того же провайдера бывает разовым)
-                    continue
-                # чистый финиш, ЛИБО короткий полный ответ без маркера, ЛИБО обрыв ПОСЛЕ видимого текста
-                # (там рестарт = дубль). Во всех случаях выпускаем удержанный хвост прозы и идём дальше.
-                if not _flush_prose():
-                    return
-
-            usage_total["prompt_tokens"] += u.get("prompt_tokens", 0)
-            usage_total["completion_tokens"] += u.get("completion_tokens", 0)
-
-            if not got_any and emitted_chars == 0:
-                # стрим закрылся без единой дельты И ничего видимого не ушло (обрыв апстрима/пустой ответ).
-                # Ничего юзеру ещё не отдано → тихо пробуем запасную funded-модель (двойной отправки нет).
-                # Только если запасной нет — показываем ошибку.
-                nxt = _next_fallback_model(stream_model, tried, uid, has_images)
-                if nxt:
-                    tried.add(nxt[0]); stream_model, stream_key = nxt
-                    continue
-                self._sse({"type": "error", "message": "пустой ответ модели"})
-                return
-
-            if buffering:
-                call = parse_tool_call(buf, active_tools) if active_tools and steps < 8 else None
-                if call and call[0] == "ask_expert":
-                    # 🧠 ведущий решил, что запрос сложный → стримим ответ умного эксперта напрямую
-                    if not self._sse({"type": "tool", "name": "ask_expert", "args": call[1]}):
-                        return
-                    eu = {}
-                    streamed0 = len(out_total)
-                    try:
-                        for d in venice_stream(expert_model, expert_msgs,
-                                               max(max_tokens, 3000), eu, expert_key,
+                try:
+                    for delta in venice_stream(stream_model, msgs, max_tokens, u, stream_key,
                                                temperature=temperature):
-                            out_total += d
-                            if not self._sse({"type": "delta", "text": d}):
-                                return
-                    except Exception:
-                        # эксперт-провайдер лёг (502/down/таймаут) → НЕ показываем сырую ошибку юзеру.
-                        # Правило «только рабочие модели»: молча пробуем funded-запасные из цепочки.
-                        if len(out_total) == streamed0:        # ничего ещё не стримили — можно подменить
-                            for fb in _MODEL_FALLBACK["chat"]:
-                                if fb == expert_model:
-                                    continue
-                                fk, _fb_byok, _fk_err = resolve_key(uid, fb)
-                                if not fk:
-                                    continue
-                                try:
-                                    eu = {}
-                                    for d in venice_stream(fb, expert_msgs,
-                                                           max(max_tokens, 3000), eu, fk,
-                                                           temperature=temperature):
-                                        out_total += d
-                                        if not self._sse({"type": "delta", "text": d}):
-                                            return
-                                    expert_model, expert_key = fb, fk   # для биллинга — кто реально ответил
-                                    break
-                                except Exception:
-                                    eu = {}
-                                    continue
-                        if len(out_total) == streamed0:        # совсем никто не ответил
-                            self._sse({"type": "delta", "text":
-                                       "Модели-эксперты сейчас перегружены — попробуй ещё раз через пару секунд."})
-                    expert_usage["prompt_tokens"] += eu.get("prompt_tokens", 0)
-                    expert_usage["completion_tokens"] += eu.get("completion_tokens", 0)
-                    self._sse({"type": "tool_done", "name": "ask_expert", "chars": len(out_total)})
-                    # ответ эксперта — финальный, переходим к биллингу
-                elif call:
-                    steps += 1
-                    name, args = call
-                    if not self._sse({"type": "tool", "name": name, "args": args}):
-                        return
-                    if name == "generate_image":
-                        try:
-                            data_url = venice_image(IMAGE_MODEL,
-                                                    str(args.get("prompt") or last_user), key=global_key("venice"))
-                            self._sse({"type": "image", "url": data_url, "prompt": args.get("prompt")})
-                            result = "[изображение сгенерировано и показано пользователю]"
-                            if bill:  # списываем РЕАЛЬНУЮ цену картинки, а не только текст-токены
-                                info = charge_media(uid, image_gen_price(IMAGE_MODEL), kind="image")
-                                self._sse({"type": "cost", "owner": owner, **info})
-                        except Exception as e:
-                            result = f"error: {e}"
-                    else:
-                        _block = _perm_check(str(req.get("perm") or "full"), name)
-                        _deny, args = _run_pre_hooks(name, args)
-                        if _block or _deny:
-                            result = _block or _deny
+                        got_any = True
+                        out_total += delta
+                        if buffering:
+                            buf += delta
+                            head = buf.lstrip()
+                            if not head:
+                                pass                       # ещё только пробелы — ждём первого значимого символа
+                            elif not head.startswith(("{", "`", "<")):
+                                # обычная проза — отдаём (как и раньше), но через холдбэк-хвост
+                                buffering = False
+                                if not _emit_prose(buf):
+                                    return
+                                buf = ""
+                            elif not _looks_like_tool_head(head, active_tools, steps):
+                                # фенс/тег/«{», но это ЯВНО не зреющий tool-call (markdown-код, html, JSON-проза) →
+                                # отпускаем как обычный текст, не держим до конца стрима
+                                buffering = False
+                                if not _emit_prose(buf):
+                                    return
+                                buf = ""
+                            # иначе: голова всё ещё похожа на tool-call JSON — ДЕРЖИМ (даже хвост-обрезок не утечёт)
                         else:
+                            if not _emit_prose(delta):
+                                return
+                except urllib.error.HTTPError as e:
+                    detail = e.read().decode("utf-8", "ignore")[:300]
+                    # провайдер лёг (502/429/5xx) И мы ещё НИЧЕГО видимого не отдали → молча на следующую funded.
+                    # Видимым считаем уже отданную прозу (emitted_chars): рестарт не должен дублировать текст.
+                    if emitted_chars == 0 and e.code in (408, 409, 425, 429, 500, 502, 503, 504):
+                        nxt = _next_fallback_model(stream_model, tried, uid, has_images)
+                        if nxt:
+                            tried.add(nxt[0]); stream_model, stream_key = nxt
+                            # откатываем ВЕСЬ ещё-не-отданный текст этой попытки (буфер + удержанный хвост),
+                            # иначе он склеится с ответом запасной модели и испортит биллинг/контекст инструмента
+                            out_total = out_total[:len(out_total) - len(buf) - len(hold)]
+                            continue
+                    self._sse({"type": "error", "message": friendly_api_error(e.code, detail, has_images)})
+                    return
+                except Exception as e:
+                    # сетевой обрыв/таймаут ПОСРЕДИ потока или до первого байта.
+                    # Если видимого текста ещё не было — тихо пробуем запасную (двойной отправки нет).
+                    if emitted_chars == 0:
+                        nxt = _next_fallback_model(stream_model, tried, uid, has_images)
+                        if nxt:
+                            tried.add(nxt[0]); stream_model, stream_key = nxt
+                            out_total = out_total[:len(out_total) - len(buf) - len(hold)]
+                            continue
+                    # видимая проза уже полилась → НЕ рестартим (был бы дубль). Мягко финализируем:
+                    # выпускаем удержанный хвост и доводим до биллинга/done на том, что успели получить.
+                    if not _flush_prose():
+                        return
+                    buffering = False
+                    break
+                else:
+                    # цикл завершился БЕЗ исключения — стрим апстрима закончился (чисто ИЛИ обрезан).
+                    clean_finish = bool(u.get("__finished__"))
+                    # видимого текста ещё не было (вся выдача — в буфере/холдбэке), значит рестарт без дубля возможен.
+                    # Решаем, что это именно ОБРЕЗ (а не короткий полный ответ без finish-маркера):
+                    #   • незавершённая голова tool-call (buffering ещё True) — почти всегда обрезок; ЛИБО
+                    #   • удержанный хвост прозы обрывается НЕ на естественной границе (нет .!?…»)»`)
+                    #     и провайдер не прислал чистого финиша.
+                    _tail = (buf if buffering else hold).rstrip()
+                    _looks_cut = bool(_tail) and _tail[-1] not in ".!?…»)\"'`}»。！？"
+                    truncated = (not clean_finish and emitted_chars == 0
+                                 and (buffering or _looks_cut) and drop_retries < 2)
+                    if truncated:
+                        # ОБРЫВ/ОБРЕЗ SSE до видимого текста → ровно как существующий «провайдер лёг → молча
+                        # подменяем»: один тихий ретрай на запасной (или ту же) модель, без сырой ошибки
+                        # юзеру. Анти-цикл: ≤2 ретрая. Двойной отправки нет — видимого текста ещё не было.
+                        nxt = _next_fallback_model(stream_model, tried, uid, has_images)
+                        drop_retries += 1
+                        # сбрасываем ВЕСЬ ещё-не-отданный текст (недособранный буфер + удержанный хвост)
+                        out_total = out_total[:len(out_total) - len(buf) - len(hold)]
+                        if nxt:
+                            tried.add(nxt[0]); stream_model, stream_key = nxt
+                        # запасной нет → ретраим ту же модель (короткий обрыв у того же провайдера бывает разовым)
+                        continue
+                    # чистый финиш, ЛИБО короткий полный ответ без маркера, ЛИБО обрыв ПОСЛЕ видимого текста
+                    # (там рестарт = дубль). Во всех случаях выпускаем удержанный хвост прозы и идём дальше.
+                    if not _flush_prose():
+                        return
+
+                usage_total["prompt_tokens"] += u.get("prompt_tokens", 0)
+                usage_total["completion_tokens"] += u.get("completion_tokens", 0)
+
+                if not got_any and emitted_chars == 0:
+                    # стрим закрылся без единой дельты И ничего видимого не ушло (обрыв апстрима/пустой ответ).
+                    # Ничего юзеру ещё не отдано → тихо пробуем запасную funded-модель (двойной отправки нет).
+                    # Только если запасной нет — показываем ошибку.
+                    nxt = _next_fallback_model(stream_model, tried, uid, has_images)
+                    if nxt:
+                        tried.add(nxt[0]); stream_model, stream_key = nxt
+                        continue
+                    self._sse({"type": "error", "message": "пустой ответ модели"})
+                    return
+
+                if buffering:
+                    call = parse_tool_call(buf, active_tools) if active_tools and steps < 8 else None
+                    if call and call[0] == "ask_expert":
+                        # 🧠 ведущий решил, что запрос сложный → стримим ответ умного эксперта напрямую
+                        if not self._sse({"type": "tool", "name": "ask_expert", "args": call[1]}):
+                            return
+                        eu = {}
+                        streamed0 = len(out_total)
+                        try:
+                            for d in venice_stream(expert_model, expert_msgs,
+                                                   max(max_tokens, 3000), eu, expert_key,
+                                                   temperature=temperature):
+                                out_total += d
+                                if not self._sse({"type": "delta", "text": d}):
+                                    return
+                        except Exception:
+                            # эксперт-провайдер лёг (502/down/таймаут) → НЕ показываем сырую ошибку юзеру.
+                            # Правило «только рабочие модели»: молча пробуем funded-запасные из цепочки.
+                            if len(out_total) == streamed0:        # ничего ещё не стримили — можно подменить
+                                for fb in _MODEL_FALLBACK["chat"]:
+                                    if fb == expert_model:
+                                        continue
+                                    fk, _fb_byok, _fk_err = resolve_key(uid, fb)
+                                    if not fk:
+                                        continue
+                                    try:
+                                        eu = {}
+                                        for d in venice_stream(fb, expert_msgs,
+                                                               max(max_tokens, 3000), eu, fk,
+                                                               temperature=temperature):
+                                            out_total += d
+                                            if not self._sse({"type": "delta", "text": d}):
+                                                return
+                                        expert_model, expert_key = fb, fk   # для биллинга — кто реально ответил
+                                        break
+                                    except Exception:
+                                        eu = {}
+                                        continue
+                            if len(out_total) == streamed0:        # совсем никто не ответил
+                                self._sse({"type": "delta", "text":
+                                           "Модели-эксперты сейчас перегружены — попробуй ещё раз через пару секунд."})
+                        expert_usage["prompt_tokens"] += eu.get("prompt_tokens", 0)
+                        expert_usage["completion_tokens"] += eu.get("completion_tokens", 0)
+                        self._sse({"type": "tool_done", "name": "ask_expert", "chars": len(out_total)})
+                        # ответ эксперта — финальный, переходим к биллингу
+                    elif call:
+                        steps += 1
+                        name, args = call
+                        # стабильный id вызова: адресует permission/tool_result/verify и ручку permit.
+                        tool_id = f"{run_id}.{steps}"
+                        _tool_ev = {"type": "tool", "name": name, "args": args}
+                        if agent_events:        # доп.поле id только при опт-ине; старый клиент его игнорит
+                            _tool_ev["id"] = tool_id
+                        if not self._sse(_tool_ev):
+                            return
+                        if name == "generate_image":
                             try:
-                                result = active_tools[name](args)
+                                data_url = venice_image(IMAGE_MODEL,
+                                                        str(args.get("prompt") or last_user), key=global_key("venice"))
+                                self._sse({"type": "image", "url": data_url, "prompt": args.get("prompt")})
+                                result = "[изображение сгенерировано и показано пользователю]"
+                                if bill:  # списываем РЕАЛЬНУЮ цену картинки, а не только текст-токены
+                                    info = charge_media(uid, image_gen_price(IMAGE_MODEL), kind="image")
+                                    self._sse({"type": "cost", "owner": owner, **info})
                             except Exception as e:
                                 result = f"error: {e}"
-                            result = _run_post_hooks(name, args, result)
-                    if not self._sse({"type": "tool_done", "name": name, "chars": len(result)}):
-                        return
-                    msgs.append({"role": "assistant", "content": buf})
-                    msgs.append({"role": "user", "content":
-                                 f"TOOL RESULT {name}:\n{result}\n\n"
-                                 "(Это результат инструмента, а не сообщение пользователя. "
-                                 "Вызови ещё инструмент или дай финальный ответ.)"})
-                    continue
-                else:
-                    clean = re.sub(r"<\|[^|<>]*\|>", "", buf).strip() or buf
-                    if not self._sse({"type": "delta", "text": clean}):
-                        return
-            # биллинг: себестоимость + комиссия. BYOK — юзер платит провайдеру сам, не тарифицируем.
-            if billing["enabled"]:
-                in_tok = usage_total["prompt_tokens"] or est_tokens(json.dumps(msgs, ensure_ascii=False))
-                out_tok = usage_total["completion_tokens"] or est_tokens(out_total)
-                if byok:
-                    self._sse({"type": "cost", "byok": True, "in": in_tok, "out": out_tok})
-                elif brain:
-                    # ведущий (дёшево) + эксперт (дорого, только если звали) — считаем раздельно
-                    di = meter(uid, stream_model, in_tok, out_tok, deduct=not owner)
-                    cost, charge, markup = di["cost"], di["charge"], di["markup"]
-                    if expert_usage["prompt_tokens"] or expert_usage["completion_tokens"]:
-                        ei = meter(uid, expert_model, expert_usage["prompt_tokens"],
-                                   expert_usage["completion_tokens"], deduct=not owner)
-                        cost = round(cost + ei["cost"], 6)
-                        charge = round(charge + ei["charge"], 6)
-                    info = {"cost": cost, "charge": charge, "markup": markup,
-                            "expert": bool(expert_usage["completion_tokens"])}
-                    if not owner:
-                        info["balance"] = user_balance(uid).get("balance", 0)
-                    self._sse({"type": "cost", "owner": owner, **info})
-                else:
-                    info = meter(uid, model, in_tok, out_tok, deduct=not owner)
-                    self._sse({"type": "cost", "owner": owner, **info})
-            self._sse({"type": "done"})
-            return
+                        else:
+                            _perm = str(req.get("perm") or "full")
+                            # ── ИНТЕРАКТИВНЫЙ ГЕЙТ (опт-ин: agent_events + interactive_perms) ──
+                            # Работает ТОЛЬКО в полосе, где _perm_check НЕ запрещает наотрез
+                            # (_perm_needs_ask). Хард-деноды _perm_check клиент переопределить НЕ может.
+                            # «always» уже выданный в этом прогоне — не переспрашиваем. Таймаут/нет
+                            # решения → молча падаем в обычный _perm_check (поток НЕ висит).
+                            _client_deny = None
+                            if (interactive_perms and _perm_needs_ask(_perm, name)
+                                    and not _agent_permit_always(run_id, name)):
+                                self._sse({"type": "permission", "id": tool_id, "name": name,
+                                           "args": args, "risk": ("high" if name in _RISKY_TOOLS
+                                                                   else "medium")})
+                                _decision = _agent_permit_wait(run_id, tool_id, name)
+                                if _decision == "deny":
+                                    _client_deny = (f"[пользователь отклонил] {name} не исполнен "
+                                                    "(интерактивный запрет).")
+                                # allow_once/always/таймаут(None) → продолжаем к _perm_check ниже
+                                # (он остаётся авторитетным; клиент не может расширить права).
+                            _block = _perm_check(_perm, name)
+                            _deny, args = _run_pre_hooks(name, args)
+                            if _client_deny or _block or _deny:
+                                result = _client_deny or _block or _deny
+                                _ok = False
+                            else:
+                                try:
+                                    result = active_tools[name](args)
+                                    _ok = not str(result).startswith("error:")
+                                except Exception as e:
+                                    result = f"error: {e}"
+                                    _ok = False
+                                result = _run_post_hooks(name, args, result)
+                        if not self._sse({"type": "tool_done", "name": name, "chars": len(result)}):
+                            return
+                        if agent_events:
+                            # типизированный результат: id связывает с tool/permission; preview — урезка.
+                            _ok2 = locals().get("_ok", not str(result).startswith("error:"))
+                            self._sse({"type": "tool_result", "id": tool_id, "ok": bool(_ok2),
+                                       "preview": str(result)[:500]})
+                            # verify-шаг: лёгкая пост-проверка результата (без выдумки — на базе _ok).
+                            self._sse({"type": "verify", "id": tool_id,
+                                       "ok": bool(_ok2),
+                                       "detail": ("инструмент вернул результат" if _ok2
+                                                  else "инструмент вернул ошибку/блок")})
+                        msgs.append({"role": "assistant", "content": buf})
+                        msgs.append({"role": "user", "content":
+                                     f"TOOL RESULT {name}:\n{result}\n\n"
+                                     "(Это результат инструмента, а не сообщение пользователя. "
+                                     "Вызови ещё инструмент или дай финальный ответ.)"})
+                        continue
+                    else:
+                        clean = re.sub(r"<\|[^|<>]*\|>", "", buf).strip() or buf
+                        if not self._sse({"type": "delta", "text": clean}):
+                            return
+                # биллинг: себестоимость + комиссия. BYOK — юзер платит провайдеру сам, не тарифицируем.
+                if billing["enabled"]:
+                    in_tok = usage_total["prompt_tokens"] or est_tokens(json.dumps(msgs, ensure_ascii=False))
+                    out_tok = usage_total["completion_tokens"] or est_tokens(out_total)
+                    if byok:
+                        self._sse({"type": "cost", "byok": True, "in": in_tok, "out": out_tok})
+                    elif brain:
+                        # ведущий (дёшево) + эксперт (дорого, только если звали) — считаем раздельно
+                        di = meter(uid, stream_model, in_tok, out_tok, deduct=not owner)
+                        cost, charge, markup = di["cost"], di["charge"], di["markup"]
+                        if expert_usage["prompt_tokens"] or expert_usage["completion_tokens"]:
+                            ei = meter(uid, expert_model, expert_usage["prompt_tokens"],
+                                       expert_usage["completion_tokens"], deduct=not owner)
+                            cost = round(cost + ei["cost"], 6)
+                            charge = round(charge + ei["charge"], 6)
+                        info = {"cost": cost, "charge": charge, "markup": markup,
+                                "expert": bool(expert_usage["completion_tokens"])}
+                        if not owner:
+                            info["balance"] = user_balance(uid).get("balance", 0)
+                        self._sse({"type": "cost", "owner": owner, **info})
+                    else:
+                        info = meter(uid, model, in_tok, out_tok, deduct=not owner)
+                        self._sse({"type": "cost", "owner": owner, **info})
+                self._sse({"type": "done"})
+                return
+        finally:
+            if agent_events:
+                self._sse({"type": "run_done", "run_id": run_id})
+            _agent_permit_cleanup(run_id)
 
 
 def _start_catalog_refresher(interval_sec: int = 21600):
