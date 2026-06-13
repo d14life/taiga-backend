@@ -1597,6 +1597,64 @@ Use these only when the user clearly asks to touch files or the system. Be caref
 BRAIN_DRIVER = "gemma-4-uncensored"      # дешёвый ведущий (можно поменять)
 IMAGE_MODEL = "venice-sd35"              # модель-генератор картинок для агент-инструмента generate_image
 
+# ── Воркфлоу-раннер: встроенные шаблоны мульти-шаговых пайплайнов поверх существующих
+# примитивов (chat/image/rag/web). Шаги ссылаются на {input} (исходный запрос юзера) и
+# на вывод предыдущих шагов через {steps.N} (N — 0-based индекс шага). Ничего нового не
+# исполняется — каждый kind переиспользует тот же внутренний примитив, что и его эндпоинт.
+WORKFLOW_TEMPLATES = [
+    {
+        "id": "research-brief",
+        "title": "Ресёрч-бриф",
+        "desc": "Ищу в вебе по теме, затем собираю короткий бриф с выводами.",
+        "steps": [
+            {"kind": "web", "label": "Поиск в вебе",
+             "params": {"prompt": "{input}", "k": 6}},
+            {"kind": "chat", "label": "Сводка-бриф",
+             "params": {"system": "Ты аналитик. Сделай сжатый структурированный бриф по-русски: "
+                                   "3-5 ключевых тезисов + короткий вывод. Опирайся только на источники.",
+                        "prompt": "Тема: {input}\n\nИсточники из веба:\n{steps.0}\n\nСобери бриф."}},
+        ],
+    },
+    {
+        "id": "image-from-idea",
+        "title": "Картинка из идеи",
+        "desc": "Расширяю идею в детальный промпт, затем генерирую картинку.",
+        "steps": [
+            {"kind": "chat", "label": "Расширить промпт",
+             "params": {"system": "Ты промпт-инженер для генерации изображений. По короткой идее "
+                                   "напиши ОДИН детальный визуальный промпт на английском (сцена, свет, "
+                                   "стиль, композиция). Верни только промпт, без пояснений.",
+                        "prompt": "Идея: {input}"}},
+            {"kind": "image", "label": "Сгенерировать картинку",
+             "params": {"prompt": "{steps.0}", "negative_prompt": "blurry, low quality, watermark, text"}},
+        ],
+    },
+    {
+        "id": "doc-qa",
+        "title": "Вопрос по документам",
+        "desc": "Ищу релевантные куски в вашей базе знаний и отвечаю по ним.",
+        "steps": [
+            {"kind": "rag", "label": "Поиск по базе",
+             "params": {"prompt": "{input}", "k": 4}},
+            {"kind": "chat", "label": "Ответ по контексту",
+             "params": {"system": "Ты отвечаешь СТРОГО по предоставленному контексту. Если ответа в "
+                                   "контексте нет — честно скажи об этом. Пиши по-русски.",
+                        "prompt": "Вопрос: {input}\n\nКонтекст из документов:\n{steps.0}\n\nОтветь."}},
+        ],
+    },
+    {
+        "id": "rewrite-polish",
+        "title": "Переписать и отполировать",
+        "desc": "Улучшаю текст: ясность, тон и грамматику — в один шаг.",
+        "steps": [
+            {"kind": "chat", "label": "Полировка текста",
+             "params": {"system": "Ты редактор. Перепиши текст пользователя: улучши ясность, тон и "
+                                   "грамматику, сохрани смысл и язык оригинала. Верни только итог.",
+                        "prompt": "{input}"}},
+        ],
+    },
+]
+
 BRAIN_PROMPT = """\
 Ты — Тайга ИИ, быстрый ведущий. Твоя ГЛАВНАЯ задача — решить, кто отвечает: ты или умный эксперт.
 
@@ -1986,9 +2044,12 @@ def nano_image(model: str, prompt: str, width: int = 1024, height: int = 1024, s
 
 def venice_image(model: str, prompt: str, key: str = None,
                  width: int = 1024, height: int = 1024,
-                 seed: int = None, steps: int = None, cfg_scale: float = None) -> str:
+                 seed: int = None, steps: int = None, cfg_scale: float = None,
+                 negative_prompt: str = None) -> str:
     """Генерация картинки через Venice → data-URL (base64 PNG). Только Venice.
-    seed/steps/cfg_scale — продвинутые контролы (для воспроизводимости/вариаций)."""
+    seed/steps/cfg_scale — продвинутые контролы (для воспроизводимости/вариаций).
+    negative_prompt — НАСТОЯЩИЙ негатив-промпт (что НЕ рисовать); Venice поддерживает поле
+    negative_prompt нативно. None/пусто → поле не шлём (полная обратная совместимость)."""
     key = key or global_key("venice")
     if not key:
         raise RuntimeError("нет ключа Venice для генерации картинок")
@@ -1999,6 +2060,8 @@ def venice_image(model: str, prompt: str, key: str = None,
         "format": "png", "safe_mode": False,
         "return_binary": False,
     }
+    if negative_prompt is not None and str(negative_prompt).strip():
+        payload["negative_prompt"] = str(negative_prompt).strip()[:1500]
     if seed is not None:
         payload["seed"] = max(0, min(int(seed), 999999999))  # Venice max seed = 999999999
     if steps is not None:
@@ -7015,9 +7078,11 @@ class Handler(BaseHTTPRequestHandler):
         uid = req.get("user", "default")
         model = str(req.get("model") or "").strip()
         prompt = str(req.get("prompt") or "").strip()
+        # НАСТОЯЩИЙ негатив-промпт (что НЕ рисовать). Опц.; нет → поведение как раньше.
+        neg = str(req.get("negative_prompt") or "").strip() or None
         if not prompt:
             return self._json({"error": "пустой промпт"}, 400)
-        if abuse_check(prompt):
+        if abuse_check(prompt) or (neg and abuse_check(neg)):
             log_abuse(uid, model or "image")
             return self._json({"error": "Запрос нарушает правила."}, 400)
         owner = is_owner(uid)
@@ -7068,7 +7133,8 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 url = venice_image(model or IMAGE_MODEL, prompt, width=w, height=h,
                                    seed=seed, steps=int(steps_in) if steps_in else None,
-                                   cfg_scale=float(cfg_in) if cfg_in else None)
+                                   cfg_scale=float(cfg_in) if cfg_in else None,
+                                   negative_prompt=neg)
                 used_seed = seed
         except urllib.error.HTTPError as e:
             return self._json({"error": f"картинка {e.code}: {e.read().decode('utf-8','ignore')[:200]}"}, 502)
@@ -7479,6 +7545,102 @@ class Handler(BaseHTTPRequestHandler):
             r.update(charge_media(uid, 0.05, kind="orchestrate"))
         return self._json(r)
 
+    # --- воркфлоу-раннер: шаблонный мульти-шаг пайплайн поверх существующих примитивов ---
+    def api_workflow(self):
+        """Запускает встроенный/кастомный шаблон шаг-за-шагом поверх chat/image/rag/web.
+        Тело {user, template_id?, steps?, input}. Подстановка {input} и {steps.N} (0-based,
+        N — индекс ПРЕДЫДУЩЕГО шага) в prompt/params. Каждый шаг переиспользует тот же
+        внутренний примитив (и его charge/owner-логику), без дублирования кода/обхода списаний."""
+        c = self._body()
+        uid = c.get("user", "default")
+        owner = is_owner(uid)
+        user_input = str(c.get("input") or "").strip()
+        # шаги: из шаблона по id ЛИБО кастомный массив из тела
+        steps = c.get("steps")
+        if not steps:
+            tpl = next((t for t in WORKFLOW_TEMPLATES if t["id"] == c.get("template_id")), None)
+            if not tpl:
+                return self._json({"ok": False, "error": "неизвестный template_id и нет steps",
+                                   "steps": []}, 200)
+            steps = tpl["steps"]
+        if not isinstance(steps, list) or not steps:
+            return self._json({"ok": False, "error": "нет шагов для запуска", "steps": []}, 200)
+        if not user_input:
+            return self._json({"ok": False, "error": "пустой input", "steps": []}, 200)
+
+        def subst(s):
+            """{input} и {steps.N} → реальные значения. N вне диапазона → пусто."""
+            if not isinstance(s, str):
+                return s
+            s = s.replace("{input}", user_input)
+
+            def _ref(m):
+                try:
+                    i = int(m.group(1))
+                    return str(done[i]["output"]) if 0 <= i < len(done) else ""
+                except Exception:
+                    return ""
+            return re.sub(r"\{steps\.(\d+)\}", _ref, s)
+
+        done = []
+        for st in steps:
+            kind = str((st or {}).get("kind") or "chat").strip()
+            label = str((st or {}).get("label") or kind)
+            params = dict((st or {}).get("params") or {})
+            try:
+                prompt = subst(str(params.get("prompt") or user_input))
+                if kind == "chat":
+                    sys = subst(str(params.get("system") or
+                                    "Ты — помощник Тайга. Отвечай по-русски, по делу."))
+                    out = venice_complete(
+                        str(params.get("model") or "") or aux_model("craft"),
+                        [{"role": "system", "content": sys},
+                         {"role": "user", "content": prompt}],
+                        max_tokens=int(params.get("max_tokens") or 700),
+                        temperature=params.get("temperature"))
+                    if not owner:
+                        meter(uid, aux_model("craft"),
+                              est_tokens(sys + prompt), est_tokens(out), deduct=True)
+                elif kind == "web":
+                    res = []
+                    for be in (_search_ddg, _search_mojeek):
+                        try:
+                            res = be(prompt)
+                        except Exception:
+                            res = []
+                        if res:
+                            break
+                    out = "\n".join("- %s — %s\n  %s" % (t, h, s)
+                                    for t, h, s in res[:int(params.get("k") or 6)]
+                                    if t != "__answer__") or "(ничего не найдено)"
+                elif kind == "rag":
+                    ws = params.get("workspace", c.get("workspace"))
+                    hits = rag_query(uid, prompt, int(params.get("k") or 4), workspace=ws)
+                    out = "\n\n".join("[%s] %s" % (h.get("doc", ""), h.get("text", ""))
+                                      for h in hits) or "(в базе ничего не найдено)"
+                elif kind == "image":
+                    model = str(params.get("model") or "").strip()
+                    price = image_gen_price(model)
+                    if not owner:
+                        need = round(price * (1 + load_billing().get("markup_pct", 50) / 100), 6)
+                        if user_balance(uid).get("balance", 0) < need:
+                            raise RuntimeError("Недостаточно средств для картинки: ~$%s" % need)
+                    neg = subst(str(params.get("negative_prompt") or "")) or None
+                    if model.startswith("ng:"):
+                        out = nano_image(model, prompt)
+                    else:
+                        out = venice_image(model or IMAGE_MODEL, prompt, negative_prompt=neg)
+                    if not owner:
+                        charge_media(uid, image_gen_price(model), kind="workflow-image")
+                else:
+                    raise RuntimeError("неизвестный kind шага: %s" % kind)
+            except Exception as e:
+                done.append({"kind": kind, "label": label, "output": "", "error": str(e)})
+                return self._json({"ok": False, "error": str(e), "steps": done}, 200)
+            done.append({"kind": kind, "label": label, "output": out})
+        return self._json({"ok": True, "steps": done,
+                           "result": done[-1]["output"] if done else ""})
+
     # --- серверный агентный браузер (Playwright): ИИ+юзер видят один экран ---
     def api_cookies(self):
         c = self._body()
@@ -7632,6 +7794,8 @@ class Handler(BaseHTTPRequestHandler):
             obj = chat_load(uid, cid)
             self._json(obj if obj is not None else {"error": "not found"},
                        200 if obj is not None else 404)
+        elif path == "/api/workflow":         # воркфлоу-раннер: список встроенных шаблонов
+            self._json({"templates": WORKFLOW_TEMPLATES})
         else:
             self._json({"error": "not found"}, 404)
 
@@ -7782,6 +7946,8 @@ class Handler(BaseHTTPRequestHandler):
             self.api_supersearch()
         elif path == "/api/orchestrate":      # оркестратор агентов (LangGraph: мозг→воркеры→синтез)
             self.api_orchestrate()
+        elif path == "/api/workflow":         # воркфлоу-раннер: шаблонный мульти-шаг пайплайн
+            self.api_workflow()
         elif path == "/api/jobs":             # планировщик фоновых/расписание-агентов
             self.api_jobs()
         elif path == "/api/catalog_refresh":  # owner: ручной пересбор каталога
