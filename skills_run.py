@@ -249,6 +249,59 @@ def _read_script(user_dir, uid, sid, script_rel):
     return target.read_text("utf-8", "ignore"), None
 
 
+def _e2b_api_key():
+    """E2B-ключ из ~/.e2b_key или env E2B_API_KEY (один наш аккаунт; расход метрим на юзера в server.py)."""
+    import os
+    from pathlib import Path
+    try:
+        p = Path.home() / ".e2b_key"
+        if p.exists():
+            k = p.read_text("utf-8", "ignore").strip()
+            if k:
+                return k
+    except Exception:
+        pass
+    return os.environ.get("E2B_API_KEY") or ""
+
+
+def run_in_cloud_sandbox(code, lang):
+    """Тяжёлый/нативный путь: одноразовый E2B Linux-sandbox (реальный терминал, pip, бинарники).
+    Один наш аккаунт E2B; расход перекладываем на кредиты юзера на уровне server.py.
+    Ленивая загрузка SDK + мягкая деградация, если ключа/SDK нет. Возврат: {ok, output|error, runtime}."""
+    import os
+    key = _e2b_api_key()
+    if not key:
+        return {"ok": False, "runtime": "cloud-sandbox", "error": "E2B не настроен (нет ключа ~/.e2b_key)"}
+    try:
+        from e2b_code_interpreter import Sandbox
+    except Exception:
+        return {"ok": False, "runtime": "cloud-sandbox",
+                "error": "E2B SDK не установлен (pip install e2b-code-interpreter)"}
+    os.environ.setdefault("E2B_API_KEY", key)
+    sbx = None
+    try:
+        sbx = Sandbox.create()
+        if lang in ("python", "js", "javascript", "ts", "typescript"):
+            ex = sbx.run_code(code)
+            out = "".join(ex.logs.stdout or [])
+            err = "".join(ex.logs.stderr or [])
+            if getattr(ex, "error", None):
+                err += f"\n{ex.error}"
+            output = (out + ("\n" + err if err.strip() else "")).strip()
+        else:  # bash и прочее → как shell-команда
+            r = sbx.commands.run(code)
+            output = ((r.stdout or "") + ("\n" + r.stderr if (r.stderr or "").strip() else "")).strip()
+        return {"ok": True, "runtime": "cloud-sandbox", "output": output[:20000]}
+    except Exception as e:
+        return {"ok": False, "runtime": "cloud-sandbox", "error": f"sandbox: {str(e)[:300]}"}
+    finally:
+        try:
+            if sbx is not None:
+                sbx.kill()
+        except Exception:
+            pass
+
+
 def run_skill_script(user_dir, uid, sid, script_rel, *, is_owner, run_code_lang):
     """Запустить бандл-скрипт навыка — БЕЗОПАСНО ГЕЙТИТСЯ.
 
@@ -272,11 +325,15 @@ def run_skill_script(user_dir, uid, sid, script_rel, *, is_owner, run_code_lang)
         out = run_code_lang(code, "python" if lang == "python" else lang)
         return {"ok": True, "runtime": "server", "lang": lang, "script": script_rel, "output": out}
 
-    # ЮЗЕР: только browser-WASM. Pyodide умеет python; js → WebContainer (фронт), bash на WASM не гоним.
+    # ЮЗЕР, bash/нативное → облачный E2B-sandbox (реальный Linux). Расход метрится на сервере.
     if lang == "bash":
-        return {"ok": False, "runtime": "cloud-sandbox",
-                "error": "bash-скрипты требуют облачного sandbox (в разработке)",
-                "todo": "cloud-sandbox-per-user (E2B/Daytona) — отложенная инфра"}
+        res = run_in_cloud_sandbox(code, "bash")
+        if res.get("ok"):
+            return {"ok": True, "runtime": "cloud-sandbox", "lang": lang,
+                    "script": script_rel, "output": res.get("output", "")}
+        return {"ok": False, "runtime": "cloud-sandbox", "lang": lang, "script": script_rel,
+                "error": res.get("error", "облачный sandbox недоступен")}
+    # Питон/JS юзера → browser-WASM (бесплатно). Тяжёлый питон тоже можно отправить в E2B при желании.
     return {"ok": True, "runtime": "browser-wasm", "lang": lang, "script": script_rel,
             "code": code,
             "note": "скрипт выполнится в вашем браузере (Pyodide) — безопасно, без затрат сервера"}
