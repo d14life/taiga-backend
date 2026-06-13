@@ -323,6 +323,42 @@ def is_reasoning(model_id: str) -> bool:
 _REJECTS_EFFORT = set()
 _REASONING_IDS_CACHE = {"ts": -1.0, "ids": set()}
 
+# L3 — модели, которые ПРИНИМАЮТ reasoning_effort (не 400), но по факту ИГНОРИРУЮТ его
+# (глубина не меняется). Для них «Глубоко» эмулируем ПРОМПТОМ (думай пошагово + больший бюджет),
+# а не бесполезным параметром. Матч по подстроке id (без провайдер-префикса) — ловит семейства
+# (grok-nano/grok-mini, deepseek-chat (не -reasoner), gemma, llama, qwen-instruct, mistral, gpt-oss).
+_EFFORT_IGNORERS = ("grok-nano", "grok-mini", "grok-3-mini", "gemma", "llama", "mistral",
+                    "qwen2", "qwen-2", "gpt-oss")
+
+
+def ignores_effort(model_id: str) -> bool:
+    """L3: модель «глухая» к reasoning_effort (принимает, но не углубляется) → нужен промпт-путь.
+    deepseek-reasoner/R1 реально думают (их НЕ трогаем), а deepseek-chat/v3 — нет."""
+    bare = strip_model_prefix(str(model_id or "")).lower()
+    if not bare:
+        return False
+    if bare in _REJECTS_EFFORT or model_id in _REJECTS_EFFORT:
+        return True            # вовсе не принимает параметр → тем более эмулируем промптом
+    if "deepseek" in bare and not ("reason" in bare or "r1" in bare):
+        return True            # deepseek-chat/v3 игнорируют; deepseek-reasoner/R1 — нет
+    return any(tag in bare for tag in _EFFORT_IGNORERS)
+
+
+# L3: системная преамбла, эмулирующая глубину размышления для «глухих» к reasoning_effort моделей.
+# Уровень medium — лёгкая, high — сильная (пошаговый разбор + самопроверка перед ответом).
+_DEPTH_PREFACE = {
+    "medium": ("\n\nПеред ответом подумай: разбери задачу на шаги и рассуждай последовательно, "
+               "затем дай выверенный ответ."),
+    "high": ("\n\nРАЗМЫШЛЯЙ ГЛУБОКО перед ответом: (1) разложи задачу на части и явно продумай "
+             "каждый шаг; (2) рассмотри альтернативы и проверь логику на ошибки и крайние случаи; "
+             "(3) только потом дай тщательный, выверенный ответ. Не торопись — точность важнее скорости."),
+}
+
+
+def depth_preface(effort: str) -> str:
+    """L3: текст-эмуляция глубины под уровень усилия (low → пусто, как и в нативном пути)."""
+    return _DEPTH_PREFACE.get(effort or "", "")
+
 
 def model_reasons(model_id: str) -> bool:
     """Думающая ли модель (reasoning_effort имеет смысл): по ключу ИЛИ по флагу живого каталога.
@@ -10937,6 +10973,18 @@ class Handler(BaseHTTPRequestHandler):
             model = _first_live("cheap")
         max_tokens = max(max_tokens, reasoning_token_floor(model, req_reasoning_effort))
         max_tokens = min(max_tokens, USERCFG_MAX_TOKENS)
+
+        # ── L3: ПРОМПТ-ЭМУЛЯЦИЯ ГЛУБИНЫ для «глухих» к reasoning_effort моделей (grok-nano/deepseek-chat/…).
+        # Юзер выкрутил «Глубоко», но эта модель параметр игнорирует → вшиваем преамбулу «думай пошагово»
+        # + даём запас токенов под размышление. Думающим моделям (нативный reasoning_effort) НЕ трогаем —
+        # у них параметр работает. Срабатывает ТОЛЬКО при заданном усилии medium/high.
+        if req_reasoning_effort in ("medium", "high") and ignores_effort(model):
+            _pf = depth_preface(req_reasoning_effort)
+            if _pf:
+                system += _pf
+                # запас под «эмулированное» размышление: high ≈ как у думающих, medium — поменьше
+                _floor = 3200 if req_reasoning_effort == "high" else 1800
+                max_tokens = min(max(max_tokens, _floor), USERCFG_MAX_TOKENS)
 
         base_system = system          # чистый системный промпт — для эксперта (без брейн-обёртки)
 
