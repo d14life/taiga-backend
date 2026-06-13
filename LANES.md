@@ -19,7 +19,7 @@ ANOTHER claude session may also work this repo — collision-guard before EVERY 
    Tick the checkbox here. Restart backend if server.py changed.
 5. Append ONE casual plain-English line to WHATS-NEW.md: "✨ <feature> — <what it does for the user>".
 Rules: NEVER auto-pick dead models. server.py edits sequential. L13 BLOCKED on Damir's harness repo link = skip.
-Priority: L4b · L4c · L19 · L20 · L4f · L6 · L7 · L8 · L9 · L10 · L11 · L12 · L18 · L15 · L16 · L14 · L3 · L21 · L22
+Priority: L4c · L19 · L20 · L4f · L6 · L7 · L8 · L9 · L10 · L11 · L12 · L18 · L15 · L16 · L14 · L3 · L21 · L22
 
 ## DONE (committed)
 - [x] L0 Agent S identity rename + name-stamp fix + default-leak fix        (5f8c24e)
@@ -53,7 +53,11 @@ Priority: L4b · L4c · L19 · L20 · L4f · L6 · L7 · L8 · L9 · L10 · L11 
         allow-list). VERIFIED via proxy: cheap+code → deepseek-v4-pro-cheaper, mid → grok, top → opus.
 - [x] L4d Beam=Council merge: Council always uses fusion-critic synthesis; Beam absorbed.  (d02a073)
         VERIFIED taxonomy: Brain=triage/one-leads · Council=N deliberate→fuse · Heavy/Research=single-model.
-- [ ] L4b POWER SYSTEM = 5-level slider + Fast/Heavy/Deep presets (Damir, updated — HIGH).
+- [x] L4b POWER SYSTEM — CORE DONE (taiga-web b094267): 5-dot ГЛУБИНА-slider replaces Fast/Auto/Expert/Heavy
+        pills; maps to effort + NATIVE reasoning_effort (L1 fast…L5 max). Heavy/Brain DECOUPLED (the CRITICAL
+        bug), Solo/Brain/Council = mode axis, "ответ:" chip = output length, Слияние button dropped. VERIFIED
+        live (5 dots, persists, proxy forwards reasoning_effort, no console errors). (Optional polish left:
+        discrete one-tap Fast/Heavy/Deep chips — slider ends already ARE Fast/Deep; Heavy = output «ответ: макс».)
         CURRENT muddle (verified): Expert = deep single model; Heavy = secretly Brain (2 models), mislabeled
         "совет". Replace with this clean design:
         • EFFORT/OUTPUT = a 5-LEVEL slider (Claude-Code cheap/mid/max idea but 5 steps; screenshot's 5 dots),
