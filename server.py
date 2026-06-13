@@ -3919,10 +3919,15 @@ def _github_blob_to_raw(url: str) -> str:
         if host not in ("github.com", "www.github.com"):
             return url
         parts = p.path.strip("/").split("/")
-        # owner / repo / blob / <ref> / <path...>
+        # owner / repo / blob / <ref> / <path...>  → сырой файл
         if len(parts) >= 5 and parts[2] == "blob":
             owner, repo, ref, rest = parts[0], parts[1], parts[3], "/".join(parts[4:])
             return f"https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{rest}"
+        # owner / repo / tree / <ref> / <path...>  → ПАПКА навыка: берём SKILL.md внутри неё.
+        # (юзер часто копирует ссылку на папку навыка, а не на сам SKILL.md — обрабатываем по-человечески)
+        if len(parts) >= 5 and parts[2] == "tree":
+            owner, repo, ref, rest = parts[0], parts[1], parts[3], "/".join(parts[4:])
+            return f"https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{rest}/SKILL.md"
     except Exception:
         pass
     return url
