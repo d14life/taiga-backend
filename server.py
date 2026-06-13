@@ -8202,8 +8202,31 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self._cors_headers()           # cobrowse-расширение бьёт кросс-ориджин → разрешаем
         self.end_headers()
         self.wfile.write(body)
+
+    def _cors_headers(self):
+        """CORS для cobrowse-расширения (Chrome MV3 шлёт запросы с origin
+        chrome-extension://...). Additive: только заголовки, тело/логика ответов
+        не меняются. Разрешаем любой origin — это локальный личный бэкенд Тайги."""
+        try:
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+            self.send_header("Access-Control-Max-Age", "86400")
+        except Exception:
+            pass
+
+    def do_OPTIONS(self):
+        """CORS-preflight для расширения. Отвечаем 204 с CORS-заголовками."""
+        try:
+            self.send_response(204)
+            self._cors_headers()
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        except Exception:
+            pass
 
     def _body(self):
         n = int(self.headers.get("Content-Length") or 0)
@@ -9551,6 +9574,116 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(BROWSER.submit("close", uid=uid))
         return self._json({"error": "неизвестное action"}, 400)
 
+    def api_browser_act(self):
+        """Мозг cobrowse-расширения. Расширение шлёт {goal, page, history}; модель
+        возвращает ОДНО следующее действие JSON {action,selector?,text?,url?,reason}.
+        Тонкий хендлер: переиспользуем resolve_key/best_for_task/venice_complete.
+        Никаких действий тут не выполняется — только решение, что делать дальше."""
+        c = self._body()
+        uid = c.get("user", "default")
+        goal = str(c.get("goal") or "").strip()
+        if not goal:
+            return self._json({"error": "нет цели (goal)"}, 400)
+        page = c.get("page") or {}
+        history = c.get("history") or []
+        if not isinstance(history, list):
+            history = []
+
+        # компактный снимок страницы для модели (бюджетим размер)
+        url = str(page.get("url") or "")[:300]
+        title = str(page.get("title") or "")[:200]
+        text = str(page.get("text") or "")[:4000]
+        els = page.get("elements") or []
+        if not isinstance(els, list):
+            els = []
+        el_lines = []
+        for i, e in enumerate(els[:60]):
+            if not isinstance(e, dict):
+                continue
+            sel = str(e.get("selector") or "")[:120]
+            tag = str(e.get("tag") or "")[:12]
+            role = str(e.get("role") or "")[:24]
+            etext = str(e.get("text") or "")[:80]
+            el_lines.append(f"[{i}] <{tag}> role={role} sel={sel!r} text={etext!r}")
+        elements_block = "\n".join(el_lines) or "(интерактивных элементов не найдено)"
+
+        hist_lines = []
+        for h in history[-10:]:
+            if not isinstance(h, dict):
+                continue
+            a = str(h.get("action") or "")[:20]
+            d = str(h.get("detail") or h.get("selector") or h.get("url") or "")[:80]
+            r = str(h.get("result") or "")[:100]
+            hist_lines.append(f"- {a} {d} -> {r}")
+        history_block = "\n".join(hist_lines) or "(шагов ещё не было)"
+
+        sys_prompt = (
+            "Ты — Тайга, агент управления браузером пользователя. Тебе дают ЦЕЛЬ, "
+            "снимок текущей страницы (url, текст, список интерактивных элементов с "
+            "селекторами) и историю уже выполненных шагов. Верни СТРОГО ОДНО следующее "
+            "действие в виде ОДНОГО JSON-объекта без пояснений вокруг.\n"
+            "Схема: {\"action\": \"click|type|navigate|scroll|done\", "
+            "\"selector\": \"css-селектор из списка (для click/type)\", "
+            "\"text\": \"что ввести (для type) или итоговый ответ (для done)\", "
+            "\"url\": \"куда перейти (для navigate)\", "
+            "\"reason\": \"кратко почему этот шаг\", "
+            "\"confirm\": true|false}\n"
+            "Правила:\n"
+            "- Выбирай selector ТОЛЬКО из предоставленного списка элементов.\n"
+            "- action=done когда цель достигнута; в text положи короткий итог для пользователя.\n"
+            "- Если видишь CAPTCHA / проверку «я не робот» / антибот — НЕ пытайся её решать: "
+            "верни action=done с пояснением, что нужна помощь человека.\n"
+            "- Ставь confirm=true для необратимых/отправляющих действий: отправка формы, "
+            "покупка/оплата, удаление, публикация, отправка сообщения, ввод данных в поле формы. "
+            "Для чтения, прокрутки, перехода по ссылкам confirm=false.\n"
+            "- НИКОГДА не вводи пароли, номера карт, коды — для таких полей верни done с просьбой "
+            "к пользователю сделать это самому.\n"
+            "- Ровно один JSON-объект, ничего больше."
+        )
+        user_prompt = (
+            f"ЦЕЛЬ: {goal}\n\n"
+            f"СТРАНИЦА:\nurl: {url}\nзаголовок: {title}\n\n"
+            f"ТЕКСТ (обрезан):\n{text}\n\n"
+            f"ИНТЕРАКТИВНЫЕ ЭЛЕМЕНТЫ:\n{elements_block}\n\n"
+            f"ИСТОРИЯ ШАГОВ:\n{history_block}\n\n"
+            "Верни следующее действие одним JSON-объектом."
+        )
+        try:
+            model = best_for_task("instruction following reasoning")
+        except Exception:
+            model = None
+        if not model:
+            return self._json({"error": "нет доступной модели"}, 503)
+        key, _byok, kerr = resolve_key(uid, model)
+        if kerr:
+            return self._json({"error": kerr}, 402)
+        raw = venice_complete(
+            model,
+            [{"role": "system", "content": sys_prompt},
+             {"role": "user", "content": user_prompt}],
+            max_tokens=400, key=key, temperature=0.0) or ""
+        decision = _extract_json_object(raw)
+        if not isinstance(decision, dict) or not decision.get("action"):
+            # не распарсилось — безопасный дефолт: остановиться и показать сырой ответ
+            return self._json({"action": "done",
+                               "reason": "не удалось разобрать ответ модели",
+                               "text": (raw or "")[:400], "model": model})
+        act = str(decision.get("action") or "").lower().strip()
+        if act not in ("click", "type", "navigate", "scroll", "done"):
+            act = "done"
+        out = {"action": act,
+               "selector": decision.get("selector"),
+               "text": decision.get("text"),
+               "url": decision.get("url"),
+               "reason": str(decision.get("reason") or "")[:300],
+               "confirm": bool(decision.get("confirm")),
+               "model": model}
+        # серверный бэкстоп безопасности: отправляющие/необратимые действия требуют подтверждения,
+        # даже если модель забыла выставить confirm.
+        if act == "type":
+            out["confirm"] = True   # ввод данных в форму — всегда подтверждаем
+        return self._json(out)
+
     # --- GET ---
     def do_GET(self):
         # Тонкая обёртка: тайминг + лог + бэкстоп необработанных исключений (см. _dispatch).
@@ -9836,6 +9969,8 @@ class Handler(BaseHTTPRequestHandler):
             self.api_catalog_refresh()
         elif path == "/api/browser":          # серверный агентный браузер (open/act/close)
             self.api_browser()
+        elif path == "/api/browser_act":      # cobrowse-расширение: следующий шаг агента (think→act)
+            self.api_browser_act()
         elif path == "/api/cookies":          # шифрохранилище cookies (save/list/delete)
             self.api_cookies()
         elif path == "/api/mem_extract":      # извлечь факты БЕЗ хранения (клиентская память)

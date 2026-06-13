@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Тайга — браузер-агент</title>
+  <link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body>
+  <header class="hdr">
+    <div class="brand">
+      <span class="logo">🌲</span>
+      <span class="name">Тайга</span>
+      <span class="tag">браузер-агент</span>
+    </div>
+    <button id="settingsBtn" class="icon-btn" title="Настройки">⚙</button>
+  </header>
+
+  <section id="settings" class="settings hidden">
+    <label>Бэкенд Тайги
+      <input id="backend" type="text" placeholder="http://127.0.0.1:8777" />
+    </label>
+    <label>Пользователь
+      <input id="user" type="text" placeholder="default" />
+    </label>
+    <button id="saveCfg" class="btn-ghost">Сохранить</button>
+  </section>
+
+  <main id="log" class="log" aria-live="polite"></main>
+
+  <div id="confirmBar" class="confirm-bar hidden">
+    <div id="confirmText" class="confirm-text"></div>
+    <div class="confirm-actions">
+      <button id="approveBtn" class="btn-approve">Подтвердить</button>
+      <button id="declineBtn" class="btn-decline">Отклонить</button>
+    </div>
+  </div>
+
+  <footer class="composer">
+    <textarea id="goal" rows="2" placeholder="Цель: например «найди на странице цену и нажми Купить»"></textarea>
+    <div class="row">
+      <button id="runBtn" class="btn-run">Запустить</button>
+      <button id="stopBtn" class="btn-stop" disabled>Стоп</button>
+    </div>
+  </footer>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>
