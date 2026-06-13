@@ -818,6 +818,32 @@ def _dedup_rich(records: list) -> list:
     return out
 
 
+def _dedup_exact(records: list) -> list:
+    """Схлопывает ТОЧНЫЕ повторы записи модели — когда один и тот же id (а если id одинаков,
+    то и провайдер тот же — id уже несёт префикс провайдера: ng:/or:/ch:/rp:) попал в список
+    дважды. Откуда берутся точные повторы: провайдер иногда отдаёт один и тот же id в своём
+    /models списком дважды; слияние «живой+кэш» по провайдеру; пересечение текстового списка
+    NanoGPT с nano_image_records() (обе ветки дают id вида 'ng:...'). Это и есть видимые
+    юзеру дубли «модель ×2/×3».
+
+    КОНСЕРВАТИВНО: ключ = точный id (он уникален в пределах провайдера и сам несёт префикс
+    провайдера, так что разные провайдеры с одинаковым голым именем имеют РАЗНЫЕ id —
+    'gpt-image-2' (venice) vs 'ng:gpt-image-2' (nanogpt) — и НЕ схлопываются). Две разные
+    модели с одинаковым ОТОБРАЖАЕМЫМ именем, но разными id (venice↔nanogpt-вариант, или
+    ':32768' vs ':32000' — разный бюджет размышления) — это РАЗНЫЕ модели, остаются обе.
+    Оставляем ПЕРВУЮ встреченную запись (порядок сохраняется; у неё уже проставлены
+    served_by/цены/бейджи/also от _dedup_rich)."""
+    seen = set()
+    out = []
+    for r in records:
+        mid = r.get("id")
+        if mid in seen:
+            continue
+        seen.add(mid)
+        out.append(r)
+    return out
+
+
 def _fetch_model_list(url: str, headers: dict, tries: int = 3) -> list:
     """Тянет список моделей с ретраями — провайдеры периодически отдают пусто/ошибку."""
     last = None
@@ -1481,6 +1507,14 @@ def load_rich_catalog():
     before = len(records)
     records = _dedup_rich(records)
     print(f"── каталог: дедуп {before} → {len(records)} (убрано дублей: {before - len(records)})")
+    # страховка от ТОЧНЫХ повторов id (тот же id дважды: провайдер-флап, слияние живой+кэш,
+    # пересечение текстового списка nano с nano-картинками). _dedup_rich группирует
+    # медиа по id (перезапись), но текст+медиа из разных веток могут дать один id дважды —
+    # этот проход гарантированно убирает точные дубли, не трогая разные id. См. _dedup_exact.
+    before_x = len(records)
+    records = _dedup_exact(records)
+    if before_x != len(records):
+        print(f"── каталог: точных дублей id убрано {before_x - len(records)}")
 
     if records:
         RICH = records
@@ -1552,7 +1586,9 @@ def _build_curated_payload():
             item["degraded"] = True
         out.append(item)
     out.extend({**m, "provider": "openrouter"} for m in OR_MODELS)  # OpenRouter в витрине
-    return out
+    # та же страховка от точных повторов id (CURATED-алиас мог совпасть с OR_MODELS, либо
+    # дубль внутри списка) — мозг-ведущий и витрина рендерят отсюда. Разные id не трогаем.
+    return _dedup_exact(out)
 
 
 def curated_payload():
@@ -1565,7 +1601,8 @@ def _build_full_catalog_payload():
     out = [{"id": mid, "ctx": info["ctx"], "vision": info["vision"]}
            for mid, info in sorted(CATALOG.items(), key=lambda kv: -kv[1]["ctx"])]
     out.extend({"id": m["id"], "ctx": m["ctx"], "vision": m["vision"]} for m in OR_MODELS)
-    return out
+    # страховка от точных повторов id (CATALOG↔OR_MODELS пересечение/дубль) — разные id целы.
+    return _dedup_exact(out)
 
 
 def full_catalog_payload():
