@@ -19,7 +19,29 @@ Batches of ≤4 disjoint-file lanes. ≤1 server.py lane + ≤1 chat.tsx lane pe
 - [x] BATCH 19 — backend test suite (NEW tests/, stdlib unittest endpoint smoke, 16/16 live-pass) + lib hardening + harden gen-image/video error paths + retry/backoff polish — DONE (FE 4bf90a5 / parent next)
 - [x] BATCH 20 — observability (S: structured logs, error envelopes, friendly errors) + wired dormant features into chat (C: playground/tour/sprint/agent-timeline+permission) + toast system + diagnostics panel — DONE (FE b4a611e / parent next)
 - [x] BATCH 21 — provider health checks (S: /api/providers, served_by) + model-catalog health UI + provider-fallback transparency + TESTING.md — DONE (FE e15d667 / parent next)
-- [ ] FINAL — full code review (batches 9-21) + full smoke + update FINAL SUMMARY + STOP
+- [x] FINAL — full code review (batches 9-21, zero blockers) + full smoke (16/16 endpoint tests + 73 vitest + build + live curls) + FINAL SUMMARY — DONE. Loop STOPPED.
+
+## ✅ FINAL SUMMARY (V3 complete — batches 9-21 + final review, all local, never pushed)
+All 13 V3 batches (9-21) DONE on top of V2 (0-8). Verified every batch: `ast OK` + `tsc 0` + `vitest 73/73` + `next build` SUCCESS + backend restart-smoke green. Two independent fresh-context audits: batches 9-17 cleared (mid-build), batches 18-21 cleared at FINAL — **zero blockers both times**. Live endpoint test suite (`tests/test_endpoints.py`): **16/16 pass**. App passes its own `/sprint` self-test (6/6 subsystems).
+
+### Shipped in V3
+- **Intelligence/RAG:** smart multi-query+RRF+rerank RAG (smart-gated) · multimodal RAG ingest (VLM-caption images/scanned PDFs) · per-chat workspace (from V2) · sleep-time memory consolidation (Letta-style, off by default).
+- **Agent:** stream-recovery holdback + silent cut-retry · interactive agent timeline + permission gate (typed SSE + /api/agent_permit, no-hang, server _perm_check authoritative) · TaskPacket per-subtask model delegation + accept/verify envelope · tool-ACL.
+- **Studio/media:** workflow runner (/api/workflow, 4 templates) · per-model playground (Form/JSON + price + embed snippet) · schema param-forms in studios · real negative_prompt · real OOXML .docx · media retry/backoff + categorized error UX.
+- **Voice:** hands-free «режим разговора» loop (talk→speak→listen).
+- **UI/UX:** pre-send ₽ estimate · catalog deep-filters + saved chips + brand-click · provider health strip · server-persona editor · memory-budget sliders · onboarding capability tour · settings IA reorg + search · diagnostics panel · toast system · i18n + motion libs · whats-new changelog · tool-card polish · empty/error/loading primitives · error boundaries · a11y (chat + settings) · mobile deep-polish.
+- **Perf:** backend catalog/RAG caching (balance NEVER cached) · FE code-split (next/dynamic) · streaming delta coalescing · lazy-img.
+- **Security/ops:** per-IP rate-limit + input validation + owner-gate audit · observability (structured logs + {error,code} envelopes + unhandled-exception backstop) · provider health tracker + /api/providers + served_by fallback transparency.
+- **Tests/docs:** 16-test stdlib endpoint suite (tests/) · 73 vitest unit tests · /sprint + /api/selftest · TESTING.md full-scale-test guide · PROJECT-STATE.md handoff.
+
+### Known follow-ups (non-blocking — for founder review)
+- `/api/init` top-level `balance` exposes the owner resale-pool USD to all users (PRE-EXISTING, not a V3 change) — review whether to hide from non-owners.
+- Provider `degraded` flag in the curated catalog can lag up to ~60s (TTL cache); /api/providers is always live. UI-deprioritize only, never money.
+- Optional dev-SDK polish (document /v1/chat/completions OpenAI-compat surface + thin wrapper) — discussed, deferred to a future task.
+
+### Deferred/blocked (need founder keys/infra/decision — NOT auto-built): payments, self-hosted ML voice/guard, sqlite-vec, E2B sandbox, ComfyUI/manim/FLUX-schnell free-media, Taiga-Coder v2 loop, GPU host, desktop Tauri, social publishing, login UI, ACE-Step, 3D .glb (provider down), deepfake guard, MCP OAuth full flow, Coder git-push/PR.
+
+STATUS: autonomous loop STOPPED (all 13 V3 batches + final review done). Live: backend :8777, dev :3000. All work LOCAL git, NEVER pushed. Ready for full-scale testing — see TESTING.md.
 
 ## LANE DETAIL (refined at dispatch)
 ### BATCH 9
