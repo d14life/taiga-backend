@@ -701,15 +701,162 @@ def _rag_embed(text: str) -> list:
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.load(r)["data"][0]["embedding"]
 
-def _rag_chunks(text: str, size: int = 700, overlap: int = 100) -> list:
-    text = re.sub(r"\s+", " ", text or "").strip()
-    if not text:
+_RAG_MAX_CHUNKS = 400  # потолок кусков на очень больших доках
+
+def _rag_split_recursive(text: str, target: int) -> list:
+    """Рекурсивно режем по иерархии разделителей (от крупно-семантических к мелким),
+    НЕ ломая единицу посреди, пока есть запас. Возвращает список «атомов» <= ~target.
+    Паттерн langchain RecursiveCharacterTextSplitter, но stdlib-only."""
+    if len(text) <= target:
+        return [text] if text.strip() else []
+    # Иерархия разделителей: каждый кортеж — (regex-разделитель, keep_with: 'after'|'before'|'').
+    # 'after' — разделитель остаётся в конце куска (абзацы/строки/предложения),
+    # 'before' — приклеивается к началу следующего (markdown-заголовки),
+    # '' — разделитель-пробел (теряется).
+    seps = [
+        (r"\n\s*\n", "after"),                       # разрыв абзаца
+        (r"(?<=\n)(?=#{1,6}\s)", "before"),          # markdown-заголовок (#, ##, ...) — сильная точка
+        (r"\n", "after"),                            # перевод строки
+        (r"(?<=[.!?;])\s+", "after"),                # граница предложения (лат.)
+        (r"(?<=[.!?…»])\s+", "after"),               # граница предложения (RU «…»)
+        (r"(?<=\s—)\s+|(?<=\s–)\s+", "after"),       # тире-врезка
+        (r"\s+", ""),                                # пробелы (слова)
+    ]
+    for pat, keep in seps:
+        parts = _rag_apply_sep(text, pat, keep)
+        if len(parts) < 2:
+            continue
+        out = []
+        for p in parts:
+            if len(p) <= target:
+                if p.strip():
+                    out.append(p)
+            else:
+                out.extend(_rag_split_recursive(p, target))  # ещё крупный — следующий уровень
+        if out:
+            return out
+    # последний рубеж — жёсткая нарезка по символам
+    return [text[i:i + target] for i in range(0, len(text), target) if text[i:i + target].strip()]
+
+def _rag_apply_sep(text: str, pat: str, keep: str) -> list:
+    """Разрезать text по pat. keep='after' оставляет разделитель в конце куска,
+    'before' — в начале следующего, '' — выбрасывает (split с захватом пробелов)."""
+    if keep == "before":
+        # split на ГРАНИЦАХ (lookahead/lookbehind): склейки не нужны, re.split вернёт куски
+        return [p for p in re.split(pat, text) if p]
+    if keep == "after":
+        # сохраняем «хвост» разделителя при куске слева через split с захватом
+        pieces = re.split("(" + pat + ")", text)
+        out, buf = [], ""
+        for j, piece in enumerate(pieces):
+            if j % 2 == 1:        # это сам разделитель
+                buf += piece
+                out.append(buf)
+                buf = ""
+            else:
+                buf += piece
+        if buf:
+            out.append(buf)
+        return [p for p in out if p]
+    # keep == "" : режем по пробелам, теряя их
+    return [p for p in re.split(pat, text) if p]
+
+def _rag_fence_segments(text: str) -> list:
+    """Разбить документ на сегменты, помечая огороженные ```code``` блоки.
+    Возвращает [(segment_text, is_code_fence), ...]."""
+    segs, i, n = [], 0, len(text)
+    fence = re.compile(r"(?m)^[ \t]*```")
+    pos = 0
+    open_m = fence.search(text, pos)
+    while open_m:
+        start = open_m.start()
+        if start > pos:
+            segs.append((text[pos:start], False))
+        close_m = fence.search(text, open_m.end())
+        if not close_m:
+            # незакрытый забор — остаток считаем кодом до конца
+            segs.append((text[start:], True))
+            return segs
+        end = close_m.end()
+        # дотягиваем до конца строки закрывающего забора
+        nl = text.find("\n", end)
+        end = nl + 1 if nl != -1 else len(text)
+        segs.append((text[start:end], True))
+        pos = end
+        open_m = fence.search(text, pos)
+    if pos < n:
+        segs.append((text[pos:], False))
+    return segs
+
+def _rag_overlap_tail(prev: str, overlap: int) -> str:
+    """Хвост предыдущего куска для контекстного перекрытия — по границе предложения/слова,
+    не посреди слова."""
+    if overlap <= 0 or not prev:
+        return ""
+    tail = prev[-overlap * 2:] if len(prev) > overlap * 2 else prev
+    # ищем начало предложения внутри хвоста
+    m = list(re.finditer(r"(?<=[.!?;…»])\s+|\n", tail))
+    if m:
+        cand = tail[m[-1].end():].strip()
+        if 0 < len(cand) <= overlap * 2:
+            return cand
+    # иначе — по границе слова
+    cut = prev[-overlap:]
+    sp = cut.find(" ")
+    return cut[sp + 1:].strip() if sp != -1 else cut.strip()
+
+def _rag_pack(atoms: list, target: int, overlap: int) -> list:
+    """Жадно упаковываем атомы в куски ~target, добавляя sentence-aware перекрытие
+    между соседними кусками."""
+    chunks, cur = [], ""
+    for a in atoms:
+        if not cur:
+            cur = a
+        elif len(cur) + len(a) <= target:
+            cur += a
+        else:
+            chunks.append(cur)
+            tail = _rag_overlap_tail(cur, overlap)
+            cur = (tail + ("\n" if tail and not a.startswith(("\n", " ")) else "") + a) if tail else a
+    if cur and cur.strip():
+        chunks.append(cur)
+    return chunks
+
+def _rag_chunks(text: str, target: int = 900, overlap: int = 150) -> list:
+    """Структурно-осознанная рекурсивная нарезка (stdlib-only, паттерн
+    RecursiveCharacterTextSplitter). Возвращает list[str] непустых кусков ~target символов:
+    - режет по иерархии разделителей (абзацы → заголовки → строки → предложения → тире → слова → жёсткий рез);
+    - НЕ ломает огороженный ```code``` блок (целиком, если влезает; иначе по строкам внутри);
+    - markdown-заголовки (#, ##) — сильные точки разреза;
+    - sentence-aware перекрытие ~overlap между кусками (не посреди слова)."""
+    if not text or not text.strip():
         return []
-    out, i = [], 0
-    while i < len(text):
-        out.append(text[i:i + size])
-        i += max(1, size - overlap)
-    return out[:200]
+    target = max(120, int(target))
+    overlap = max(0, min(int(overlap), target // 2))
+    out = []
+    for seg, is_code in _rag_fence_segments(text):
+        if not seg.strip():
+            continue
+        if is_code:
+            # код-забор: целиком, если влезает; иначе режем ТОЛЬКО по границам строк
+            seg = seg.rstrip("\n")
+            if len(seg) <= target:
+                out.append(seg)
+            else:
+                lines = _rag_apply_sep(seg, r"\n", "after")
+                out.extend(_rag_pack(
+                    [ln if len(ln) <= target else ln  # длинную строку кода оставляем как есть-атом
+                     for ln in lines], target, 0))
+        else:
+            # обычный текст: схлопываем лишние пробелы внутри строк, но сохраняем переводы строк
+            seg = re.sub(r"[ \t]+", " ", seg)
+            seg = re.sub(r"\n{3,}", "\n\n", seg)
+            atoms = _rag_split_recursive(seg, target)
+            out.extend(_rag_pack(atoms, target, overlap))
+        if len(out) >= _RAG_MAX_CHUNKS:
+            break
+    cleaned = [c.strip() for c in out if c and c.strip()]
+    return cleaned[:_RAG_MAX_CHUNKS]
 
 def _rag_path(uid: str) -> Path:
     return user_dir(uid) / "rag.json"
