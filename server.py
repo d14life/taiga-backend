@@ -1647,6 +1647,8 @@ def load_rich_catalog():
         r["ru"] = any(f in r["id"].lower() for f in _RU_FAM)
         pin, pout = r.get("in") or 0, r.get("out") or 0
         r["per1k"] = round((2000 * pin + 1000 * pout) / 1e6, 4)   # ~$ за 1000 сообщений
+        _p = r["per1k"]
+        r["tier_cost"] = "cheap" if _p <= 0.003 else ("mid" if _p <= 0.012 else "top")  # ценовой тир (для UI/авто)
         r["free"] = (pin == 0 and pout == 0) and r["kind"] not in ("image", "voice")
         c = censor.get(r["id"])
         r["uncensored_pct"] = c.get("pct") if c else None
@@ -3062,10 +3064,46 @@ def _expert_pool() -> list:
     return _EXPERT_POOL_CACHE
 
 
-def best_for_task(task: str, pool=None) -> str:
-    """Лучшая НЕ-фантомная модель под задачу ПО БЕНЧМАРКАМ (_BENCH). Это и есть «авто ищет
-    лучшую модель под задачу». pool=None → дефолтный экспертный пул. Все фантомы → _first_live."""
-    cands = [mid for mid in (pool or _expert_pool()) if not is_phantom(mid)]
+# ── ЦЕНОВЫЕ ТИРЫ (Damir: cheapest/mid/top): по per1k ($ за 1000 сообщений). Авто внутри тира =
+# лучшая-под-задачу модель в этом бюджете ("лучшая ДЕШЁВАЯ модель под код"). Пороги из распределения
+# каталога (медиана ~0.002): cheap ≤0.003 · mid ≤0.012 · top >0.012.
+_PER1K_CACHE = {"ts": -1.0, "map": {}}
+
+
+def model_per1k(model_id: str):
+    c = _PER1K_CACHE
+    try:
+        if c["ts"] != _CATALOG_TS:
+            c["map"] = {strip_model_prefix(r.get("id", "")): r.get("per1k") for r in RICH}
+            c["ts"] = _CATALOG_TS
+        return c["map"].get(strip_model_prefix(model_id))
+    except Exception:
+        return None
+
+
+def cost_tier(model_id: str) -> str:
+    """Ценовой тир модели: cheap / mid / top (по per1k). Неизвестно → mid (серединка)."""
+    p = model_per1k(model_id)
+    if p is None:
+        return "mid"
+    if p <= 0.003:
+        return "cheap"
+    if p <= 0.012:
+        return "mid"
+    return "top"
+
+
+def best_for_task(task: str, pool=None, tier: str = None) -> str:
+    """Лучшая НЕ-фантомная модель под задачу ПО БЕНЧМАРКАМ (_BENCH). Это «авто ищет лучшую модель
+    под задачу». tier (cheap/mid/top) → ищем по ВСЕМУ каталогу в этом ценовом тире (лучшая в бюджете);
+    иначе — по дефолтному экспертному пулу. Все фантомы → _first_live."""
+    if tier in ("cheap", "mid", "top"):
+        cands = [r.get("id") for r in RICH
+                 if r.get("kind") in ("allround", "thinking", "code", "mid", "chat", "vision")
+                 and not is_phantom(r.get("id", ""))
+                 and cost_tier(r.get("id", "")) == tier]
+    else:
+        cands = [mid for mid in (pool or _expert_pool()) if not is_phantom(mid)]
     if not cands:
         return _first_live("smart")
     return max(cands, key=lambda x: bench(x, task))
@@ -10497,6 +10535,8 @@ class Handler(BaseHTTPRequestHandler):
         # В провайдер уходит ТОЛЬКО думающим моделям (model_reasons) и ТОЛЬКО как reasoning_effort.
         _re = str(req.get("reasoning_effort") or "").lower()
         req_reasoning_effort = _re if _re in ("low", "medium", "high") else ("high" if req.get("deep") else None)
+        _tier = str(req.get("tier") or "").lower()
+        req_tier = _tier if _tier in ("cheap", "mid", "top") else None   # ценовой тир: авто ищет лучшую-под-задачу в нём
 
         has_images = any(m.get("images") for m in raw_messages)
         model = str(req.get("model") or _first_live("chat"))
@@ -10517,6 +10557,8 @@ class Handler(BaseHTTPRequestHandler):
                 auto_brain = False
         if model == "__auto__":
             model = route_model(raw_messages, has_images)
+            if req_tier:        # юзер выбрал ценовой тир → лучшая-под-задачу модель В ЭТОМ БЮДЖЕТЕ
+                model = best_for_task(detect_task(raw_messages, has_images), tier=req_tier)
         # ВЛАДЕЛЕЦ + активная подписка + не задал модель руками + без картинок →
         # гоним тест-чат через nano-подписку (free). Юзеры/явный выбор модели — не трогаем.
         # При авто-Мозге эксперта подбираем ниже (сильная модель), поэтому этот шорткат пропускаем.
@@ -10528,8 +10570,10 @@ class Handler(BaseHTTPRequestHandler):
         # обычный сильный дефолт. Стрим всё равно ведёт дешёвый ведущий (см. брейн-ветку ниже).
         if auto_brain:
             # авто-Мозг: эксперт = ЛУЧШАЯ модель ПОД ЗАДАЧУ по бенчмаркам (код→кодер, reason→думающая,
-            # vision→зрячая). Владельцу — opus бесплатно через подписку (он силён почти везде).
-            model = "ng:claude-opus-4-8" if is_owner(uid) else best_for_task(detect_task(raw_messages, has_images))
+            # vision→зрячая), в выбранном ценовом тире. Владельцу без тира — opus бесплатно (силён везде).
+            _bt = detect_task(raw_messages, has_images)
+            model = ("ng:claude-opus-4-8" if (is_owner(uid) and not req_tier)
+                     else best_for_task(_bt, tier=req_tier))
         # картинки есть, а модель их не понимает — переключаем на зрячую (не-фантомную)
         if has_images and not vision_ok(model):
             model = _first_live("cheap")
