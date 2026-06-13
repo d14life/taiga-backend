@@ -19,7 +19,7 @@ ANOTHER claude session may also work this repo — collision-guard before EVERY 
    Tick the checkbox here. Restart backend if server.py changed.
 5. Append ONE casual plain-English line to WHATS-NEW.md: "✨ <feature> — <what it does for the user>".
 Rules: NEVER auto-pick dead models. server.py edits sequential. L13 BLOCKED on Damir's harness repo link = skip.
-Priority: L7 · L8 · L9 · L10 · L11 · L12 · L18 · L15 · L16 · L14 · L3 · L21 · L22
+Priority: L8 · L9 · L10 · L11 · L12 · L18 · L15 · L16 · L14 · L3 · L21 · L22
 
 ## DONE (committed)
 - [x] L0 Agent S identity rename + name-stamp fix + default-leak fix        (5f8c24e)
@@ -131,7 +131,9 @@ Priority: L7 · L8 · L9 · L10 · L11 · L12 · L18 · L15 · L16 · L14 · L3 
         Подумал Nс» box, not mixed into the answer. VERIFIED: thinking model → 172 reasoning events. Original ask:
         capture reasoning_content from stream → separate SSE
         channel → collapsible "Думает…→Подумал Nс" box (empty-safe for models w/o trace).
-- [ ] L7 Verify-against-reality button: hallucination(vs web) + chat-drift + memory-vs-reality;
+- [x] L7 Verify-against-reality button — DONE (taiga-web b075d9a): per-answer «проверить» → web-search the
+        question + strict fact-checker model → verdict ✅/⚠️N/❌ + fixes (reuses super-search + ultra). Covers:
+        hallucination(vs web) + chat-drift + memory-vs-reality;
         verdict ✅/⚠️N/❌ + fixes. Reuse BEAM_FUSION_PROMPT + tool_web_search. (no name-stamp check)
 - [ ] L8 Memory-write frequency: expose consolidation cadence as a user setting + UI slider.
 - [ ] L9 User hooks per chat: chat-settings → create hook (trigger + action-prompt + AI-help btn).
