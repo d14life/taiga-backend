@@ -46,13 +46,21 @@ Priority: L4a-ui · L23 (no-truncation/budget-routing) · L4b · L4c · L19 · L
         on the main pad → send req.tier. "best CHEAP model for this code task" works (deepseek-v4 bench 95).
 - [x] L4d Beam=Council merge: Council always uses fusion-critic synthesis; Beam absorbed.  (d02a073)
         VERIFIED taxonomy: Brain=triage/one-leads · Council=N deliberate→fuse · Heavy/Research=single-model.
-- [ ] L4b Mode taxonomy + EFFORT SLIDER cleanup (Damir, screenshot — HIGH). Build the clean effort control:
-        a discrete "Faster ←→ Smarter" slider (5 dots, label "Effort: Low/Medium/High"), shown as a chip
-        next to the model ("Opus 4.8 · Medium"), Claude/Codex-style. Maps DIRECTLY to reasoning_effort
-        (low/med/high → native dial, backend-ready) + token budget. This REPLACES the messy overlap of
-        Fast/Expert/Heavy + Deep + budget — ONE slider. Also: Heavy = SINGLE-model max-intensity (NOT Brain),
-        Research = single-model deep, drop the separate "Слияние" button (== Совет). Fast suppresses auto-Brain.
-        NOTE: temperature already forwards on the main path (fixed comment 63fc8b8); pipeline-step temp = todo.
+- [ ] L4b POWER SYSTEM = 5-level slider + Fast/Heavy/Deep presets (Damir, updated — HIGH).
+        CURRENT muddle (verified): Expert = deep single model; Heavy = secretly Brain (2 models), mislabeled
+        "совет". Replace with this clean design:
+        • EFFORT/OUTPUT = a 5-LEVEL slider (Claude-Code cheap/mid/max idea but 5 steps; screenshot's 5 dots),
+          chip next to model ("Opus 4.8 · Medium"). Maps to reasoning_effort (low/med/high→native dial,
+          backend-ready) + token/output budget.
+        • QUICK PRESETS Fast · Heavy · Deep — one-tap, each bundles effort + OUTPUT + routing:
+            Fast  = fast, SHORT output preset (~300 words, request-dependent), cheap/fast model.
+            Heavy = thorough, more compute + longer output.
+            Deep  = deep thinking, ROUTED to models that natively accept it (GPT/Gemini — measured to honor
+                    reasoning_effort) using their REAL native reasoning (use best_for_task + model_reasons).
+        • Each preset ALSO controls output length (presets carry output caps). Native routing: Deep/thinking
+          → only reasoning-capable models, real dial not faked.
+        Also: drop separate "Слияние" button (== Совет); "more engines" (Brain/Council) = MODE, not effort.
+        NOTE: temperature already forwards main path (comment fixed 63fc8b8); pipeline-step temp = todo.
 - [x] L4e Multi-engine heads inherit main-pad spec + see chat memory (Damir).  (90daf3e)
         Council members/Brain-expert now get the FULL chat history (memory), inherit effort
         (deep→reasoning_effort, gated), scaled token budget, + optional per-head master prompt
