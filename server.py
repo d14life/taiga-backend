@@ -2525,70 +2525,98 @@ def venice_stream(model: str, messages: list, max_tokens: int, usage_out: dict =
     key = key or global_key(provider_name(model))
     if not key:
         raise RuntimeError(f"нет ключа: {provider_name(model)}")
-    max_tokens = cap_nano_max_tokens(model, max_tokens, messages)  # низкий баланс NanoGPT → режем вывод, не 402
-    body_dict = {
-        "model": strip_model_prefix(model),
-        "messages": messages,
-        "max_tokens": max_tokens,
-        "stream": True,
-        "stream_options": {"include_usage": True},
-    }
-    temperature = _clean_temperature(temperature)
-    if temperature is not None:
-        body_dict["temperature"] = round(temperature, 3)
-    # НАТИВНЫЙ дайл размышления: шлём ТОЛЬКО reasoning_effort (low/medium/high). Семейные объекты
-    # (Anthropic thinking{budget}, Google thinkingConfig) РЕЖУТСЯ прокси с 400 — проверено 2026-06,
-    # поэтому их НЕ шлём никогда. include_reasoning тоже НЕ шлём (ломал Trinity 400).
-    if reasoning_effort in ("low", "medium", "high") and strip_model_prefix(model) not in _REJECTS_EFFORT:
-        body_dict["reasoning_effort"] = reasoning_effort
-    # пассивный замер здоровья: тайминг открытия + исход. yield-байты НЕ трогаем.
     _hp = provider_name(model)
-    _t0 = time.time()
-    _opened = False
-    try:
-        with _open_chat(chat_completions_url(prov), body_dict, headers_for(prov, key), 300) as r:
-            _opened = True
-            for raw in r:
-                line = raw.decode("utf-8", "ignore").strip()
-                if not line.startswith("data:"):
-                    continue
-                payload = line[5:].strip()
-                if payload == "[DONE]":
-                    if usage_out is not None:
-                        usage_out["__finished__"] = True   # явный чистый финиш апстрима
-                    break
-                try:
-                    obj = json.loads(payload)
-                except json.JSONDecodeError:
-                    continue
-                u = obj.get("usage")
-                if u and usage_out is not None:
-                    usage_out["prompt_tokens"] = u.get("prompt_tokens") or usage_out.get("prompt_tokens", 0)
-                    usage_out["completion_tokens"] = u.get("completion_tokens") or usage_out.get("completion_tokens", 0)
-                try:
-                    choice0 = obj["choices"][0]
-                except (KeyError, IndexError):
-                    continue
-                # finish_reason на последнем choice — тоже признак ЧИСТОГО завершения
-                # (часть дешёвых провайдеров шлёт его вместо/раньше [DONE]).
-                if choice0.get("finish_reason") and usage_out is not None:
-                    usage_out["__finished__"] = True
-                delta = (choice0.get("delta") or {}).get("content") or ""
-                if delta:
-                    yield delta
-    except GeneratorExit:
-        # потребитель закрыл генератор (клиент отвалился) — это не вина провайдера:
-        # соединение открылось и текст шёл, считаем успехом и не глушим GeneratorExit.
-        if _opened:
+    convo = list(messages)          # рабочая копия — растёт продолжениями (вход вызывающего не трогаем)
+    acc = ""                        # накопленный ответ этого вызова — для стыковки и контекста продолжения
+    total_prompt = total_completion = 0
+    continues = 0
+    while True:
+        cap = cap_nano_max_tokens(model, max_tokens, convo)  # низкий баланс NanoGPT → режем ЧАНК, не 402
+        body_dict = {
+            "model": strip_model_prefix(model),
+            "messages": convo,
+            "max_tokens": cap,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        _temp = _clean_temperature(temperature)
+        if _temp is not None:
+            body_dict["temperature"] = round(_temp, 3)
+        # НАТИВНЫЙ дайл размышления: шлём ТОЛЬКО reasoning_effort (low/medium/high). Семейные объекты
+        # (Anthropic thinking{budget}, Google thinkingConfig) РЕЖУТСЯ прокси с 400 — проверено 2026-06,
+        # поэтому их НЕ шлём никогда. include_reasoning тоже НЕ шлём (ломал Trinity 400).
+        if reasoning_effort in ("low", "medium", "high") and strip_model_prefix(model) not in _REJECTS_EFFORT:
+            body_dict["reasoning_effort"] = reasoning_effort
+        # пассивный замер здоровья: тайминг открытия + исход. yield-байты НЕ трогаем.
+        _t0 = time.time()
+        _opened = False
+        round_finish = None         # finish_reason раунда (None → апстрим оборвался без сигнала)
+        saw_done = False
+        round_usage = {}
+        try:
+            with _open_chat(chat_completions_url(prov), body_dict, headers_for(prov, key), 300) as r:
+                _opened = True
+                for raw in r:
+                    line = raw.decode("utf-8", "ignore").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    payload = line[5:].strip()
+                    if payload == "[DONE]":
+                        saw_done = True   # явный чистый финиш апстрима
+                        break
+                    try:
+                        obj = json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
+                    u = obj.get("usage")
+                    if u:
+                        round_usage["prompt_tokens"] = u.get("prompt_tokens") or round_usage.get("prompt_tokens", 0)
+                        round_usage["completion_tokens"] = u.get("completion_tokens") or round_usage.get("completion_tokens", 0)
+                    try:
+                        choice0 = obj["choices"][0]
+                    except (KeyError, IndexError):
+                        continue
+                    # finish_reason на последнем choice — признак ЧИСТОГО завершения, а "length" → обрезка.
+                    if choice0.get("finish_reason"):
+                        round_finish = choice0["finish_reason"]
+                    delta = (choice0.get("delta") or {}).get("content") or ""
+                    if delta:
+                        acc += delta
+                        yield delta
+        except GeneratorExit:
+            # потребитель закрыл генератор (клиент отвалился) — это не вина провайдера:
+            # соединение открылось и текст шёл, считаем успехом и не глушим GeneratorExit.
+            if _opened:
+                health_record(_hp, True, (time.time() - _t0) * 1000.0)
+            raise
+        except Exception as e:
+            # апстрим лёг / сетевой обрыв / HTTP-ошибка → фиксируем неудачу и ПРОБРАСЫВАЕМ
+            # дальше (логика тихого фолбэка в chat() остаётся ровно прежней).
+            health_record(_hp, False, error=getattr(e, "code", None) or e.__class__.__name__)
+            raise
+        else:
             health_record(_hp, True, (time.time() - _t0) * 1000.0)
-        raise
-    except Exception as e:
-        # апстрим лёг / сетевой обрыв / HTTP-ошибка → фиксируем неудачу и ПРОБРАСЫВАЕМ
-        # дальше (логика тихого фолбэка в chat() остаётся ровно прежней).
-        health_record(_hp, False, error=getattr(e, "code", None) or e.__class__.__name__)
-        raise
-    else:
-        health_record(_hp, True, (time.time() - _t0) * 1000.0)
+        # суммарный расход по ВСЕМ раундам (авто-продолжения тоже стоят токенов)
+        total_prompt += int(round_usage.get("prompt_tokens") or 0)
+        total_completion += int(round_usage.get("completion_tokens") or 0)
+        if usage_out is not None:
+            usage_out["prompt_tokens"] = total_prompt
+            usage_out["completion_tokens"] = total_completion
+        clean = saw_done or (round_finish is not None)
+        # АВТО-ПРОДОЛЖЕНИЕ (L23): обрыв ПО ЛИМИТУ токенов (finish_reason=='length') → дозапрашиваем
+        # продолжение (тот же контекст + уже написанное + просьба продолжить РОВНО с обрыва) и стримим
+        # дальше, до _max_continues раз. Потолок токенов = размер ОДНОГО чанка, а не всего ответа.
+        if round_finish == "length" and continues < _max_continues and acc.strip():
+            continues += 1
+            convo = list(messages) + [
+                {"role": "assistant", "content": acc},
+                {"role": "user", "content": "Продолжи ответ РОВНО с места обрыва — без повторов, "
+                                            "без вступлений и без извинений. Просто продолжай текст."},
+            ]
+            continue
+        if clean and usage_out is not None:
+            usage_out["__finished__"] = True   # чистый финиш ([DONE]/finish_reason) — не truncation
+        return
 
 
 def venice_complete(model: str, messages: list, max_tokens: int = 400, key: str = None,
@@ -10637,6 +10665,40 @@ class Handler(BaseHTTPRequestHandler):
         owner = is_owner(uid)
         key, byok, kerr = resolve_key(uid, model)        # ключ выбранной модели (в брейне — эксперт)
 
+        # 💸 GRACEFUL COST DEGRADATION (L23): дорогой запрос НЕ режем и НЕ блокируем — на «Авто» роутимся
+        # на сильнейшую модель ПОД ЗАДАЧУ, что влезает в бюджет (req.max_spend), и отвечаем ПОЛНОСТЬЮ
+        # (авто-продолжение в venice_stream добьёт длину). Честно сообщаем подменой. Трогаем ТОЛЬКО
+        # биллинг-юзера на «Авто» без спец-режима — явный выбор модели, владельца и BYOK не трогаем.
+        budget_note = ""
+        try:
+            _ms = float(req.get("max_spend") or 0)
+        except (TypeError, ValueError):
+            _ms = 0.0
+        if (_ms > 0 and not owner and not byok and not explicit_model and not _in_special_mode
+                and not has_images and model_kind(model) not in ("image", "voice")):
+            _in_tok = sum(len(str(m.get("content") or "")) for m in raw_messages) / 3.0  # ~токены входа
+            def _est_usd(mid):
+                pr = PRICE.get(mid)
+                if not pr:
+                    return None
+                return (_in_tok * (pr[0] or 0) + max_tokens * (pr[1] or 0)) / 1e6  # вход + потолок выхода
+            _cur_est = _est_usd(model)
+            if _cur_est is not None and _cur_est > _ms:
+                _btask = detect_task(raw_messages, has_images)
+                _fits = [r for r in RICH
+                         if r.get("kind") in ("allround", "thinking", "code", "mid", "chat")
+                         and not is_phantom(r.get("id", ""))
+                         and (_est_usd(r.get("id", "")) is not None)
+                         and _est_usd(r.get("id", "")) <= _ms]
+                if _fits:
+                    _best = max(_fits, key=lambda r: bench(r.get("id", ""), _btask))
+                    if _best.get("id") and _best["id"] != model:
+                        _nk, _nbyok, _nkerr = resolve_key(uid, _best["id"])
+                        if _nk and not _nkerr:               # подменяем ТОЛЬКО на модель с живым ключом
+                            model, key, byok, kerr = _best["id"], _nk, _nbyok, _nkerr
+                            budget_note = (f"большой запрос — отвечаю моделью «{_best.get('name') or model}» "
+                                           f"в рамках бюджета (~${_ms:g})")
+
         # 🧠 МОЗГ: дешёвый ведущий триажит → умный эксперт отвечает на сложное.
         # Включается явным флагом brain ЛИБО авто-Мозгом (трудный запрос на «__auto__»).
         brain = ((bool(req.get("brain")) or auto_brain) and not has_images
@@ -10706,6 +10768,8 @@ class Handler(BaseHTTPRequestHandler):
         _meta = {"type": "meta", "model": model}
         if agent_events:
             _meta["run_id"] = run_id
+        if budget_note:
+            _meta["note"] = budget_note   # прозрачно: почему ответ от другой (более дешёвой) модели
         if not self._sse(_meta):
             return
 

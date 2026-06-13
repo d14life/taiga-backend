@@ -19,7 +19,7 @@ ANOTHER claude session may also work this repo — collision-guard before EVERY 
    Tick the checkbox here. Restart backend if server.py changed.
 5. Append ONE casual plain-English line to WHATS-NEW.md: "✨ <feature> — <what it does for the user>".
 Rules: NEVER auto-pick dead models. server.py edits sequential. L13 BLOCKED on Damir's harness repo link = skip.
-Priority: L23 (no-truncation/budget-routing) · L4b · L4c · L19 · L20 · L4f · L6 · L7 · L8 · L9 · L10 · L11 · L12 · L18 · L15 · L16 · L14 · L3 · L21 · L22
+Priority: L4b · L4c · L19 · L20 · L4f · L6 · L7 · L8 · L9 · L10 · L11 · L12 · L18 · L15 · L16 · L14 · L3 · L21 · L22
 
 ## DONE (committed)
 - [x] L0 Agent S identity rename + name-stamp fix + default-leak fix        (5f8c24e)
@@ -34,7 +34,7 @@ Priority: L23 (no-truncation/budget-routing) · L4b · L4c · L19 · L20 · L4f 
 - [ ] L3 reasoning dial: for models that IGNORE reasoning_effort (grok-nano, deepseek),
         try alternate params (reasoning:{effort}, thinking, extra_body); measure low-vs-high;
         store per-model which param actually deepens. Fall back to prompt-nudge + token floor.
-- [ ] L23 NO MID-ANSWER TRUNCATION + budget-aware routing (Damir — HIGH priority, core output UX).
+- [x] L23 NO MID-ANSWER TRUNCATION + budget-aware routing — DONE (server.py + taiga-web f150c54).
         PRINCIPLE: a cap shapes the PLAN (which model / continue-or-not), it NEVER chops the output.
         (a) AUTO-CONTINUE: capture finish_reason in venice_stream; if "length" (answer cut), auto-issue a
             continuation (append assistant partial + "продолжи ровно с места обрыва") and stitch seamlessly
@@ -43,6 +43,10 @@ Priority: L23 (no-truncation/budget-routing) · L4b · L4c · L19 · L20 · L4f 
             user's spend-cap/balance, DON'T cut/block — route to a cheaper model that fits (cost_tier via
             best_for_task, the L4a backend) and answer FULLY but cheaper, told transparently
             ("большой запрос — отвечаю моделью X в рамках бюджета"). No truncation, ever.
+        VERIFIED: (a) venice_stream auto-continues on finish_reason=='length' → 64-tok chunk cap produced a
+        6239-char COMPLETE answer (ends cleanly, no cut). (b) non-owner max_spend=0.003 → opus→deepseek-v4-
+        pro-cheaper + transparent meta.note (shown in UI). (a) live for ALL; (b) for billed users only
+        (owner = free opus → not budget-limited; taiga-web currently sends user=default=owner → (b) dormant).
 - [x] L4a TIERS (Damir): BACKEND (1a1ad02) + UI CHIP (taiga-web 3bcc8eb). cost_tier(model) +
         best_for_task(task,tier) wired into auto + auto-Brain; tier_cost per model. UI: cycling "цена:"
         chip (любая/дёшево/средне/топ) on the pad next to "ответ:" → req.tier (SendOpts→baseBody→proxy
