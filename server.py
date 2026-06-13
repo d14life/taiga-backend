@@ -4003,6 +4003,20 @@ def _fetch_text_guarded(url: str, token: str = "") -> tuple:
 _INSTALL_OK_CTYPES = _INSTALL_OK_CTYPES + ("application/json",)
 
 
+def _parse_skill_text(text: str):
+    """Парс формата навыка (фронтматтер name/description + тело) через skills_lib, с фолбэком
+    на первый #заголовок. Тонкая обёртка — отдаётся как зависимость в skills_run (L12)."""
+    try:
+        import skills_lib
+        return skills_lib._parse_skill(text)
+    except Exception:
+        name = ""
+        h = re.search(r"^#\s+(.+)$", text or "", re.M)
+        if h:
+            name = h.group(1).strip()
+        return name, "", (text or "")
+
+
 def install_skill_from_url(uid: str, url: str, token: str = "") -> dict:
     """Скачать навык по ссылке и установить в личный стор. Возвращает
     {ok:True, skill:{...}} либо {ok:False, error:"..."}. ЖЁСТКИЙ SSRF-страж (общий с
@@ -8927,6 +8941,43 @@ class Handler(BaseHTTPRequestHandler):
         res = import_skill_repo_from_url(uid, url, token=token)
         return self._json(res, 200 if res.get("ok") else 400)
 
+    def api_skill_folder(self):
+        """L12 ПОЛНЫЕ НАВЫКИ: импорт ЦЕЛОГО навык-фолдера (SKILL.md + scripts + resources) + список/
+        тумблер/запуск скрипта. Действия:
+          action="import" {url, token?} → тянет весь фолдер (≤2МБ) в стор аккаунта;
+          action="list"                 → установленные навыки с метой (folder/scripts/enabled);
+          action="toggle" {id, enabled} → вкл/выкл навык (выкл → не авто-триггерится);
+          action="run" {id, script}     → запуск скрипта: владелец на сервере, юзер → browser-wasm-маркер.
+        Импорт НЕ исполняет код. Запуск гейтится (анти-RCE, см. skills_run/ARCH-DECISIONS)."""
+        import skills_run
+        c = self._body()
+        uid = c.get("user", "default")
+        if not self._ip_guard(uid):
+            return
+        action = str(c.get("action") or "import")
+        if action == "list":
+            return self._json({"skills": skills_run.list_installed(user_dir, uid)})
+        if action == "toggle":
+            ok = skills_run.set_skill_enabled(user_dir, uid, str(c.get("id") or ""),
+                                              bool(c.get("enabled")))
+            return self._json({"ok": ok}, 200 if ok else 404)
+        if action == "run":
+            res = skills_run.run_skill_script(
+                user_dir, uid, str(c.get("id") or ""), str(c.get("script") or ""),
+                is_owner=is_owner, run_code_lang=run_code_lang)
+            return self._json(res, 200 if res.get("ok") else 400)
+        # action == "import" (по умолчанию)
+        url = str(c.get("url") or "").strip()
+        token = str(c.get("token") or "").strip()
+        if not url:
+            return self._json({"ok": False, "error": "нет url"}, 400)
+        res = skills_run.import_skill_folder(
+            uid, url, user_dir=user_dir,
+            parse_github_repo_url=_parse_github_repo_url, github_trees=_github_trees,
+            fetch_text_guarded=_fetch_text_guarded, parse_skill=_parse_skill_text,
+            store_user_skill=_store_user_skill, token=token)
+        return self._json(res, 200 if res.get("ok") else 400)
+
     # --- медиа-поиск для in-chat браузера: web + YouTube + картинки ---
     def api_websearch(self):
         c = self._body()
@@ -9712,6 +9763,8 @@ class Handler(BaseHTTPRequestHandler):
             self.api_install_agent()
         elif path == "/api/import_skill_repo":  # массовый импорт навыков из GitHub-репо
             self.api_import_skill_repo()
+        elif path == "/api/skill_folder":     # L12: импорт/список/тумблер/запуск навыка-ФОЛДЕРА
+            self.api_skill_folder()
         elif path == "/api/auth":             # signup/login + session-токены
             self.api_auth()
         elif path == "/api/websearch":        # медиа-поиск (web+YouTube+картинки) для in-chat браузера
@@ -10823,6 +10876,28 @@ class Handler(BaseHTTPRequestHandler):
         _rag_smart = bool(req.get("rag_smart") or req.get("smart_rag"))
         system += rag_context(uid, raw_messages, workspace=_rag_ws_req, smart=_rag_smart)
         system += datetime.now().strftime("\nСегодня %Y-%m-%d (%A), время %H:%M.")
+        # ── L12 ПОЛНЫЕ НАВЫКИ: авто-триггер. Матчим последнее сообщение юзера на ВКЛЮЧЁННЫЕ навыки
+        # и инжектим их SKILL.md в системный промпт (как харнес) → ЛЮБАЯ модель следует Claude-формату.
+        # Робастно: любой сбой не ломает чат. fired_skills уйдёт в SSE-мету для индикатора в UI.
+        fired_skills = []
+        skill_tools = {}
+        try:
+            import skills_run
+            _last_user = next((m.get("content") or "" for m in reversed(raw_messages)
+                               if m.get("role") == "user"), "")
+            _matched = skills_run.match_skills(user_dir, uid, _last_user,
+                                               skill_body=_user_skill_body)
+            if _matched:
+                _inj, fired_skills = skills_run.build_skill_injection(_matched)
+                system += _inj
+                # если у сматченных навыков есть скрипты — даём модели тулзу их запускать (модель-агностично)
+                if any(m.get("scripts") for m in _matched):
+                    skill_tools = {"run_skill_script": skills_run.make_run_skill_tool(
+                        uid, user_dir=user_dir, is_owner=is_owner, run_code_lang=run_code_lang)}
+                    system += "\n" + skills_run.RUN_SKILL_TOOL_PROMPT
+        except Exception:
+            fired_skills = []
+            skill_tools = {}
         if agent:
             system += "\n" + TOOLS_PROMPT
             if dev:
@@ -10835,6 +10910,7 @@ class Handler(BaseHTTPRequestHandler):
             if mtools:
                 active_tools = {**active_tools, **mtools}
                 system += mprompt
+            active_tools = {**active_tools, **skill_tools}   # L12: run_skill_script (если навык со скриптом сматчен)
         else:
             active_tools = {}
             # Подключённые (включённые) MCP-коннекторы работают и в обычном чате —
@@ -10843,6 +10919,8 @@ class Handler(BaseHTTPRequestHandler):
             if mtools:
                 active_tools = {**active_tools, **mtools}
                 system += mprompt
+            # L12: навык-скрипт доступен тулзой и в обычном чате (модель-агностично), если сматчен.
+            active_tools = {**active_tools, **skill_tools}
 
         # 🔐 пер-юзер кастомизация: мержим сохранённый конфиг для текущего режима.
         # Серверный страж — model только из каталога, maxTokens КАП на потолке,
@@ -10977,6 +11055,8 @@ class Handler(BaseHTTPRequestHandler):
             _meta["run_id"] = run_id
         if budget_note:
             _meta["note"] = budget_note   # прозрачно: почему ответ от другой (более дешёвой) модели
+        if fired_skills:
+            _meta["skills"] = fired_skills  # L12: индикатор «сработал навык: …» в UI
         if not self._sse(_meta):
             return
 
