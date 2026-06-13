@@ -10113,6 +10113,25 @@ class Handler(BaseHTTPRequestHandler):
             if not is_owner(c.get("user", "default")):
                 return self._json({"error": "Запуск кода — только владелец."}, 403)
             self._json({"output": run_code_lang(c.get("code", ""), c.get("lang", "python"))})
+        elif path == "/api/terminal":         # ВИЗУАЛЬНЫЙ ТЕРМИНАЛ: команда → вывод
+            c = self._body()
+            uid = c.get("user", "default")
+            cmd = str(c.get("cmd") or c.get("command") or "")
+            if not cmd.strip():
+                return self._json({"output": ""})
+            if abuse_check(cmd):
+                return self._json({"output": "[заблокировано правилами]"}, 400)
+            if is_owner(uid):
+                out = run_code_lang(cmd, "bash", timeout=20)     # владелец → локальный shell (доверенный)
+            else:
+                # НЕ-владелец → E2B-песочница (анти-RCE), гейт баланса
+                if user_balance(uid).get("balance", 0) <= 0:
+                    return self._json({"output": "", "error": "Баланс исчерпан."}, 402)
+                import skills_run
+                res = skills_run.run_in_cloud_sandbox(cmd, "bash")
+                out = res.get("output") if res.get("ok") else ("[песочница] " + (res.get("error") or "недоступна"))
+                charge_media(uid, 0.002, kind="terminal")
+            self._json({"output": out, "owner": is_owner(uid)})
         elif path == "/api/identity":
             c = self._body()
             uid = c.get("user", "default")
@@ -11223,9 +11242,15 @@ class Handler(BaseHTTPRequestHandler):
         else:
             # ИИ может ДЕЙСТВОВАТЬ и в обычном чате: даём БЕЗОПАСНЫЕ тулзы (веб-поиск/супер-поиск/фетч/
             # вики/курсы/расчёты/время/поиск-навыков) — чтобы он САМ искал и считал, а не отвечал «сделай
-            # это сам через UI». RCE-тулзы (код/shell/файлы) — ТОЛЬКО агент-режим/песочница (анти-RCE).
+            # это сам через UI».
             active_tools = {k: TOOLS[k] for k in SAFE_TOOLS if k in TOOLS}
-            if active_tools:
+            if is_owner(uid):
+                # «DO ALL» для ВЛАДЕЛЬЦА (доверенный, своя машина): ИИ в обычном чате умеет ВСЁ, что и юзер —
+                # код/shell/файлы (run_code) + картинки (generate_image) + браузер + кастом-тулзы. Для НЕ-
+                # владельца тяжёлое (код/shell/файлы) НЕ даём в чат — только агент/E2B-песочница (анти-RCE).
+                active_tools = {**active_tools, **TOOLS, **DEV_TOOLS, **user_tools(uid), "generate_image": True}
+                system += "\n" + TOOLS_PROMPT + "\n" + DEV_TOOLS_PROMPT
+            elif active_tools:
                 system += "\n" + TOOLS_PROMPT
             # Подключённые (включённые) MCP-коннекторы работают и в обычном чате —
             # интеграции (GitHub/Notion/ComfyUI) доступны без явного агент-режима.
