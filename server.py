@@ -3110,7 +3110,11 @@ def route_model(messages: list, has_images: bool) -> str:
         return _first_live("reason")
     if len(last) > 8000:
         return _first_live("cheap")             # 256k контекст
-    return _first_live("chat")                  # дефолт — флагман без цензуры
+    # КОРОТКИЙ простой запрос (приветствие/мета/болтовня — не код, не рассуждение) → ДЕШЁВАЯ модель,
+    # а НЕ флагман opus. Дёшево по умолчанию; флагман только для содержательного. (Damir: «не opus на всё».)
+    if len(last.strip()) < 220:
+        return _first_live("cheap")
+    return _first_live("chat")                  # дефолт — флагман без цензуры (только для содержательного)
 
 
 def detect_task(messages: list, has_images: bool) -> str:
@@ -3298,6 +3302,10 @@ def query_is_hard(messages: list) -> bool:
     # явный лёгкий смолток в начале и короткое сообщение — не эскалируем
     # (трейлинг «?» у приветствий допустим: «как дела?», «как ты?»).
     if _EASY_RE.match(low) and len(t) <= 60:
+        return False
+    # КОРОТКОЕ сообщение без код-блока → мета/болтовня/короткий вопрос → НЕ трудное (дёшево по умолчанию).
+    # route_model ниже всё равно отправит код→кодеру, рассуждение→думающей. (Damir: «не opus на ВСЁ».)
+    if len(t) < 80 and "```" not in t:
         return False
     # код-блок, сложные маркеры, многошаговость → трудный
     if "```" in t:
