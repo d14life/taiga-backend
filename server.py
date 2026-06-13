@@ -317,6 +317,40 @@ def is_reasoning(model_id: str) -> bool:
     return any(k in model_id for k in REASONING_HINTS)
 
 
+# Модели, которые РЕЖУТ reasoning_effort с 400 (учим на лету: при таком 400 добавляем сюда
+# и ретраим без параметра). По замерам 2026-06 reasoning_effort САМ по себе принимают все —
+# но страховка на случай новой модели/провайдера, чтобы дайл не ронял ответ в 400.
+_REJECTS_EFFORT = set()
+_REASONING_IDS_CACHE = {"ts": -1.0, "ids": set()}
+
+
+def model_reasons(model_id: str) -> bool:
+    """Думающая ли модель (reasoning_effort имеет смысл): по ключу ИЛИ по флагу живого каталога.
+    Кэш по версии каталога. Так дайл бьёт и по моделям без ключевого слова (gemini-3-pro, gpt-oss)."""
+    if not model_id:
+        return False
+    if is_reasoning(model_id):
+        return True
+    c = _REASONING_IDS_CACHE
+    try:
+        if c["ts"] != _CATALOG_TS:
+            c["ids"] = {strip_model_prefix(r.get("id", "")) for r in RICH if r.get("reasoning")}
+            c["ts"] = _CATALOG_TS
+        return strip_model_prefix(model_id) in c["ids"]
+    except Exception:
+        return False
+
+
+def reasoning_token_floor(model_id: str, effort: str = None) -> int:
+    """Пер-модельный минимум max_tokens: думающая модель тратит токены на размышление, и без
+    запаса ответ обрезается/пустеет. Зависит от МОДЕЛИ (думает по живому каталогу, а не по
+    ключевому слову — поэтому ловит и Fable/gemini/gpt-oss) и от усилия (Глубоко → больше).
+    Не-думающим моделям → 0 (бюджет не трогаем)."""
+    if not model_reasons(model_id):
+        return 0
+    return 4000 if effort == "high" else 3000
+
+
 # RELAY: uncensored-модель причёсывает промпт, frontier-модель отвечает.
 RELAY_CRAFT_SYSTEM = (
     "Ты улучшаешь запрос пользователя перед отправкой в другую, более умную ИИ-модель. "
@@ -2060,15 +2094,24 @@ def _open_chat(url: str, body_dict: dict, headers: dict, timeout: int):
     try:
         return urllib.request.urlopen(req, timeout=timeout)
     except urllib.error.HTTPError as e:
-        if e.code == 400 and "max_tokens" in body_dict:
+        if e.code == 400 and ("max_tokens" in body_dict or "reasoning_effort" in body_dict):
             detail = ""
             try:
                 detail = e.read().decode("utf-8", "ignore")
             except Exception:
                 pass
-            if "max_completion_tokens" in detail:
-                bd = dict(body_dict)
+            bd = dict(body_dict)
+            changed = False
+            # модель не переваривает reasoning_effort → запоминаем (чтоб больше не слать) и убираем
+            if "reasoning_effort" in bd:
+                _REJECTS_EFFORT.add(bd.get("model", ""))
+                bd.pop("reasoning_effort", None)
+                changed = True
+            # новые OpenAI-модели требуют max_completion_tokens вместо max_tokens
+            if "max_completion_tokens" in detail and "max_tokens" in bd:
                 bd["max_completion_tokens"] = bd.pop("max_tokens")
+                changed = True
+            if changed:
                 req2 = urllib.request.Request(url, data=json.dumps(bd).encode(), headers=headers, method="POST")
                 return urllib.request.urlopen(req2, timeout=timeout)
         raise
@@ -2351,7 +2394,7 @@ def _clean_temperature(temperature):
 
 
 def venice_stream(model: str, messages: list, max_tokens: int, usage_out: dict = None,
-                  key: str = None, temperature=None):
+                  key: str = None, temperature=None, reasoning_effort: str = None):
     """Генератор дельт текста. key — конкретный ключ (BYOK/пул); если None — общий пул.
     usage_out — складываем реальный расход токенов для биллинга. Доп. ключ
     usage_out["__finished__"]=True ставится ТОЛЬКО при ЧИСТОМ финише апстрима
@@ -2374,6 +2417,11 @@ def venice_stream(model: str, messages: list, max_tokens: int, usage_out: dict =
     temperature = _clean_temperature(temperature)
     if temperature is not None:
         body_dict["temperature"] = round(temperature, 3)
+    # НАТИВНЫЙ дайл размышления: шлём ТОЛЬКО reasoning_effort (low/medium/high). Семейные объекты
+    # (Anthropic thinking{budget}, Google thinkingConfig) РЕЖУТСЯ прокси с 400 — проверено 2026-06,
+    # поэтому их НЕ шлём никогда. include_reasoning тоже НЕ шлём (ломал Trinity 400).
+    if reasoning_effort in ("low", "medium", "high") and strip_model_prefix(model) not in _REJECTS_EFFORT:
+        body_dict["reasoning_effort"] = reasoning_effort
     # пассивный замер здоровья: тайминг открытия + исход. yield-байты НЕ трогаем.
     _hp = provider_name(model)
     _t0 = time.time()
@@ -10276,6 +10324,10 @@ class Handler(BaseHTTPRequestHandler):
         run_id = str(req.get("run_id") or "").strip() or ("run_" + secrets.token_hex(8))
         max_tokens = int(req.get("max_tokens") or 2048)
         system = taiga_identity() + "\n\n" + str(req.get("system") or DEFAULT_SYSTEM)
+        # НАТИВНЫЙ дайл размышления (фича «Глубоко»): low/medium/high из запроса, либо deep→high.
+        # В провайдер уходит ТОЛЬКО думающим моделям (model_reasons) и ТОЛЬКО как reasoning_effort.
+        _re = str(req.get("reasoning_effort") or "").lower()
+        req_reasoning_effort = _re if _re in ("low", "medium", "high") else ("high" if req.get("deep") else None)
 
         has_images = any(m.get("images") for m in raw_messages)
         model = str(req.get("model") or _first_live("chat"))
@@ -10310,9 +10362,9 @@ class Handler(BaseHTTPRequestHandler):
         # картинки есть, а модель их не понимает — переключаем на зрячую (не-фантомную)
         if has_images and not vision_ok(model):
             model = _first_live("cheap")
-        # reasoning-модели тратят токены на «размышление» — иначе ответ обрезается/пустеет
-        if is_reasoning(model):
-            max_tokens = max(max_tokens, 3000)
+        # пер-модельный бюджет: думающей модели — запас под размышление (определяется по живому
+        # каталогу, не только по ключевому слову → ловит и Fable/gemini/gpt-oss); Глубоко → больше
+        max_tokens = max(max_tokens, reasoning_token_floor(model, req_reasoning_effort))
 
         # Память теперь живёт на ФРОНТЕ — на каждый чат, юзер правит руками (chat-memory.ts),
         # и приходит уже внутри req["system"]. Серверную ГЛОБАЛЬНУЮ память по умолчанию НЕ
@@ -10360,9 +10412,8 @@ class Handler(BaseHTTPRequestHandler):
         temperature = user_config_temperature(uid, cfg_mode, req.get("temperature"))
         # конфиг мог сменить модель — повторяем защиты: vision + потолок токенов
         if has_images and not vision_ok(model):
-            model = DEFAULTS["cheap"]
-        if is_reasoning(model):
-            max_tokens = max(max_tokens, 3000)
+            model = _first_live("cheap")
+        max_tokens = max(max_tokens, reasoning_token_floor(model, req_reasoning_effort))
         max_tokens = min(max_tokens, USERCFG_MAX_TOKENS)
 
         base_system = system          # чистый системный промпт — для эксперта (без брейн-обёртки)
@@ -10524,7 +10575,9 @@ class Handler(BaseHTTPRequestHandler):
 
                 try:
                     for delta in venice_stream(stream_model, msgs, max_tokens, u, stream_key,
-                                               temperature=temperature):
+                                               temperature=temperature,
+                                               reasoning_effort=(req_reasoning_effort
+                                                                 if model_reasons(stream_model) else None)):
                         got_any = True
                         out_total += delta
                         if buffering:
