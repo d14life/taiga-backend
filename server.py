@@ -11190,8 +11190,10 @@ class Handler(BaseHTTPRequestHandler):
             # авто-Мозг: эксперт = ЛУЧШАЯ модель ПОД ЗАДАЧУ по бенчмаркам (код→кодер, reason→думающая,
             # vision→зрячая), в выбранном ценовом тире. Владельцу без тира — opus бесплатно (силён везде).
             _bt = detect_task(raw_messages, has_images)
-            model = ("ng:claude-opus-4-8" if (is_owner(uid) and not req_tier)
-                     else best_for_task(_bt, tier=req_tier))
+            # «НУЖНАЯ модель под задачу В ЦЕНЕ»: дефолтный ценовой тир = "mid" (НЕ opus на ВСЁ).
+            # Топ (opus) — ТОЛЬКО если юзер явно выбрал цена=топ. Раньше владельцу хардкодился opus
+            # на любой «трудный» запрос (дорого). (Damir: «убери, только когда реально надо + прайс-кап».)
+            model = best_for_task(_bt, tier=req_tier or "mid")
         # картинки есть, а модель их не понимает — переключаем на зрячую (не-фантомную)
         if has_images and not vision_ok(model):
             model = _first_live("cheap")
