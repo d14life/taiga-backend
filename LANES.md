@@ -1,16 +1,23 @@
-# Тайга — Autonomous build lanes (Damir away 10h: "do all", then clean casual summary)
+# Тайга — build backlog (Damir drives; this file = source of truth, resume from here)
 
-## RUN PROTOCOL (each cron fire = one lane)
-1. COLLISION GUARD first: `git log --oneline -3` + files mtime <3min. Other session active → wait, don't edit.
-2. Pick the next unchecked lane (priority order below). Build end-to-end (backend + visible UI control).
-3. TEST before commit: backend = ast.parse + import + live probe/curl; frontend = `npx tsc --noEmit`. MEASURE.
-4. Commit per-lane to main (taiga-web is nested: commit inside, then `git add taiga-web` + pointer commit).
+## ▶ START HERE (fresh session)
+Repo: /Users/damir12/Downloads/claude-sessions/2026-06-10/mostik-ai/ · backend: `python3 server.py` :8777
+State (2026-06-13): 11 commits landed (Agent S identity, phantom-guard, native dial+token budget,
+benchmark "ум" matrix + per-task routing, Beam=Council merge, multi-engine memory/effort inheritance,
+model-picker sort, cost-tiers backend). WHATS-NEW.md = the casual changelog. Read it + this file, then grind.
+ANOTHER claude session may also work this repo — collision-guard before EVERY edit.
+
+## RUN PROTOCOL (each turn = one lane, harness discipline)
+1. COLLISION GUARD first: `git log --oneline -3` + `find . -name '*.py' -o -name '*.tsx' -mmin -3` (excl node_modules).
+   Other session committed new / writing files → wait 90s, recheck, don't edit.
+2. Pick the next unchecked lane (priority order below). Build end-to-end (backend + a VISIBLE UI control).
+3. TEST before commit: backend = `python3 -c "import ast;ast.parse(open('server.py').read())"` + import + live curl;
+   frontend = `npx tsc --noEmit`. MEASURE, never claim. taiga-web/AGENTS.md: modified Next.js 16 — read its docs.
+4. Commit per-lane to main (taiga-web is NESTED git: commit inside it, then `git add taiga-web` + pointer commit).
    Tick the checkbox here. Restart backend if server.py changed.
-5. Append ONE casual, plain-English line to WHATS-NEW.md: "✨ <feature> — <what it does for the user>".
-6. When ALL buildable lanes are [x] (L13 blocked on Damir's repo link = skip): write the final WHATS-NEW.md
-   summary, post "v1 build done", and CronDelete this job so it stops.
-Rules: NEVER auto-pick dead models. server.py edits sequential. Verify-before-done (harness discipline).
-Priority: L3 · L4a · L4b · L4c · L19 · L20 · L4f · L6 · L7 · L8 · L9 · L10 · L11 · L12 · L18 · L15 · L16 · L14 · L21 · L22
+5. Append ONE casual plain-English line to WHATS-NEW.md: "✨ <feature> — <what it does for the user>".
+Rules: NEVER auto-pick dead models. server.py edits sequential. L13 BLOCKED on Damir's harness repo link = skip.
+Priority: L4a-ui · L4b · L4c · L19 · L20 · L4f · L6 · L7 · L8 · L9 · L10 · L11 · L12 · L18 · L15 · L16 · L14 · L3 · L21 · L22
 
 ## DONE (committed)
 - [x] L0 Agent S identity rename + name-stamp fix + default-leak fix        (5f8c24e)
