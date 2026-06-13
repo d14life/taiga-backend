@@ -5,6 +5,8 @@ Repo: /Users/damir12/Downloads/claude-sessions/2026-06-10/mostik-ai/ · backend:
 State (2026-06-13): 11 commits landed (Agent S identity, phantom-guard, native dial+token budget,
 benchmark "ум" matrix + per-task routing, Beam=Council merge, multi-engine memory/effort inheritance,
 model-picker sort, cost-tiers backend). WHATS-NEW.md = the casual changelog. Read it + this file, then grind.
+ALSO read ARCH-DECISIONS.md — Damir-approved exec-hosting (HYBRID: browser-WASM free + cloud sandbox-per-user
+paid), full-skills spec (L12: import folder+scripts, run sandboxed, auto-trigger, model-agnostic), agent-envs (L15).
 ANOTHER claude session may also work this repo — collision-guard before EVERY edit.
 
 ## RUN PROTOCOL (each turn = one lane, harness discipline)
