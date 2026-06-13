@@ -877,43 +877,88 @@ def _cosine(a: list, b: list) -> float:
     nb = sum(y * y for y in b) ** 0.5
     return s / (na * nb) if na and nb else 0.0
 
-def rag_docs(uid: str) -> list:
+_RAG_GLOBAL_WS = "global"  # рабочее пространство по умолчанию (доки уровня юзера, видны везде)
+
+def _rag_ws(workspace) -> str:
+    """Нормализуем workspace/chat_id → строка. Пусто/None → глобальное пространство."""
+    ws = str(workspace).strip() if workspace not in (None, "") else ""
+    return ws or _RAG_GLOBAL_WS
+
+def _rag_item_ws(it: dict) -> str:
+    """Workspace куска. Старые записи без поля → 'global' (обратная совместимость)."""
+    return _rag_ws(it.get("workspace"))
+
+def _rag_in_scope(it: dict, workspace, include_global: bool = True) -> bool:
+    """Попадает ли кусок в выборку. workspace=None → все доки юзера (как раньше).
+    workspace задан → только этот ws (+ глобальные доки, если include_global)."""
+    if workspace in (None, ""):
+        return True
+    iws = _rag_item_ws(it)
+    if iws == _rag_ws(workspace):
+        return True
+    return bool(include_global) and iws == _RAG_GLOBAL_WS
+
+def rag_docs(uid: str, workspace=None, include_global: bool = True) -> list:
     seen = []
     for it in _rag_load(uid):
+        if workspace not in (None, "") and not _rag_in_scope(it, workspace, include_global):
+            continue
         if it.get("doc") not in seen:
             seen.append(it.get("doc"))
     return seen
 
-def rag_delete(uid: str, name: str) -> list:
-    """Удалить документ из RAG-хранилища юзера (все его куски). Возвращает оставшиеся доки."""
-    _rag_save(uid, [it for it in _rag_load(uid) if it.get("doc") != name])
+def rag_delete(uid: str, name: str = "", workspace=None) -> list:
+    """Удалить из RAG-хранилища юзера. По имени дока — все его куски. Если задан только
+    workspace (без name) — чистим всё это рабочее пространство. Возвращает оставшиеся доки."""
+    items = _rag_load(uid)
+    if workspace not in (None, "") and not name:
+        # очистка целого рабочего пространства
+        ws = _rag_ws(workspace)
+        kept = [it for it in items if _rag_item_ws(it) != ws]
+    elif workspace not in (None, ""):
+        # удалить конкретный док только внутри этого рабочего пространства
+        ws = _rag_ws(workspace)
+        kept = [it for it in items
+                if not (it.get("doc") == name and _rag_item_ws(it) == ws)]
+    else:
+        # совместимость: удалить док по имени во всех пространствах юзера
+        kept = [it for it in items if it.get("doc") != name]
+    _rag_save(uid, kept)
     return rag_docs(uid)
 
-def rag_ingest(uid: str, name: str, text: str) -> int:
-    """Документ → куски → эмбеддинги → хранилище юзера. Переиндексирует одноимённый."""
+def rag_ingest(uid: str, name: str, text: str, workspace=None) -> int:
+    """Документ → куски → эмбеддинги → хранилище юзера. Переиндексирует одноимённый.
+    workspace/chat_id (опц.) — тег рабочего пространства; пусто → 'global' (виден везде)."""
+    ws = _rag_ws(workspace)
     chunks = _rag_chunks(text)
-    items = [it for it in _rag_load(uid) if it.get("doc") != name]
+    # переиндексируем одноимённый док ТОЛЬКО в его рабочем пространстве
+    items = [it for it in _rag_load(uid)
+             if not (it.get("doc") == name and _rag_item_ws(it) == ws)]
     for ch in chunks:
-        items.append({"doc": name, "text": ch, "vec": _rag_embed(ch)})
+        items.append({"doc": name, "text": ch, "vec": _rag_embed(ch), "workspace": ws})
     _rag_save(uid, items)
     return len(chunks)
 
-def rag_query(uid: str, query: str, k: int = 4) -> list:
-    """Топ-k релевантных кусков по косинусу (для инъекции в контекст)."""
-    items = _rag_load(uid)
+def rag_query(uid: str, query: str, k: int = 4, workspace=None, include_global: bool = True) -> list:
+    """Топ-k релевантных кусков по косинусу (для инъекции в контекст).
+    workspace=None → ищем по всем докам юзера (как раньше). Задан → только это
+    рабочее пространство (+ глобальные доки юзера, если include_global)."""
+    items = [it for it in _rag_load(uid) if _rag_in_scope(it, workspace, include_global)]
     if not items:
         return []
     qv = _rag_embed(query)
     scored = [(it, _cosine(qv, it.get("vec") or [])) for it in items]
     scored.sort(key=lambda p: p[1], reverse=True)
-    return [{"doc": it["doc"], "text": it["text"], "score": round(sc, 3)}
+    return [{"doc": it["doc"], "text": it["text"], "score": round(sc, 3),
+             "workspace": _rag_item_ws(it)}
             for it, sc in scored[:k]]
 
 
-def rag_context(uid: str, messages: list) -> str:
-    """Если у юзера есть загруженные доки — подмешиваем релевантные куски в системный промпт чата."""
+def rag_context(uid: str, messages: list, workspace=None, include_global: bool = True) -> str:
+    """Если у юзера есть загруженные доки — подмешиваем релевантные куски в системный промпт чата.
+    workspace (опц.) ограничивает поиск рабочим пространством текущего чата; пусто → все доки юзера."""
     try:
-        if not rag_docs(uid):
+        if not rag_docs(uid, workspace, include_global):
             return ""
         last = ""
         for m in reversed(messages):
@@ -924,7 +969,7 @@ def rag_context(uid: str, messages: list) -> str:
                 break
         if not last.strip():
             return ""
-        hits = rag_query(uid, last, k=4)
+        hits = rag_query(uid, last, k=4, workspace=workspace, include_global=include_global)
         if not hits:
             return ""
         try:
@@ -6938,6 +6983,7 @@ class Handler(BaseHTTPRequestHandler):
         c = self._body()
         uid = c.get("user", "default")
         name = str(c.get("name") or "doc")
+        ws = c.get("workspace", c.get("chat_id"))  # опц. рабочее пространство/чат; пусто → global
         text = c.get("text") or ""
         if not text and c.get("raw_b64"):
             try:
@@ -6947,27 +6993,31 @@ class Handler(BaseHTTPRequestHandler):
         if not str(text).strip():
             return self._json({"error": "пустой документ"}, 400)
         try:
-            n = rag_ingest(uid, name, str(text))
+            n = rag_ingest(uid, name, str(text), workspace=ws)
         except Exception as e:
             return self._json({"error": str(e)}, 502)
-        return self._json({"ok": True, "doc": name, "chunks": n, "docs": rag_docs(uid)})
+        return self._json({"ok": True, "doc": name, "chunks": n,
+                           "workspace": _rag_ws(ws), "docs": rag_docs(uid, ws)})
 
     def api_rag_query(self):
         c = self._body()
         uid = c.get("user", "default")
+        ws = c.get("workspace", c.get("chat_id"))  # опц. фильтр по рабочему пространству/чату
         q = str(c.get("query") or "").strip()
         if not q:
             return self._json({"error": "пустой запрос"}, 400)
         try:
-            hits = rag_query(uid, q, int(c.get("k") or 4))
+            hits = rag_query(uid, q, int(c.get("k") or 4), workspace=ws)
         except Exception as e:
             return self._json({"error": str(e)}, 502)
-        return self._json({"hits": hits, "docs": rag_docs(uid)})
+        return self._json({"hits": hits, "docs": rag_docs(uid, ws)})
 
     def api_rag_delete(self):
         c = self._body()
         uid = c.get("user", "default")
-        return self._json({"ok": True, "docs": rag_delete(uid, str(c.get("name") or ""))})
+        ws = c.get("workspace", c.get("chat_id"))  # опц.; без name → чистим всё пространство
+        docs = rag_delete(uid, str(c.get("name") or ""), workspace=ws)
+        return self._json({"ok": True, "docs": docs})
 
     # --- auth: signup/login (PBKDF2) + session-токены (аддитивно, не ломает uid-режим) ---
     def api_auth(self):
@@ -8443,7 +8493,10 @@ class Handler(BaseHTTPRequestHandler):
         # «крипто-дрейнером»). Включается флагом server_memory — тогда это осознанный выбор.
         if req.get("server_memory"):
             system += memory_block(uid, raw_messages)
-        system += rag_context(uid, raw_messages)      # RAG: подмешать релевантные куски доков юзера
+        # RAG: подмешать релевантные куски доков юзера. Если фронт прислал workspace/chat_id —
+        # ищем в этом рабочем пространстве (+ глобальные доки); иначе — по всем докам юзера.
+        _rag_ws_req = req.get("rag_workspace", req.get("workspace", req.get("chat_id")))
+        system += rag_context(uid, raw_messages, workspace=_rag_ws_req)
         system += datetime.now().strftime("\nСегодня %Y-%m-%d (%A), время %H:%M.")
         if agent:
             system += "\n" + TOOLS_PROMPT

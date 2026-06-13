@@ -10,8 +10,8 @@ Rule: ≤1 server.py lane + ≤1 chat.tsx lane per batch (god-file contention). 
 - [x] BATCH 4 — RAG-chunking, bg-tasks-panel, catalog-screen, agent-tabs — DONE (FE 2350f4c / parent 2cec45b)
 - [x] BATCH 5 — Beam-fusion, camera+Beam-UI, cron-triggers, sub-meters — DONE (FE 07ba126 / parent c6fc7d5)
 - [x] BATCH 6 — Aider-editblock, OpenHands-risk-gate, richer-RAG-retrievers, model-catalog-badges — DONE (FE b561887 / parent 0f163f2)
-- [ ] BATCH 7 — wire smart-RAG+risk-gate, usage-log refactor, MCP-at-creation+memory-budget, custom-instructions+changelog
-- [ ] BATCH 8 — per-chat RAG workspace, assistant-ui tool-cards, workflow-marketplace, MCP-picker-in-builders
+- [x] BATCH 7 — wire smart-RAG+risk-gate, usage-log refactor, MCP-at-creation+memory-budget, custom-instructions+changelog — DONE (FE ae6df49 / parent 8020f0b)
+- [x] BATCH 8 — per-chat RAG workspace, assistant-ui tool-cards, workflow-marketplace, MCP-picker-in-builders — DONE (FE 9a4e364 / parent PENDING)
 - [ ] FINAL — full code review + smoke + report
 
 ## LANES (each = dedicated agent; detailed prompt at dispatch)
