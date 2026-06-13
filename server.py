@@ -3137,6 +3137,27 @@ def best_for_task(task: str, pool=None, tier: str = None) -> str:
     return max(cands, key=lambda x: bench(x, task))
 
 
+def best_n_for_task(task: str, n: int = 2, tier: str = None) -> list:
+    """Топ-N НЕ-фантомных моделей ПОД ЗАДАЧУ по бенчмаркам — для Мозга-ОРКЕСТРАТОРА (L4c/L19):
+    ведущий эскалировал → запускаем N лучших-под-задачу специалистов и сплавляем. Тот же отбор,
+    что best_for_task, но возвращает N лучших (по убыванию bench), без дублей."""
+    if tier in ("cheap", "mid", "top"):
+        cands = [r.get("id") for r in RICH
+                 if r.get("kind") in ("allround", "thinking", "code", "mid", "chat", "vision")
+                 and not is_phantom(r.get("id", ""))
+                 and cost_tier(r.get("id", "")) == tier]
+    else:
+        cands = [mid for mid in _expert_pool() if not is_phantom(mid)]
+    seen, uniq = set(), []
+    for mid in sorted(cands, key=lambda x: bench(x, task), reverse=True):
+        if mid not in seen:
+            seen.add(mid)
+            uniq.append(mid)
+        if len(uniq) >= max(1, n):
+            break
+    return uniq or [_first_live("smart")]
+
+
 # Маркеры «трудного» запроса для авто-Мозга: вопросы/просьбы, где одна средняя модель
 # часто галлюцинирует или отвечает слабо (факты, код, рассуждения, многошаговость, точность).
 _HARD_HINTS = re.compile(
@@ -10705,6 +10726,12 @@ class Handler(BaseHTTPRequestHandler):
                  and model_kind(model) not in ("image", "voice"))
         expert_model, expert_key = model, key
         stream_model, stream_key = model, key
+        # L4c/L19: сколько специалистов оркестрирует Мозг (1-3). =1 → ведущий→один эксперт (как раньше);
+        # >1 → ведущий эскалировал → N лучших-под-задачу работают и сплавляются фьюжн-критиком.
+        try:
+            brain_experts = max(1, min(3, int(req.get("brainExperts") or 1)))
+        except (TypeError, ValueError):
+            brain_experts = 1
         if brain:
             # ведущий (контролёр) — дешёвая модель без цензуры; в явном брейне юзер может выбрать свою,
             # в авто-Мозге всегда дефолтный дешёвый ведущий (req["driver"] здесь не задан).
@@ -10956,48 +10983,99 @@ class Handler(BaseHTTPRequestHandler):
                 if buffering:
                     call = parse_tool_call(buf, active_tools) if active_tools and steps < 8 else None
                     if call and call[0] == "ask_expert":
-                        # 🧠 ведущий решил, что запрос сложный → стримим ответ умного эксперта напрямую
+                        # 🧠 ведущий решил, что запрос сложный → эскалация к эксперту(ам)
                         if not self._sse({"type": "tool", "name": "ask_expert", "args": call[1]}):
                             return
                         eu = {}
                         streamed0 = len(out_total)
-                        try:
-                            for d in venice_stream(expert_model, expert_msgs,
-                                                   max(max_tokens, 3000), eu, expert_key,
-                                                   temperature=temperature,
-                                                   reasoning_effort=(req_reasoning_effort
-                                                                     if model_reasons(expert_model) else None)):
-                                out_total += d
-                                if not self._sse({"type": "delta", "text": d}):
-                                    return
-                        except Exception:
-                            # эксперт-провайдер лёг (502/down/таймаут) → НЕ показываем сырую ошибку юзеру.
-                            # Правило «только рабочие модели»: молча пробуем funded-запасные из цепочки.
-                            if len(out_total) == streamed0:        # ничего ещё не стримили — можно подменить
-                                for fb in _MODEL_FALLBACK["chat"]:
-                                    if fb == expert_model:
-                                        continue
-                                    fk, _fb_byok, _fk_err = resolve_key(uid, fb)
-                                    if not fk:
-                                        continue
+                        _orch_ok = False
+                        if brain_experts > 1:
+                            # 🧠 МОЗГ-ОРКЕСТРАТОР (L4c/L19): ведущий эскалировал → N лучших-ПОД-ЗАДАЧУ
+                            # специалистов отвечают независимо (каждый инхерит pad+память = expert_msgs),
+                            # затем СПЛАВЛЯЕМ их фьюжн-критиком (как Совет). Иерархия vs Совет: тут дешёвый
+                            # ведущий РЕШИЛ эскалировать; req.tier ограничивает специалистов бюджетом (L4a).
+                            _btask = detect_task(raw_messages, has_images)
+                            _experts = best_n_for_task(_btask, brain_experts, tier=req_tier)
+                            _answers = []
+                            for _em in _experts:
+                                _ek, _eb, _ekerr = resolve_key(uid, _em)
+                                if not _ek:
+                                    continue
+                                _eu, _txt = {}, ""
+                                try:
+                                    for _d in venice_stream(_em, expert_msgs, max(max_tokens, 3000), _eu, _ek,
+                                                            temperature=temperature,
+                                                            reasoning_effort=(req_reasoning_effort
+                                                                              if model_reasons(_em) else None)):
+                                        _txt += _d
+                                except Exception:
+                                    _txt = ""
+                                expert_usage["prompt_tokens"] += _eu.get("prompt_tokens", 0)
+                                expert_usage["completion_tokens"] += _eu.get("completion_tokens", 0)
+                                self._sse({"type": "council_step",
+                                           "model": strip_model_prefix(_em).split("/")[-1], "ok": bool(_txt.strip())})
+                                if _txt.strip():
+                                    _answers.append((_em, _txt))
+                            if _answers:
+                                # синтез = сильнейший из ответивших (best_n отсортирован по bench)
+                                _fm = _answers[0][0]
+                                _fk, _fbk, _fkerr = resolve_key(uid, _fm)
+                                if _fk:
+                                    expert_model, expert_key = _fm, _fk   # биллинг — синтезатор
+                                    _panel = "\n\n".join(f"[Ответ {i+1}]\n{t}" for i, (m, t) in enumerate(_answers))[:16000]
+                                    _q = (call[1].get("question") if isinstance(call[1], dict) else None) or last_user
+                                    _fmsgs = [{"role": "system", "content": taiga_identity() + "\n\n" + BEAM_FUSION_PROMPT},
+                                              {"role": "user", "content": f"Вопрос: {_q}\n\n{_panel}\n\nДай один сплавленный, выверенный ответ."}]
                                     try:
-                                        eu = {}
-                                        for d in venice_stream(fb, expert_msgs,
-                                                               max(max_tokens, 3000), eu, fk,
+                                        for d in venice_stream(expert_model, _fmsgs, max(max_tokens, 3000), eu, expert_key,
                                                                temperature=temperature,
                                                                reasoning_effort=(req_reasoning_effort
-                                                                                 if model_reasons(fb) else None)):
+                                                                                 if model_reasons(expert_model) else None)):
                                             out_total += d
                                             if not self._sse({"type": "delta", "text": d}):
                                                 return
-                                        expert_model, expert_key = fb, fk   # для биллинга — кто реально ответил
-                                        break
+                                        _orch_ok = True
                                     except Exception:
-                                        eu = {}
-                                        continue
-                            if len(out_total) == streamed0:        # совсем никто не ответил
-                                self._sse({"type": "delta", "text":
-                                           "Модели-эксперты сейчас перегружены — попробуй ещё раз через пару секунд."})
+                                        _orch_ok = False
+                            # оркестрация не дала ответа → мягко падаем на одиночного эксперта ниже
+                        if not _orch_ok:
+                            try:
+                                for d in venice_stream(expert_model, expert_msgs,
+                                                       max(max_tokens, 3000), eu, expert_key,
+                                                       temperature=temperature,
+                                                       reasoning_effort=(req_reasoning_effort
+                                                                         if model_reasons(expert_model) else None)):
+                                    out_total += d
+                                    if not self._sse({"type": "delta", "text": d}):
+                                        return
+                            except Exception:
+                                # эксперт-провайдер лёг (502/down/таймаут) → НЕ показываем сырую ошибку юзеру.
+                                # Правило «только рабочие модели»: молча пробуем funded-запасные из цепочки.
+                                if len(out_total) == streamed0:        # ничего ещё не стримили — можно подменить
+                                    for fb in _MODEL_FALLBACK["chat"]:
+                                        if fb == expert_model:
+                                            continue
+                                        fk, _fb_byok, _fk_err = resolve_key(uid, fb)
+                                        if not fk:
+                                            continue
+                                        try:
+                                            eu = {}
+                                            for d in venice_stream(fb, expert_msgs,
+                                                                   max(max_tokens, 3000), eu, fk,
+                                                                   temperature=temperature,
+                                                                   reasoning_effort=(req_reasoning_effort
+                                                                                     if model_reasons(fb) else None)):
+                                                out_total += d
+                                                if not self._sse({"type": "delta", "text": d}):
+                                                    return
+                                            expert_model, expert_key = fb, fk   # для биллинга — кто реально ответил
+                                            break
+                                        except Exception:
+                                            eu = {}
+                                            continue
+                                if len(out_total) == streamed0:        # совсем никто не ответил
+                                    self._sse({"type": "delta", "text":
+                                               "Модели-эксперты сейчас перегружены — попробуй ещё раз через пару секунд."})
                         expert_usage["prompt_tokens"] += eu.get("prompt_tokens", 0)
                         expert_usage["completion_tokens"] += eu.get("completion_tokens", 0)
                         self._sse({"type": "tool_done", "name": "ask_expert", "chars": len(out_total)})

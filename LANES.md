@@ -19,7 +19,7 @@ ANOTHER claude session may also work this repo — collision-guard before EVERY 
    Tick the checkbox here. Restart backend if server.py changed.
 5. Append ONE casual plain-English line to WHATS-NEW.md: "✨ <feature> — <what it does for the user>".
 Rules: NEVER auto-pick dead models. server.py edits sequential. L13 BLOCKED on Damir's harness repo link = skip.
-Priority: L4c · L19 · L20 · L4f · L6 · L7 · L8 · L9 · L10 · L11 · L12 · L18 · L15 · L16 · L14 · L3 · L21 · L22
+Priority: L20 · L4f · L6 · L7 · L8 · L9 · L10 · L11 · L12 · L18 · L15 · L16 · L14 · L3 · L21 · L22
 
 ## DONE (committed)
 - [x] L0 Agent S identity rename + name-stamp fix + default-leak fix        (5f8c24e)
@@ -84,7 +84,8 @@ Priority: L4c · L19 · L20 · L4f · L6 · L7 · L8 · L9 · L10 · L11 · L12 
         Council members/Brain-expert now get the FULL chat history (memory), inherit effort
         (deep→reasoning_effort, gated), scaled token budget, + optional per-head master prompt
         (memberPrompts). venice_complete += reasoning_effort. Heads work independent → then fuse.
-- [ ] L4c BRAIN = ORCHESTRATOR (Damir, updated): Brain's lead doesn't just delegate to ONE expert — it
+- [x] L4c BRAIN = ORCHESTRATOR — DONE (server.py best_n_for_task + taiga-web 6c44231; VERIFIED experts=2 →
+        opus+deepseek-v4-pro ran as council_step then fused). Brain's lead doesn't just delegate to ONE expert — it
         ORCHESTRATES MULTIPLE models like the agent feature (manager → directs N specialists, hierarchical).
         This is the clean split vs Council (Council = N equals deliberate→fuse, flat). Lead breaks the task,
         routes pieces to best-for-task models (in the chosen tier), combines. Editable lead + per-model
@@ -96,7 +97,8 @@ Priority: L4c · L19 · L20 · L4f · L6 · L7 · L8 · L9 · L10 · L11 · L12 
         toggles · 3 privacy groups). Code/Uncensored stay as mode buttons AND live as picker filters.
 - [ ] L18 Picker categorization polish (Damir's "4 layers"): make type (uncensored/code/thinking/vision/voice)
         × cost × privacy fully browseable + label each model's layers clearly.
-- [ ] L19 BRAIN output-count (Damir): req.brainExperts (1-3, default 1). =1 → current (driver→1 expert).
+- [x] L19 BRAIN output-count — DONE (taiga-web 6c44231: "Сколько экспертов" 1/2/3 selector in Brain popover →
+        req.brainExperts). req.brainExperts (1-3, default 1). =1 → current (driver→1 expert).
         >1 → driver triages, then runs the N best-for-task experts in parallel, fuses with BEAM_FUSION_PROMPT
         (reuse council fusion). UI: "выходных моделей" count selector in Brain controls. Each expert inherits
         pad spec + sees chat memory (L4e already wires venice_complete effort/context).
