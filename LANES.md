@@ -46,9 +46,13 @@ Priority: L4a-ui · L23 (no-truncation/budget-routing) · L4b · L4c · L19 · L
         on the main pad → send req.tier. "best CHEAP model for this code task" works (deepseek-v4 bench 95).
 - [x] L4d Beam=Council merge: Council always uses fusion-critic synthesis; Beam absorbed.  (d02a073)
         VERIFIED taxonomy: Brain=triage/one-leads · Council=N deliberate→fuse · Heavy/Research=single-model.
-- [ ] L4b Mode taxonomy cleanup (Damir-confirmed): Heavy = SINGLE-model max-intensity mode (NOT Brain);
-        Research = single-model deep. Drop the separate "Слияние" UI button (now == Совет). Effort =
-        Fast/Normal/Deep pure intensity; Fast suppresses auto-Brain (user authority).
+- [ ] L4b Mode taxonomy + EFFORT SLIDER cleanup (Damir, screenshot — HIGH). Build the clean effort control:
+        a discrete "Faster ←→ Smarter" slider (5 dots, label "Effort: Low/Medium/High"), shown as a chip
+        next to the model ("Opus 4.8 · Medium"), Claude/Codex-style. Maps DIRECTLY to reasoning_effort
+        (low/med/high → native dial, backend-ready) + token budget. This REPLACES the messy overlap of
+        Fast/Expert/Heavy + Deep + budget — ONE slider. Also: Heavy = SINGLE-model max-intensity (NOT Brain),
+        Research = single-model deep, drop the separate "Слияние" button (== Совет). Fast suppresses auto-Brain.
+        NOTE: temperature already forwards on the main path (fixed comment 63fc8b8); pipeline-step temp = todo.
 - [x] L4e Multi-engine heads inherit main-pad spec + see chat memory (Damir).  (90daf3e)
         Council members/Brain-expert now get the FULL chat history (memory), inherit effort
         (deep→reasoning_effort, gated), scaled token budget, + optional per-head master prompt
