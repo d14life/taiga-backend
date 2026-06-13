@@ -323,6 +323,42 @@ def is_reasoning(model_id: str) -> bool:
 _REJECTS_EFFORT = set()
 _REASONING_IDS_CACHE = {"ts": -1.0, "ids": set()}
 
+# L3 — модели, которые ПРИНИМАЮТ reasoning_effort (не 400), но по факту ИГНОРИРУЮТ его
+# (глубина не меняется). Для них «Глубоко» эмулируем ПРОМПТОМ (думай пошагово + больший бюджет),
+# а не бесполезным параметром. Матч по подстроке id (без провайдер-префикса) — ловит семейства
+# (grok-nano/grok-mini, deepseek-chat (не -reasoner), gemma, llama, qwen-instruct, mistral, gpt-oss).
+_EFFORT_IGNORERS = ("grok-nano", "grok-mini", "grok-3-mini", "gemma", "llama", "mistral",
+                    "qwen2", "qwen-2", "gpt-oss")
+
+
+def ignores_effort(model_id: str) -> bool:
+    """L3: модель «глухая» к reasoning_effort (принимает, но не углубляется) → нужен промпт-путь.
+    deepseek-reasoner/R1 реально думают (их НЕ трогаем), а deepseek-chat/v3 — нет."""
+    bare = strip_model_prefix(str(model_id or "")).lower()
+    if not bare:
+        return False
+    if bare in _REJECTS_EFFORT or model_id in _REJECTS_EFFORT:
+        return True            # вовсе не принимает параметр → тем более эмулируем промптом
+    if "deepseek" in bare and not ("reason" in bare or "r1" in bare):
+        return True            # deepseek-chat/v3 игнорируют; deepseek-reasoner/R1 — нет
+    return any(tag in bare for tag in _EFFORT_IGNORERS)
+
+
+# L3: системная преамбла, эмулирующая глубину размышления для «глухих» к reasoning_effort моделей.
+# Уровень medium — лёгкая, high — сильная (пошаговый разбор + самопроверка перед ответом).
+_DEPTH_PREFACE = {
+    "medium": ("\n\nПеред ответом подумай: разбери задачу на шаги и рассуждай последовательно, "
+               "затем дай выверенный ответ."),
+    "high": ("\n\nРАЗМЫШЛЯЙ ГЛУБОКО перед ответом: (1) разложи задачу на части и явно продумай "
+             "каждый шаг; (2) рассмотри альтернативы и проверь логику на ошибки и крайние случаи; "
+             "(3) только потом дай тщательный, выверенный ответ. Не торопись — точность важнее скорости."),
+}
+
+
+def depth_preface(effort: str) -> str:
+    """L3: текст-эмуляция глубины под уровень усилия (low → пусто, как и в нативном пути)."""
+    return _DEPTH_PREFACE.get(effort or "", "")
+
 
 def model_reasons(model_id: str) -> bool:
     """Думающая ли модель (reasoning_effort имеет смысл): по ключу ИЛИ по флагу живого каталога.
@@ -4012,6 +4048,20 @@ def _fetch_text_guarded(url: str, token: str = "") -> tuple:
 
 # install_agent принимает ещё и application/json (конфиг агента), помимо текста/markdown.
 _INSTALL_OK_CTYPES = _INSTALL_OK_CTYPES + ("application/json",)
+
+
+def _parse_skill_text(text: str):
+    """Парс формата навыка (фронтматтер name/description + тело) через skills_lib, с фолбэком
+    на первый #заголовок. Тонкая обёртка — отдаётся как зависимость в skills_run (L12)."""
+    try:
+        import skills_lib
+        return skills_lib._parse_skill(text)
+    except Exception:
+        name = ""
+        h = re.search(r"^#\s+(.+)$", text or "", re.M)
+        if h:
+            name = h.group(1).strip()
+        return name, "", (text or "")
 
 
 def install_skill_from_url(uid: str, url: str, token: str = "") -> dict:
@@ -8938,6 +8988,43 @@ class Handler(BaseHTTPRequestHandler):
         res = import_skill_repo_from_url(uid, url, token=token)
         return self._json(res, 200 if res.get("ok") else 400)
 
+    def api_skill_folder(self):
+        """L12 ПОЛНЫЕ НАВЫКИ: импорт ЦЕЛОГО навык-фолдера (SKILL.md + scripts + resources) + список/
+        тумблер/запуск скрипта. Действия:
+          action="import" {url, token?} → тянет весь фолдер (≤2МБ) в стор аккаунта;
+          action="list"                 → установленные навыки с метой (folder/scripts/enabled);
+          action="toggle" {id, enabled} → вкл/выкл навык (выкл → не авто-триггерится);
+          action="run" {id, script}     → запуск скрипта: владелец на сервере, юзер → browser-wasm-маркер.
+        Импорт НЕ исполняет код. Запуск гейтится (анти-RCE, см. skills_run/ARCH-DECISIONS)."""
+        import skills_run
+        c = self._body()
+        uid = c.get("user", "default")
+        if not self._ip_guard(uid):
+            return
+        action = str(c.get("action") or "import")
+        if action == "list":
+            return self._json({"skills": skills_run.list_installed(user_dir, uid)})
+        if action == "toggle":
+            ok = skills_run.set_skill_enabled(user_dir, uid, str(c.get("id") or ""),
+                                              bool(c.get("enabled")))
+            return self._json({"ok": ok}, 200 if ok else 404)
+        if action == "run":
+            res = skills_run.run_skill_script(
+                user_dir, uid, str(c.get("id") or ""), str(c.get("script") or ""),
+                is_owner=is_owner, run_code_lang=run_code_lang)
+            return self._json(res, 200 if res.get("ok") else 400)
+        # action == "import" (по умолчанию)
+        url = str(c.get("url") or "").strip()
+        token = str(c.get("token") or "").strip()
+        if not url:
+            return self._json({"ok": False, "error": "нет url"}, 400)
+        res = skills_run.import_skill_folder(
+            uid, url, user_dir=user_dir,
+            parse_github_repo_url=_parse_github_repo_url, github_trees=_github_trees,
+            fetch_text_guarded=_fetch_text_guarded, parse_skill=_parse_skill_text,
+            store_user_skill=_store_user_skill, token=token)
+        return self._json(res, 200 if res.get("ok") else 400)
+
     # --- медиа-поиск для in-chat браузера: web + YouTube + картинки ---
     def api_websearch(self):
         c = self._body()
@@ -9136,6 +9223,117 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(consolidate_active_users(idle_sec=0))
         target = str(c.get("target") or uid).strip() or uid
         return self._json(consolidate_memory(target))
+
+    # ── L15/L13 ТАЙГА AGENT-OS: тонкий мост к agent_os.py (вся логика — там) ──
+    # Собираем dependency-injection контекст из СУЩЕСТВУЮЩИХ функций сервера и передаём
+    # в харнес. agent_os.py НЕ импортирует server.py (нет цикла) — отсюда минимум правок.
+    def _agent_os_deps(self, uid):
+        import agent_os
+        return agent_os.HarnessDeps(
+            complete=venice_complete,
+            resolve_key=resolve_key,
+            best_for_task=best_for_task,
+            best_n_for_task=best_n_for_task,
+            detect_task=detect_task,
+            tools={**TOOLS},                  # dev-тулзы НЕ даём по умолчанию (анти-RCE)
+            aux_model=aux_model("plan"),
+            model_reasons=model_reasons,
+            user_dir=user_dir,
+            is_owner=is_owner,
+            rag_context=rag_context,
+        )
+
+    def api_agent_os(self):
+        """L15 — прогон харнеса по цели: SCOPE→THINK→ACT→VERIFY→STATE. SSE-таймлайн."""
+        import agent_os
+        c = self._body()
+        uid = c.get("user", "default")
+        if not self._ip_guard_sse(uid):
+            return
+        goal = str(c.get("goal") or c.get("task") or "").strip()
+        if not goal:
+            return self._json({"error": "пустая цель"}, 400)
+        if len(goal) > SEC_MAX_PROMPT_CHARS:
+            return self._json({"error": "слишком длинная цель"}, 400)
+        owner = is_owner(uid)
+        if not owner:                          # мульти-модельный агент — гейт баланса (как orchestrate)
+            need = round(0.05 * (1 + load_billing().get("markup_pct", 50) / 100), 6)
+            if user_balance(uid).get("balance", 0) < need:
+                return self._json({"error": f"Недостаточно средств: ~${need}.", "need": need}, 402)
+        _tier = str(c.get("tier") or "").lower()
+        tier = _tier if _tier in ("cheap", "mid", "top") else None
+        context = str(c.get("context") or "")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        def emit(kind, data):
+            try:
+                self.wfile.write(("data: " + json.dumps({"kind": kind, **data}, ensure_ascii=False) + "\n\n").encode())
+                self.wfile.flush()
+            except Exception:
+                pass
+        try:
+            deps = self._agent_os_deps(uid)
+            r = agent_os.run(deps, uid, goal, context=context, emit=emit, tier=tier)
+        except Exception as e:
+            traceback.print_exc(file=sys.stderr)
+            emit("error", {"error": str(e)[:300]})
+            return
+        if not owner:
+            charge_media(uid, 0.05, kind="agent_os")
+        emit("done", {"final": r.get("final"), "plan": r.get("plan"),
+                      "sub_goals": r.get("sub_goals"), "run_id": r.get("run_id")})
+
+    def api_agent_fanout(self):
+        """L13 — N изолированных под-агентов → чистый мерж. SSE-таймлайн."""
+        import agent_os
+        c = self._body()
+        uid = c.get("user", "default")
+        if not self._ip_guard_sse(uid):
+            return
+        goal = str(c.get("goal") or c.get("task") or "").strip()
+        if not goal:
+            return self._json({"error": "пустая задача"}, 400)
+        if len(goal) > SEC_MAX_PROMPT_CHARS:
+            return self._json({"error": "слишком длинная задача"}, 400)
+        n = c.get("n")
+        try:
+            n = max(2, min(int(n or 3), SEC_MAX_ORCH_WORKERS))
+        except Exception:
+            n = 3
+        owner = is_owner(uid)
+        if not owner:
+            need = round(0.05 * n * (1 + load_billing().get("markup_pct", 50) / 100), 6)
+            if user_balance(uid).get("balance", 0) < need:
+                return self._json({"error": f"Недостаточно средств: ~${need}.", "need": need}, 402)
+        _tier = str(c.get("tier") or "").lower()
+        tier = _tier if _tier in ("cheap", "mid", "top") else None
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        def emit(kind, data):
+            try:
+                self.wfile.write(("data: " + json.dumps({"kind": kind, **data}, ensure_ascii=False) + "\n\n").encode())
+                self.wfile.flush()
+            except Exception:
+                pass
+        try:
+            deps = self._agent_os_deps(uid)
+            r = agent_os.fan_out(deps, uid, goal, emit=emit, n=n, tier=tier)
+        except Exception as e:
+            traceback.print_exc(file=sys.stderr)
+            emit("error", {"error": str(e)[:300]})
+            return
+        if not owner:
+            charge_media(uid, 0.05 * n, kind="agent_fanout")
+        emit("done", {"merged": r.get("merged"), "agents": r.get("agents"),
+                      "subtasks": r.get("subtasks")})
 
     # --- ОРКЕСТРАТОР агентов (LangGraph): мозг → воркеры (BYOK) → синтез + таймлайн ---
     def api_orchestrate(self):
@@ -9612,6 +9810,8 @@ class Handler(BaseHTTPRequestHandler):
             self.api_install_agent()
         elif path == "/api/import_skill_repo":  # массовый импорт навыков из GitHub-репо
             self.api_import_skill_repo()
+        elif path == "/api/skill_folder":     # L12: импорт/список/тумблер/запуск навыка-ФОЛДЕРА
+            self.api_skill_folder()
         elif path == "/api/auth":             # signup/login + session-токены
             self.api_auth()
         elif path == "/api/websearch":        # медиа-поиск (web+YouTube+картинки) для in-chat браузера
@@ -9620,6 +9820,10 @@ class Handler(BaseHTTPRequestHandler):
             self.api_supersearch()
         elif path == "/api/orchestrate":      # оркестратор агентов (LangGraph: мозг→воркеры→синтез)
             self.api_orchestrate()
+        elif path == "/api/agent_os":         # L15 ТАЙГА AGENT-OS харнес: scope→think→act→verify→state
+            self.api_agent_os()
+        elif path == "/api/agent_fanout":     # L13 мульти-агент: N изолированных под-агентов → мерж
+            self.api_agent_fanout()
         elif path == "/api/workflow":         # воркфлоу-раннер: шаблонный мульти-шаг пайплайн
             self.api_workflow()
         elif path == "/api/jobs":             # планировщик фоновых/расписание-агентов
@@ -10439,6 +10643,60 @@ class Handler(BaseHTTPRequestHandler):
             self._sse({"type": "cost", "owner": owner, **info})
         self._sse({"type": "done"})
 
+    def chat_agent_os(self, req):
+        """СЕССИОННЫЙ АГЕНТ-РЕЖИМ: сообщение чата = цель для харнеса (L15). Гоним agent_os.run
+        и стримим в ОБЫЧНОЙ chat-SSE-вокабуле (type: agent_phase/tool/delta/done), чтобы UI чата
+        показал таймлайн и финальный ответ без нового рендер-пути. Вся логика — в agent_os.py."""
+        import agent_os
+        uid = req.get("user", "default")
+        raw_messages = list(req.get("messages") or [])
+        goal = next((m.get("content") or "" for m in reversed(raw_messages)
+                     if m.get("role") == "user"), "")
+        # контекст = предыдущая история (без последнего user-сообщения)
+        ctx = "\n".join(f"{m.get('role')}: {m.get('content')}"
+                        for m in raw_messages[:-1] if isinstance(m.get("content"), str))[-4000:]
+        _tier = str(req.get("tier") or "").lower()
+        tier = _tier if _tier in ("cheap", "mid", "top") else None
+        owner = is_owner(uid)
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        if not goal.strip():
+            self._sse({"type": "error", "message": "Пустая цель для агента."}); return
+        if not owner:
+            need = round(0.05 * (1 + load_billing().get("markup_pct", 50) / 100), 6)
+            if user_balance(uid).get("balance", 0) < need:
+                self._sse({"type": "error",
+                           "message": f"Недостаточно средств: ~${need}. Пополни счёт."}); return
+
+        # мостим таймлайн харнеса в chat-SSE: фазы → agent_phase (UI может показать «думает/делает»),
+        # финал → delta (как обычный ответ). Финал шлём один раз по событию final.
+        def emit(kind, data):
+            if kind == "final":
+                self._sse({"type": "delta", "text": str(data.get("text") or "")})
+            elif kind == "act" and data.get("status") == "done":
+                self._sse({"type": "tool", "name": data.get("tool"),
+                           "ok": bool(data.get("ok"))})
+            else:
+                self._sse({"type": "agent_phase", "phase": kind, **{
+                    k: v for k, v in data.items() if k in
+                    ("label", "phase", "stage", "index", "total", "goal", "sub_goals",
+                     "verified", "reason", "attempt")}})
+
+        try:
+            deps = self._agent_os_deps(uid)
+            r = agent_os.run(deps, uid, goal, context=ctx, emit=emit, tier=tier)
+        except Exception as e:
+            traceback.print_exc(file=sys.stderr)
+            self._sse({"type": "error", "message": friendly_api_error(None, str(e))}); return
+        if not owner:
+            charge_media(uid, 0.05, kind="agent_os")
+        self._sse({"type": "done"})
+
     def chat_compare(self, req):
         """COMPARE-режим: тот же веер моделей, что и у «совета», но БЕЗ синтеза —
         каждый ответ показываем отдельной карточкой (member_answer)."""
@@ -10566,6 +10824,17 @@ class Handler(BaseHTTPRequestHandler):
         _ok, _emsg = _sec_messages_ok(req.get("messages"))
         if not _ok:
             return self._json({"error": _emsg}, 400)
+        # ── СЕССИОННЫЙ АГЕНТ-РЕЖИМ (Damir): «новые чаты стартуют агентом». Включается либо
+        # настройкой юзера (settings.agent_mode_default), либо явным флагом запроса (req.agent_os
+        # — индикатор «🤖 Агент» на чате). Тогда КАЖДОЕ сообщение этого чата идёт через харнес
+        # (scope→think→act→verify), а не одно-модельный ответ. Спец-режимы (совет/сравнение/…)
+        # имеют приоритет — их не перехватываем. Тонкая ветка: вся логика — в agent_os.py.
+        _sess_agent = bool(req.get("agent_os")) or bool(
+            load_settings(_uid).get("agent_mode_default"))
+        _other_mode = any(req.get(k) for k in ("relay", "research", "compare", "beam",
+                                               "council", "brain"))
+        if _sess_agent and not _other_mode:
+            return self.chat_agent_os(req)
         if req.get("relay"):
             return self.chat_relay(req)
         if req.get("research"):
@@ -10654,6 +10923,28 @@ class Handler(BaseHTTPRequestHandler):
         _rag_smart = bool(req.get("rag_smart") or req.get("smart_rag"))
         system += rag_context(uid, raw_messages, workspace=_rag_ws_req, smart=_rag_smart)
         system += datetime.now().strftime("\nСегодня %Y-%m-%d (%A), время %H:%M.")
+        # ── L12 ПОЛНЫЕ НАВЫКИ: авто-триггер. Матчим последнее сообщение юзера на ВКЛЮЧЁННЫЕ навыки
+        # и инжектим их SKILL.md в системный промпт (как харнес) → ЛЮБАЯ модель следует Claude-формату.
+        # Робастно: любой сбой не ломает чат. fired_skills уйдёт в SSE-мету для индикатора в UI.
+        fired_skills = []
+        skill_tools = {}
+        try:
+            import skills_run
+            _last_user = next((m.get("content") or "" for m in reversed(raw_messages)
+                               if m.get("role") == "user"), "")
+            _matched = skills_run.match_skills(user_dir, uid, _last_user,
+                                               skill_body=_user_skill_body)
+            if _matched:
+                _inj, fired_skills = skills_run.build_skill_injection(_matched)
+                system += _inj
+                # если у сматченных навыков есть скрипты — даём модели тулзу их запускать (модель-агностично)
+                if any(m.get("scripts") for m in _matched):
+                    skill_tools = {"run_skill_script": skills_run.make_run_skill_tool(
+                        uid, user_dir=user_dir, is_owner=is_owner, run_code_lang=run_code_lang)}
+                    system += "\n" + skills_run.RUN_SKILL_TOOL_PROMPT
+        except Exception:
+            fired_skills = []
+            skill_tools = {}
         if agent:
             system += "\n" + TOOLS_PROMPT
             if dev:
@@ -10666,6 +10957,7 @@ class Handler(BaseHTTPRequestHandler):
             if mtools:
                 active_tools = {**active_tools, **mtools}
                 system += mprompt
+            active_tools = {**active_tools, **skill_tools}   # L12: run_skill_script (если навык со скриптом сматчен)
         else:
             active_tools = {}
             # Подключённые (включённые) MCP-коннекторы работают и в обычном чате —
@@ -10674,6 +10966,8 @@ class Handler(BaseHTTPRequestHandler):
             if mtools:
                 active_tools = {**active_tools, **mtools}
                 system += mprompt
+            # L12: навык-скрипт доступен тулзой и в обычном чате (модель-агностично), если сматчен.
+            active_tools = {**active_tools, **skill_tools}
 
         # 🔐 пер-юзер кастомизация: мержим сохранённый конфиг для текущего режима.
         # Серверный страж — model только из каталога, maxTokens КАП на потолке,
@@ -10690,6 +10984,18 @@ class Handler(BaseHTTPRequestHandler):
             model = _first_live("cheap")
         max_tokens = max(max_tokens, reasoning_token_floor(model, req_reasoning_effort))
         max_tokens = min(max_tokens, USERCFG_MAX_TOKENS)
+
+        # ── L3: ПРОМПТ-ЭМУЛЯЦИЯ ГЛУБИНЫ для «глухих» к reasoning_effort моделей (grok-nano/deepseek-chat/…).
+        # Юзер выкрутил «Глубоко», но эта модель параметр игнорирует → вшиваем преамбулу «думай пошагово»
+        # + даём запас токенов под размышление. Думающим моделям (нативный reasoning_effort) НЕ трогаем —
+        # у них параметр работает. Срабатывает ТОЛЬКО при заданном усилии medium/high.
+        if req_reasoning_effort in ("medium", "high") and ignores_effort(model):
+            _pf = depth_preface(req_reasoning_effort)
+            if _pf:
+                system += _pf
+                # запас под «эмулированное» размышление: high ≈ как у думающих, medium — поменьше
+                _floor = 3200 if req_reasoning_effort == "high" else 1800
+                max_tokens = min(max(max_tokens, _floor), USERCFG_MAX_TOKENS)
 
         base_system = system          # чистый системный промпт — для эксперта (без брейн-обёртки)
 
@@ -10808,6 +11114,8 @@ class Handler(BaseHTTPRequestHandler):
             _meta["run_id"] = run_id
         if budget_note:
             _meta["note"] = budget_note   # прозрачно: почему ответ от другой (более дешёвой) модели
+        if fired_skills:
+            _meta["skills"] = fired_skills  # L12: индикатор «сработал навык: …» в UI
         if not self._sse(_meta):
             return
 
