@@ -260,6 +260,51 @@ PRICE = {}         # {model_id: (in_per_1M, out_per_1M)} для биллинга
 MODEL_KIND = {}    # {model_id: kind} — способность модели (картинки/голос/зрение/код/думающая/общение)
 
 
+# ── Безопасный кэш ускорения (stdlib-only, потокобезопасный) ──────────────────────────
+# Только для ДОРОГОЙ-в-сборке, МЕДЛЕННО-меняющейся, НЕ-зависящей-от-живых-денег статики:
+# сборка каталога моделей (curated/full) и распарсенный RAG-стор юзера. НИКОГДА не кэшируем
+# баланс/потраченное/живой спенд — они должны быть свежими каждый запрос (см. /api/init).
+# Гарантия байт-в-байт: кэшируем РОВНО тот же объект, что вернула бы несведённая ветка, в
+# пределах TTL/версии; на любом сомнении кэш пропускается и считается заново.
+_PERF_LOCK = threading.RLock()   # один замок на оба кэша ниже; короткие критические секции
+_CATALOG_PAYLOAD_CACHE = {}      # {name: (version, expires_ts, value)} — версия = _CATALOG_TS
+_CATALOG_PAYLOAD_TTL = 60.0      # сек: страховочный потолок поверх инвалидации по _CATALOG_TS
+_RAG_LOAD_CACHE = {}             # {uid: (expires_ts, parsed_list)} — распарсенный rag.json юзера
+_RAG_LOAD_TTL = 30.0             # сек: страховка; запись в rag-стор инвалидирует мгновенно
+_RAG_LOAD_CACHE_MAX = 256        # потолок числа закэшированных юзеров (ограничение памяти)
+
+
+def _catalog_payload_cached(name, builder):
+    """Кэш дорогой сборки витрины/полного каталога. Ключ версии — _CATALOG_TS (бампается
+    в load_rich_catalog на ЛЮБОМ рефреше), поэтому рефреш каталога инвалидирует автоматически;
+    TTL — лишь страховка. Возвращает тот же объект, что собрал бы builder() сейчас → ответ
+    байт-в-байт идентичен несведённой ветке. Вызывающие трактуют список как read-only."""
+    now = time.time()
+    with _PERF_LOCK:
+        hit = _CATALOG_PAYLOAD_CACHE.get(name)
+        if hit and hit[0] == _CATALOG_TS and hit[1] > now:
+            return hit[2]
+    value = builder()                       # строим ВНЕ замка (может звать model_info и т.п.)
+    with _PERF_LOCK:
+        _CATALOG_PAYLOAD_CACHE[name] = (_CATALOG_TS, now + _CATALOG_PAYLOAD_TTL, value)
+    return value
+
+
+def _invalidate_catalog_payload_cache():
+    """Сбросить кэш витрины/полного каталога (зовётся при live-пересборке каталога)."""
+    with _PERF_LOCK:
+        _CATALOG_PAYLOAD_CACHE.clear()
+
+
+def _invalidate_rag_cache(uid=None):
+    """Сбросить распарсенный RAG-кэш: конкретного юзера (на записи) или весь (uid=None)."""
+    with _PERF_LOCK:
+        if uid is None:
+            _RAG_LOAD_CACHE.clear()
+        else:
+            _RAG_LOAD_CACHE.pop(uid, None)
+
+
 def _venice_record(m: dict) -> dict:
     spec = m.get("model_spec", {})
     caps = spec.get("capabilities", {})
@@ -862,14 +907,31 @@ def _rag_path(uid: str) -> Path:
     return user_dir(uid) / "rag.json"
 
 def _rag_load(uid: str) -> list:
+    """Распарсенный RAG-стор юзера. Кэшируется per-uid (короткий TTL): за один ход чата
+    зовётся несколько раз (rag_docs + rag_query/smart) — без кэша каждый раз SELECT+json.loads
+    всего блоба. Кэш инвалидируется на ЛЮБОЙ записи стора (_rag_save) → результат идентичен
+    «всегда-из-БД». Вызывающие на чтении (rag_query/rag_docs) трактуют список как read-only;
+    rag_ingest/rag_delete строят НОВЫЙ список и сохраняют (что сбрасывает кэш)."""
+    now = time.time()
+    with _PERF_LOCK:
+        hit = _RAG_LOAD_CACHE.get(uid)
+        if hit and hit[0] > now:
+            return hit[1]
     v = _db_get_json("rag", "uid", uid, [])
-    return v if isinstance(v, list) else []
+    v = v if isinstance(v, list) else []
+    with _PERF_LOCK:
+        if len(_RAG_LOAD_CACHE) >= _RAG_LOAD_CACHE_MAX and uid not in _RAG_LOAD_CACHE:
+            _RAG_LOAD_CACHE.clear()         # простая эвикция: переполнение → полный сброс
+        _RAG_LOAD_CACHE[uid] = (now + _RAG_LOAD_TTL, v)
+    return v
 
 def _rag_save(uid: str, items: list):
     try:
         _db_put_json("rag", "uid", uid, items)
     except Exception:
         pass
+    finally:
+        _invalidate_rag_cache(uid)          # запись → следующий _rag_load перечитает из БД
 
 def _cosine(a: list, b: list) -> float:
     s = sum(x * y for x, y in zip(a, b))
@@ -1337,6 +1399,7 @@ def load_rich_catalog():
         kinds[r.get("kind", "chat")] = kinds.get(r.get("kind", "chat"), 0) + 1
     import time as _t
     _CATALOG_TS = _t.time()                            # отметка свежести для TTL-авторефреша
+    _invalidate_catalog_payload_cache()                # каталог пересобран → сбросить кэш витрины/полного
     print(f"── каталог: {len(RICH)} моделей · по способностям {kinds}")
 
 
@@ -1369,8 +1432,7 @@ def model_kind(model_id: str) -> str:
     return _kind({"id": model_id, "name": "", "vision": False, "code": False, "reasoning": False})
 
 
-def curated_payload():
-    """Витрина моделей для интерфейса: ярлык + контекст + vision (Venice + OpenRouter)."""
+def _build_curated_payload():
     out = []
     for mid, label, note, cat in CURATED:
         info = model_info(mid)
@@ -1381,12 +1443,23 @@ def curated_payload():
     return out
 
 
-def full_catalog_payload():
-    """Полный список Venice + курируемые OpenRouter — попробовать всё подряд."""
+def curated_payload():
+    """Витрина моделей для интерфейса: ярлык + контекст + vision (Venice + OpenRouter).
+    Кэшируется по версии каталога (_CATALOG_TS) + короткий TTL — содержимое НЕ меняется."""
+    return _catalog_payload_cached("curated", _build_curated_payload)
+
+
+def _build_full_catalog_payload():
     out = [{"id": mid, "ctx": info["ctx"], "vision": info["vision"]}
            for mid, info in sorted(CATALOG.items(), key=lambda kv: -kv[1]["ctx"])]
     out.extend({"id": m["id"], "ctx": m["ctx"], "vision": m["vision"]} for m in OR_MODELS)
     return out
+
+
+def full_catalog_payload():
+    """Полный список Venice + курируемые OpenRouter — попробовать всё подряд.
+    Кэшируется по версии каталога (_CATALOG_TS) + короткий TTL — содержимое НЕ меняется."""
+    return _catalog_payload_cached("full", _build_full_catalog_payload)
 
 
 def _free_chat_ids() -> set:
@@ -5237,6 +5310,7 @@ def chat_iter_recent(uid: str, limit: int = 200):
 # отдельные строки (kind/uid/cid/title/ts/body), синхронизируем при сохранении чата.
 # Если сборка sqlite без FTS5 — деградируем до LIKE-поиска, ничего не падает.
 _FTS_OK = None                         # None=не проверяли, True/False=есть ли FTS5
+_FTS_READY = False                     # таблица chat_fts создана + (если надо) бэкфилнута — один раз
 _FTS_LOCK = threading.RLock()
 
 
@@ -5255,7 +5329,13 @@ def _fts_supported(conn) -> bool:
 
 
 def _fts_init(conn):
-    """Создаём FTS5-таблицу (если поддерживается) и однократно бэкфилим, если пусто."""
+    """Создаём FTS5-таблицу (если поддерживается) и однократно бэкфилим, если пусто.
+    После первого успешного прохода взводим _FTS_READY → повторные вызовы (на каждый поиск/
+    сохранение чата) пропускают DDL+commit+проверку-на-пусто. Результаты НЕ меняются —
+    таблица один раз создана, дальше только читается/инкрементально обновляется."""
+    global _FTS_READY
+    if _FTS_READY:
+        return
     if not _fts_supported(conn):
         return
     try:
@@ -5267,6 +5347,7 @@ def _fts_init(conn):
         empty = conn.execute("SELECT 1 FROM chat_fts LIMIT 1").fetchone() is None
         if empty:
             _fts_backfill(conn)
+        _FTS_READY = True
     except Exception as e:
         global _FTS_OK
         _FTS_OK = False
