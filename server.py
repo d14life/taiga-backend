@@ -98,6 +98,108 @@ def strip_model_prefix(model_id: str) -> str:
     return model_id
 
 
+# ---------------------------------------------------------------- здоровье провайдеров
+# Пассивный трекер здоровья: на КАЖДОМ реальном чат-вызове (стрим/служебка) пишем
+# успех/ошибку + латентность. Это бесплатно (никаких лишних сетевых пингов) и точно
+# отражает то, что реально происходит у юзеров. Активного пинга нет специально:
+# дешёвые провайдеры не любят пустых запросов, а пассив уже даёт честную картину.
+#
+# КОНСЕРВАТИВНО (директива задачи — никаких вечных банов):
+#   • одна осечка НЕ выключает провайдера: нужно ≥ HEALTH_FAIL_THRESHOLD ПОДРЯД
+#     неудач, чтобы он считался «degraded» (просел);
+#   • как только провайдер снова ответил успехом — счётчик неудач обнуляется,
+#     просадка снимается мгновенно (авто-восстановление);
+#   • даже без единого успеха просадка сама истекает через HEALTH_COOLDOWN_SEC —
+#     провайдер снова получает шанс (НИКОГДА не удаляем навсегда).
+# «degraded» используется только чтобы ДЕПРИОРИТИЗировать (флаг в каталоге) —
+# фактический вызов модели не блокируется (молчаливый фолбэк и так разрулит сбой).
+HEALTH_FAIL_THRESHOLD = 3        # столько неудач ПОДРЯД → провайдер считается просевшим
+HEALTH_COOLDOWN_SEC = 120.0      # через столько секунд просадка истекает сама (повторный шанс)
+_HEALTH_LAT_KEEP = 20            # сколько последних замеров латентности держим (ограниченная память)
+
+_provider_health = {}            # {provider: {ok, last_checked, fails, latency_ms, _lat:[..], last_error}}
+_health_lock = threading.Lock()
+
+
+def _health_slot(provider: str) -> dict:
+    slot = _provider_health.get(provider)
+    if slot is None:
+        slot = {"ok": True, "last_checked": 0.0, "fails": 0,
+                "latency_ms": None, "_lat": [], "last_error": None}
+        _provider_health[provider] = slot
+    return slot
+
+
+def health_record(provider: str, ok: bool, latency_ms: float = None, error: str = None):
+    """Записать исход реального вызова провайдера. Потокобезопасно, память ограничена.
+    Никогда не кидает — мониторинг не должен ломать основной путь чата."""
+    if not provider:
+        return
+    try:
+        now = _now_health()
+        with _health_lock:
+            slot = _health_slot(provider)
+            slot["last_checked"] = now
+            if ok:
+                slot["fails"] = 0          # любой успех мгновенно снимает просадку (авто-recover)
+                slot["last_error"] = None
+                if latency_ms is not None:
+                    lat = slot["_lat"]
+                    lat.append(float(latency_ms))
+                    if len(lat) > _HEALTH_LAT_KEEP:
+                        del lat[:-_HEALTH_LAT_KEEP]   # держим лишь последние N → bounded
+                    slot["latency_ms"] = round(sum(lat) / len(lat), 1)
+            else:
+                slot["fails"] += 1
+                if error:
+                    slot["last_error"] = str(error)[:120]
+    except Exception:
+        pass
+
+
+def _now_health() -> float:
+    # отдельный монотоночный-достаточный источник времени (time уже импортирован сверху)
+    return time.time()
+
+
+def provider_degraded(provider: str) -> bool:
+    """True, если провайдер просел: ПОДРЯД ≥ порога неудач И последняя из них была
+    недавно (в пределах cooldown). По истечении cooldown просадка истекает сама —
+    провайдер снова считается рабочим (повторный шанс, без вечного бана)."""
+    with _health_lock:
+        slot = _provider_health.get(provider)
+        if not slot:
+            return False
+        if slot["fails"] < HEALTH_FAIL_THRESHOLD:
+            return False
+        return (_now_health() - slot["last_checked"]) < HEALTH_COOLDOWN_SEC
+
+
+def providers_health_snapshot() -> list:
+    """Снимок здоровья всех известных провайдеров для /api/providers. Считается живым:
+    провайдер, у которого нет ключа, помечается configured=False (но всё равно виден)."""
+    now = _now_health()
+    out = []
+    with _health_lock:
+        for name in PROVIDERS:
+            slot = _provider_health.get(name) or {}
+            fails = slot.get("fails", 0)
+            last = slot.get("last_checked", 0.0)
+            degraded = (fails >= HEALTH_FAIL_THRESHOLD
+                        and (now - last) < HEALTH_COOLDOWN_SEC)
+            out.append({
+                "name": name,
+                "ok": (not degraded),
+                "configured": PROVIDERS[name]["key"].exists(),
+                "last_checked": (round(last, 1) if last else None),
+                "latency_ms": slot.get("latency_ms"),
+                "consecutive_fails": fails,
+                "degraded": degraded,
+                "last_error": slot.get("last_error"),
+            })
+    return out
+
+
 # OpenRouter-витрина убрана вместе с провайдером (перепродажа у них запрещена).
 OR_MODELS = []
 OR_CTX = {}
@@ -1438,9 +1540,17 @@ def _build_curated_payload():
     out = []
     for mid, label, note, cat in CURATED:
         info = model_info(mid)
-        out.append({"id": mid, "label": label, "note": note, "cat": cat,
-                    "ctx": info["ctx"], "vision": info["vision"],
-                    "provider": provider_name(mid)})
+        prov = provider_name(mid)
+        item = {"id": mid, "label": label, "note": note, "cat": cat,
+                "ctx": info["ctx"], "vision": info["vision"],
+                "provider": prov}
+        # КОНСЕРВАТИВНЫЙ флаг: ключ degraded добавляем ТОЛЬКО когда провайдер реально
+        # просел (≥порога неудач подряд, в пределах cooldown). В норме — а это обычное
+        # состояние — поля нет, и payload побайтово прежний (back-compat). Флаг — сигнал
+        # UI депри­оритизировать модель, а не убирать её (вечного бана нет, само истечёт).
+        if provider_degraded(prov):
+            item["degraded"] = True
+        out.append(item)
     out.extend({**m, "provider": "openrouter"} for m in OR_MODELS)  # OpenRouter в витрине
     return out
 
@@ -2227,35 +2337,54 @@ def venice_stream(model: str, messages: list, max_tokens: int, usage_out: dict =
     temperature = _clean_temperature(temperature)
     if temperature is not None:
         body_dict["temperature"] = round(temperature, 3)
-    with _open_chat(chat_completions_url(prov), body_dict, headers_for(prov, key), 300) as r:
-        for raw in r:
-            line = raw.decode("utf-8", "ignore").strip()
-            if not line.startswith("data:"):
-                continue
-            payload = line[5:].strip()
-            if payload == "[DONE]":
-                if usage_out is not None:
-                    usage_out["__finished__"] = True   # явный чистый финиш апстрима
-                break
-            try:
-                obj = json.loads(payload)
-            except json.JSONDecodeError:
-                continue
-            u = obj.get("usage")
-            if u and usage_out is not None:
-                usage_out["prompt_tokens"] = u.get("prompt_tokens") or usage_out.get("prompt_tokens", 0)
-                usage_out["completion_tokens"] = u.get("completion_tokens") or usage_out.get("completion_tokens", 0)
-            try:
-                choice0 = obj["choices"][0]
-            except (KeyError, IndexError):
-                continue
-            # finish_reason на последнем choice — тоже признак ЧИСТОГО завершения
-            # (часть дешёвых провайдеров шлёт его вместо/раньше [DONE]).
-            if choice0.get("finish_reason") and usage_out is not None:
-                usage_out["__finished__"] = True
-            delta = (choice0.get("delta") or {}).get("content") or ""
-            if delta:
-                yield delta
+    # пассивный замер здоровья: тайминг открытия + исход. yield-байты НЕ трогаем.
+    _hp = provider_name(model)
+    _t0 = time.time()
+    _opened = False
+    try:
+        with _open_chat(chat_completions_url(prov), body_dict, headers_for(prov, key), 300) as r:
+            _opened = True
+            for raw in r:
+                line = raw.decode("utf-8", "ignore").strip()
+                if not line.startswith("data:"):
+                    continue
+                payload = line[5:].strip()
+                if payload == "[DONE]":
+                    if usage_out is not None:
+                        usage_out["__finished__"] = True   # явный чистый финиш апстрима
+                    break
+                try:
+                    obj = json.loads(payload)
+                except json.JSONDecodeError:
+                    continue
+                u = obj.get("usage")
+                if u and usage_out is not None:
+                    usage_out["prompt_tokens"] = u.get("prompt_tokens") or usage_out.get("prompt_tokens", 0)
+                    usage_out["completion_tokens"] = u.get("completion_tokens") or usage_out.get("completion_tokens", 0)
+                try:
+                    choice0 = obj["choices"][0]
+                except (KeyError, IndexError):
+                    continue
+                # finish_reason на последнем choice — тоже признак ЧИСТОГО завершения
+                # (часть дешёвых провайдеров шлёт его вместо/раньше [DONE]).
+                if choice0.get("finish_reason") and usage_out is not None:
+                    usage_out["__finished__"] = True
+                delta = (choice0.get("delta") or {}).get("content") or ""
+                if delta:
+                    yield delta
+    except GeneratorExit:
+        # потребитель закрыл генератор (клиент отвалился) — это не вина провайдера:
+        # соединение открылось и текст шёл, считаем успехом и не глушим GeneratorExit.
+        if _opened:
+            health_record(_hp, True, (time.time() - _t0) * 1000.0)
+        raise
+    except Exception as e:
+        # апстрим лёг / сетевой обрыв / HTTP-ошибка → фиксируем неудачу и ПРОБРАСЫВАЕМ
+        # дальше (логика тихого фолбэка в chat() остаётся ровно прежней).
+        health_record(_hp, False, error=getattr(e, "code", None) or e.__class__.__name__)
+        raise
+    else:
+        health_record(_hp, True, (time.time() - _t0) * 1000.0)
 
 
 def venice_complete(model: str, messages: list, max_tokens: int = 400, key: str = None,
@@ -2272,11 +2401,16 @@ def venice_complete(model: str, messages: list, max_tokens: int = 400, key: str 
     temperature = _clean_temperature(temperature)
     if temperature is not None:
         body_dict["temperature"] = round(temperature, 3)
+    _hp = provider_name(model)
+    _t0 = time.time()
     try:
         with _open_chat(chat_completions_url(prov), body_dict, headers_for(prov, key), 60) as r:
             d = json.load(r)
-        return d["choices"][0]["message"]["content"] or ""
-    except Exception:
+        out = d["choices"][0]["message"]["content"] or ""
+        health_record(_hp, True, (time.time() - _t0) * 1000.0)   # пассивный замер: исход + латентность
+        return out
+    except Exception as e:
+        health_record(_hp, False, error=getattr(e, "code", None) or e.__class__.__name__)
         return ""
 
 
@@ -8844,6 +8978,11 @@ class Handler(BaseHTTPRequestHandler):
                                 "prompts": [{"name": p.get("name"),
                                              "description": (p.get("description") or "")[:120]} for p in prompts]})
             self._json({"servers": servers, "catalog": MCP_CATALOG})
+        elif path == "/api/providers":         # здоровье провайдеров (пассивный трекер): ok/латентность/просадка
+            self._json({"providers": providers_health_snapshot(),
+                        "threshold": HEALTH_FAIL_THRESHOLD,
+                        "cooldown_sec": HEALTH_COOLDOWN_SEC,
+                        "now": _now_health()})
         elif path == "/api/balance":
             self._json(get_balance())
         elif path == "/api/balances":         # все кошельки + тотал; ?refresh=1 бьёт кэши (свежий баланс)
@@ -10478,7 +10617,16 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         info = meter(uid, model, in_tok, out_tok, deduct=not owner)
                         self._sse({"type": "cost", "owner": owner, **info})
-                self._sse({"type": "done"})
+                # served_by (additive): какой провайдер + какая РЕАЛЬНАЯ модель дали ответ —
+                # после возможного тихого фолбэка/эскалации к эксперту. Старый клиент поле
+                # просто игнорирует; ни одно существующее поле события done не меняется.
+                _served_model = (expert_model
+                                 if (brain and (expert_usage.get("prompt_tokens")
+                                                or expert_usage.get("completion_tokens")))
+                                 else stream_model)
+                self._sse({"type": "done",
+                           "served_by": {"provider": provider_name(_served_model),
+                                         "model": strip_model_prefix(_served_model)}})
                 return
         finally:
             if agent_events:

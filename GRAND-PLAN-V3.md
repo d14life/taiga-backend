@@ -18,7 +18,7 @@ Batches of ≤4 disjoint-file lanes. ≤1 server.py lane + ≤1 chat.tsx lane pe
 - [x] BATCH 18 — performance backend (S: response cache, FTS/RAG query opt) + bundle/code-split FE + image lazy/opt + streaming-latency tune — DONE (FE a05f56c / parent next)
 - [x] BATCH 19 — backend test suite (NEW tests/, stdlib unittest endpoint smoke, 16/16 live-pass) + lib hardening + harden gen-image/video error paths + retry/backoff polish — DONE (FE 4bf90a5 / parent next)
 - [x] BATCH 20 — observability (S: structured logs, error envelopes, friendly errors) + wired dormant features into chat (C: playground/tour/sprint/agent-timeline+permission) + toast system + diagnostics panel — DONE (FE b4a611e / parent next)
-- [ ] BATCH 21 — provider breadth + health checks (S) + model-catalog health UI + provider-fallback transparency + FINAL polish lane
+- [x] BATCH 21 — provider health checks (S: /api/providers, served_by) + model-catalog health UI + provider-fallback transparency + TESTING.md — DONE (FE e15d667 / parent next)
 - [ ] FINAL — full code review (batches 9-21) + full smoke + update FINAL SUMMARY + STOP
 
 ## LANE DETAIL (refined at dispatch)
