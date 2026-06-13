@@ -9,7 +9,7 @@ Rule: ≤1 server.py lane + ≤1 chat.tsx lane per batch (god-file contention). 
 - [x] BATCH 3 — heuristic-tools, analytics, aux-models-UI, voice-picker — DONE (FE c65980a / parent 19fc2fd)
 - [x] BATCH 4 — RAG-chunking, bg-tasks-panel, catalog-screen, agent-tabs — DONE (FE 2350f4c / parent 2cec45b)
 - [x] BATCH 5 — Beam-fusion, camera+Beam-UI, cron-triggers, sub-meters — DONE (FE 07ba126 / parent c6fc7d5)
-- [ ] BATCH 6 — Aider-editblock, OpenHands-risk-gate, richer-RAG-retrievers, model-catalog-badges
+- [x] BATCH 6 — Aider-editblock, OpenHands-risk-gate, richer-RAG-retrievers, model-catalog-badges — DONE (FE b561887 / parent 0f163f2)
 - [ ] FINAL — full code review + smoke + report
 
 ## LANES (each = dedicated agent; detailed prompt at dispatch)
@@ -57,3 +57,28 @@ Rule: ≤1 server.py lane + ≤1 chat.tsx lane per batch (god-file contention). 
 - Taiga-Coder v2 autonomous plan→test→PR loop, own GPU host, desktop Tauri, social publishing — explicit v2/post-launch.
 - ACE-Step free music — needs provider/host.
 - Face-swap deepfake consent guard — Damir-deferred (FINISH-PLAN ОТЛОЖЕНО).
+
+## ✅ FINAL SUMMARY (overnight build complete — all 6 batches + final review)
+All 6 batches DONE, verified (tsc=0 / build PASS / backend smoke green / FTS+council+studio+skills smoke green), committed LOCALLY (never pushed). Final code-review run: cleared as ship-able; the one 🔴 it found (heuristic tool-parser misfiring on prose-JSON in agent mode) was FIXED + verified.
+
+### Shipped this session
+- **Robustness:** instruction-source boundary (anti prompt-injection), anti-copy-loop, scoped memory, lean conditional prompt, stream-recovery (holdback + cut-retry + tool-JSON repair), heuristic tool-parser (loose formats on non-function-calling models, prose-JSON-safe).
+- **Intelligence:** auto-escalate hard questions to Brain (free Opus for owner), Beam-fusion mode (de-hallucinated fan-out→merge), skills-as-/slashcommands.
+- **Search/RAG:** FTS5 full-text chat+memory search; structure-aware recursive RAG chunking; client MultiQuery+RRF+compression retrievers (available; not yet default-wired into send — see follow-ups).
+- **Studio/files:** img2img + price-before-gen; native .xlsx + .pptx export; (artifacts/PDF/Word already shipped).
+- **Ecosystem:** GitHub-repo skill import (191 imported earlier), 36 agent presets, agent-marketplace tabs, MCP token-auth+resources+plain-chat, aux-models-per-task (owner override, end-to-end), heuristic tools.
+- **Coder:** Aider-style editblock diff/apply engine (exact>whitespace>anchor, all-or-nothing) on owner-gated edit_file; OpenHands-style client risk-gate (riskOf/policyFor — advisory, server _perm_check authoritative).
+- **UI:** Light/Dark/System + font picker; full model-catalog screen (filters/categories/badges) + dedicated catalog page; usage-analytics dashboard; background-tasks panel; subscription meters (owner); onboarding capability-cards; camera capture; mobile pass (sidebar drawer + 6 panels + tablet breakpoint); premium $100M landing redesign; unified skill/agent registry.
+- **Billing/cron:** total-balance across 5 wallets + live refresh; free=owner-only; subscription hidden from users; usage-log from cost events; cron weekday/time triggers.
+- **Security/QA:** /api/users auth hole closed; cinema-export SSRF+gating; prefixed-model-ID fix; friendly provider errors + silent fallback; vision verified; td3 fast-fail; 14-bug sweep.
+
+### Known follow-ups (non-blocking — for founder review)
+- Smart multi-query RAG (lib/rag ragSearch) is built but the chat send path still calls plain ragQuery — wire behind a "умный поиск" toggle (multi-query adds latency/cost, so not default-on).
+- lib/decision.ts riskOf/policyFor gate is exported but not yet consumed by chat.tsx's permission flow (existing toolRisk/shouldAsk still drive it; new gate is advisory-ready).
+- recordUsage imported into use-taiga-chat from a component — works (SSR-guarded), but belongs in a lib/usage-log.ts (architecture tidy).
+- Heuristic parser recovers fenced/<tool_call>/name(args)/name:value formats; bare unquoted positional (`TOOL: web_search курс`) falls through to prose (safe, not a regression).
+- Edit-block whitespace/anchor fallback normalizes CRLF→LF (cosmetic; exact-match path preserves bytes).
+
+### Deferred (need founder keys/infra/decision — see DEFERRED list above): payments, self-hosted ML voice/guard, sqlite-vec, E2B sandbox, ComfyUI/manim/FLUX-schnell free-media, Taiga-Coder v2 autonomous loop, GPU host, desktop app, social publishing, login UI, ACE-Step, deepfake guard.
+
+STATUS: autonomous loop STOPPED (all batches done). Live: backend :8777, dev :3000. All work in local git (16 batch commits af5e1bb→0f163f2 + final fix).

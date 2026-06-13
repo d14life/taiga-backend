@@ -3880,6 +3880,13 @@ def heuristic_tool_call(text: str, allowed: dict):
                 # имя инструмента может стоять ВНЕ json (name {json}) — обработаем ниже
                 break
 
+        # анти-misfire: кандидат — ЦЕЛИКОМ сбалансированный JSON-объект (проза в JSON), а строгий
+        # разбор выше НЕ нашёл tool-ключ → это НЕ вызов инструмента. НЕ сканируем имена-подстроки
+        # внутри строковых значений (иначе фабрикуем мусорный вызов). К следующему кандидату.
+        cs = c.strip()
+        if cs.startswith("{") and isinstance(_repair_tool_json(cs), dict):
+            continue
+
         # --- B) ищем имя активного инструмента + следующую за ним arg-структуру
         # сортируем по длине: длинные имена матчим первыми (super_search раньше search)
         for name in sorted(allowed, key=len, reverse=True):
