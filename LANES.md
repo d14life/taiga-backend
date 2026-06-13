@@ -19,7 +19,7 @@ ANOTHER claude session may also work this repo — collision-guard before EVERY 
    Tick the checkbox here. Restart backend if server.py changed.
 5. Append ONE casual plain-English line to WHATS-NEW.md: "✨ <feature> — <what it does for the user>".
 Rules: NEVER auto-pick dead models. server.py edits sequential. L13 BLOCKED on Damir's harness repo link = skip.
-Priority: L20 · L4f · L6 · L7 · L8 · L9 · L10 · L11 · L12 · L18 · L15 · L16 · L14 · L3 · L21 · L22
+Priority: L4f · L6 · L7 · L8 · L9 · L10 · L11 · L12 · L18 · L15 · L16 · L14 · L3 · L21 · L22
 
 ## DONE (committed)
 - [x] L0 Agent S identity rename + name-stamp fix + default-leak fix        (5f8c24e)
@@ -102,7 +102,8 @@ Priority: L20 · L4f · L6 · L7 · L8 · L9 · L10 · L11 · L12 · L18 · L15 
         >1 → driver triages, then runs the N best-for-task experts in parallel, fuses with BEAM_FUSION_PROMPT
         (reuse council fusion). UI: "выходных моделей" count selector in Brain controls. Each expert inherits
         pad spec + sees chat memory (L4e already wires venice_complete effort/context).
-- [ ] L20 COUNCIL total-count (Damir): backend already reads req.n (2-5, default 3). Add frontend count
+- [x] L20 COUNCIL total-count — DONE (taiga-web a0f6234): «всего N» stepper next to Совет (auto, no explicit
+        members) → req.n; persisted. VERIFIED live (steps 3→4, persists). backend already reads req.n (2-5, default 3). Add frontend count
         selector (2-5) for AUTO council (when no explicit councilModels picked) → send req.n. UI: "всего
         моделей" stepper near the council members popover (chat.tsx ~3982).
 
