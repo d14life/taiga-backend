@@ -19,7 +19,7 @@ ANOTHER claude session may also work this repo — collision-guard before EVERY 
    Tick the checkbox here. Restart backend if server.py changed.
 5. Append ONE casual plain-English line to WHATS-NEW.md: "✨ <feature> — <what it does for the user>".
 Rules: NEVER auto-pick dead models. server.py edits sequential. L13 BLOCKED on Damir's harness repo link = skip.
-Priority: L4f · L6 · L7 · L8 · L9 · L10 · L11 · L12 · L18 · L15 · L16 · L14 · L3 · L21 · L22
+Priority: L6 · L7 · L8 · L9 · L10 · L11 · L12 · L18 · L15 · L16 · L14 · L3 · L21 · L22
 
 ## DONE (committed)
 - [x] L0 Agent S identity rename + name-stamp fix + default-leak fix        (5f8c24e)
@@ -90,7 +90,9 @@ Priority: L4f · L6 · L7 · L8 · L9 · L10 · L11 · L12 · L18 · L15 · L16 
         This is the clean split vs Council (Council = N equals deliberate→fuse, flat). Lead breaks the task,
         routes pieces to best-for-task models (in the chosen tier), combines. Editable lead + per-model
         master prompts; count = L19 (how many models it orchestrates). Each model inherits pad + chat memory.
-- [ ] L4f Multi-engine UI: SHOW which model each head uses (per Damir "needs to be shown"), per-head
+- [x] L4f Multi-engine UI — DONE (taiga-web b23a797): per-head master-prompt textarea in Совет popover
+        (→ memberPrompts[], backend applies per head); each head's MODEL shown as "Совет: <model>" steps
+        (covers brain-orchestrator experts too via L4c council_step). SHOW which model each head uses, per-head
         master-prompt editor, heads visibly obey the main pad (Auto/Deep/Fast/tier). "independent→together".
 - [x] L17 Model-picker SORT: Мощнее (benchmark) / Новые (created) / Дешевле (per1k).  (fe 99ce78d / 58157dd)
         Picker already had the 4 layers as filters (type tabs Зрение/Код/Рассужд · uncensored/private/cheap
