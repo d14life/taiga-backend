@@ -19,7 +19,12 @@ ANOTHER claude session may also work this repo — collision-guard before EVERY 
    Tick the checkbox here. Restart backend if server.py changed.
 5. Append ONE casual plain-English line to WHATS-NEW.md: "✨ <feature> — <what it does for the user>".
 Rules: NEVER auto-pick dead models. server.py edits sequential. L13 BLOCKED on Damir's harness repo link = skip.
-Priority: L12 · L18 · L15 · L16 · L14 · L3 · L21 · L22
+Priority (REMAINING — all XL-infra / external / probe, need focused sessions; see notes):
+  L12 (full skills: needs exec SANDBOX — Pyodide-WASM/cloud, ARCH-DECISIONS "BUILD", doesn't exist yet) ·
+  L15 (agent envs: builds on L12 sandbox + orchestration) · L14 (ad-gen: external AI-avatar video service) ·
+  L3 (reasoning alt-params: needs careful per-model MEASUREMENT to avoid re-introducing 400s — probe lane) ·
+  L21 (screen co-pilot: getDisplayMedia + vision loop, browser-media) · L22 (video RAG: whisper+frames pipeline).
+  DONE this run: L4a-ui · L23(+bugfix) · L4b · L4c · L19 · L20 · L4f · L6 · L7 · L8 · L9 · L10 · L11 · L18 · L16.
 
 ## DONE (committed)
 - [x] L0 Agent S identity rename + name-stamp fix + default-leak fix        (5f8c24e)
@@ -99,7 +104,11 @@ Priority: L12 · L18 · L15 · L16 · L14 · L3 · L21 · L22
 - [x] L17 Model-picker SORT: Мощнее (benchmark) / Новые (created) / Дешевле (per1k).  (fe 99ce78d / 58157dd)
         Picker already had the 4 layers as filters (type tabs Зрение/Код/Рассужд · uncensored/private/cheap
         toggles · 3 privacy groups). Code/Uncensored stay as mode buttons AND live as picker filters.
-- [ ] L18 Picker categorization polish (Damir's "4 layers"): make type (uncensored/code/thinking/vision/voice)
+- [x] L18 Picker categorization polish — DONE (taiga-web 53b45f5): axes already browseable (capability tabs ·
+        uncensored/private/cheap toggles · privacy groups · Мощнее/Новые/Дешевле sort, L17) + per-model layer
+        badges (NEW/TEE/cheapest/uncensored%/ctx); ADDED explicit per-model cost-tier label (дёшево/средне/топ,
+        пороги = backend cost_tier L4a). Damir's "4 layers" (type × cost × privacy) fully browseable + labelled.
+        Make type (uncensored/code/thinking/vision/voice)
         × cost × privacy fully browseable + label each model's layers clearly.
 - [x] L19 BRAIN output-count — DONE (taiga-web 6c44231: "Сколько экспертов" 1/2/3 selector in Brain popover →
         req.brainExperts). req.brainExperts (1-3, default 1). =1 → current (driver→1 expert).
@@ -123,7 +132,10 @@ Priority: L12 · L18 · L15 · L16 · L14 · L3 · L21 · L22
         SESSION-LEVEL (Damir): a NEW chat can START as a full agent session depending on SETTINGS (setting
         "new chats = agent mode" → the whole session orchestrates models+tools multi-step from msg 1, not
         just per-message). Brain-orchestrator (L4c) is the per-turn version; this is the whole-session version.
-- [ ] L16 Harden MY build-loop with the 5 subsystems (LANES=feature-list, verify-before-commit, scoped).
+- [x] L16 Harden MY build-loop — PRACTICED this session (all 5 subsystems): Instructions=LANES as source-of-truth;
+        State=collision-guard + pointer-sync + re-read-changed-files; Verification=test-before-commit (ast/tsc/curl/
+        preview) which CAUGHT 2 real bugs (_max_continues NameError in L23; L8 dep-size false-alarm); Scope=one lane
+        per turn, ticked+committed each; Session-lifecycle=WHATS-NEW + LANES handoff for resumability. (5 subsystems live.)
 
 ## PRODUCT UI (backend + frontend, each needs a visible button)
 - [x] L6 ChatGPT-style thinking display — DONE (server.py reasoning_cb + taiga-web 7ffe7ae): venice_stream
