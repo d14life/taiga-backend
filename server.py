@@ -1319,7 +1319,7 @@ Developer tools are ENABLED (the user turned them on). Same JSON call format. Ex
 - shell       args {"cmd": "ls -la ~"}         — run a shell command, returns stdout+stderr
 - run_code    args {"code": "print(2**10)", "lang": "python"} — execute code (python/js/bash) in a sandbox and return its output. Use for calculations, data work, quick scripts.
 - write_file   args {"path": "...", "content": "..."} — create/overwrite a file (авто-бэкап). For NEW files or full rewrites.
-- edit_file    args {"path": "...", "search": "<exact existing text>", "replace": "<new text>"} — replace ONE exact block in a file (Aider-style). COPY the existing text precisely incl. indentation. For surgical edits.
+- edit_file    args {"path": "...", "search": "<exact existing text>", "replace": "<new text>"} — replace ONE exact block in a file (Aider-style). COPY the existing text precisely incl. indentation. For surgical edits. Matching is robust: exact → whitespace-tolerant → first/last-line anchor; if the search hits 0 or >1 places you get a clear error (add context for uniqueness). For MULTIPLE edits in one call pass "blocks" instead of search/replace: either a JSON list [{"search":"...","replace":"..."}] OR Aider SEARCH/REPLACE fences (<<<<<<< SEARCH … ======= … >>>>>>> REPLACE). Blocks apply sequentially; all-or-nothing (no partial writes).
 - revert_file  args {"path": "..."} — UNDO the last edit_file/write_file on a file (restore its backup).
 Use these only when the user clearly asks to touch files or the system. Be careful and precise."""
 
@@ -3275,16 +3275,220 @@ def _file_backup(p: Path):
         pass
 
 
-def _apply_edit(content: str, search: str, replace: str):
-    """Aider-style: точное → пробел-гибкое совпадение search-блока. None если не найден."""
-    if search in content:
-        return content.replace(search, replace, 1)
-    cl, sl = content.splitlines(), search.splitlines()
-    if sl:
-        for i in range(len(cl) - len(sl) + 1):
-            if [w.rstrip() for w in cl[i:i + len(sl)]] == [s.rstrip() for s in sl]:
-                return "\n".join(cl[:i] + replace.splitlines() + cl[i + len(sl):])
-    return None
+# ---------------------------------------------------------------------------
+# Aider-style editblock движок: разбор SEARCH/REPLACE-блоков + надёжное
+# применение (точное → пробел-гибкое → якорное совпадение, с защитой от
+# неоднозначности). Чистый stdlib, без зависимостей. Используется edit_file.
+# ---------------------------------------------------------------------------
+# Маркеры формата Aider. Допускаем «рваные» заборы (5–9 символов) и хвост после маркера.
+_EB_HEAD = re.compile(r"^<{5,9} *SEARCH\b.*$")
+_EB_DIV  = re.compile(r"^={5,9} *$")
+_EB_TAIL = re.compile(r"^>{5,9} *REPLACE\b.*$")
+
+
+def parse_edit_blocks(text):
+    """Разобрать вход в список блоков [{'search':..., 'replace':...}].
+
+    Принимает ДВА формата:
+      1) Aider-овский забор:
+             <<<<<<< SEARCH
+             старые строки
+             =======
+             новые строки
+             >>>>>>> REPLACE
+         (можно несколько блоков подряд; ``` вокруг — игнорируются)
+      2) JSON-список [{"search": "...", "replace": "..."}] (или один объект).
+
+    Бросает ValueError при битом заборе (head без div/tail и т.п.).
+    """
+    if isinstance(text, (list, dict)):
+        raw = text
+    else:
+        s = str(text).strip()
+        # Попытка JSON, если похоже на список/объект.
+        if s[:1] in "[{":
+            try:
+                raw = json.loads(s)
+            except Exception:
+                raw = None
+            if raw is not None:
+                return _normalize_blocks(raw)
+        return _parse_fenced_blocks(str(text))
+    return _normalize_blocks(raw)
+
+
+def _normalize_blocks(raw):
+    if isinstance(raw, dict):
+        raw = [raw]
+    out = []
+    if not isinstance(raw, list):
+        raise ValueError("ожидался список блоков {search,replace}")
+    for b in raw:
+        if not isinstance(b, dict):
+            raise ValueError("блок должен быть объектом {search,replace}")
+        search = b.get("search", b.get("original", ""))
+        replace = b.get("replace", b.get("updated", ""))
+        if search is None:
+            search = ""
+        if replace is None:
+            replace = ""
+        out.append({"search": str(search), "replace": str(replace)})
+    if not out:
+        raise ValueError("пустой список блоков")
+    return out
+
+
+def _parse_fenced_blocks(text):
+    """Парсер Aider-формата по строкам (state-machine). Возвращает список блоков."""
+    lines = text.splitlines()
+    blocks, i, n = [], 0, len(lines)
+    while i < n:
+        if _EB_HEAD.match(lines[i]):
+            search_lines, i = [], i + 1
+            # до разделителя =======
+            while i < n and not _EB_DIV.match(lines[i]):
+                if _EB_HEAD.match(lines[i]) or _EB_TAIL.match(lines[i]):
+                    raise ValueError("битый блок: SEARCH без разделителя =======")
+                search_lines.append(lines[i]); i += 1
+            if i >= n:
+                raise ValueError("битый блок: нет разделителя ======= после SEARCH")
+            i += 1  # пропускаем =======
+            replace_lines = []
+            # до хвоста >>>>>>> REPLACE
+            while i < n and not _EB_TAIL.match(lines[i]):
+                if _EB_HEAD.match(lines[i]) or _EB_DIV.match(lines[i]):
+                    raise ValueError("битый блок: REPLACE без >>>>>>> REPLACE")
+                replace_lines.append(lines[i]); i += 1
+            if i >= n:
+                raise ValueError("битый блок: нет >>>>>>> REPLACE")
+            i += 1  # пропускаем >>>>>>> REPLACE
+            # Сохраняем перевод строки, если исходный текст имел его (склейка \n).
+            search = "\n".join(search_lines)
+            replace = "\n".join(replace_lines)
+            blocks.append({"search": search, "replace": replace})
+        else:
+            i += 1
+    if not blocks:
+        raise ValueError("не найдено ни одного SEARCH/REPLACE-блока")
+    return blocks
+
+
+def _find_matches_exact(content, search):
+    """Все начальные индексы точного вхождения подстроки (без перекрытий)."""
+    idxs, start = [], 0
+    while True:
+        j = content.find(search, start)
+        if j < 0:
+            break
+        idxs.append(j)
+        start = j + max(1, len(search))
+    return idxs
+
+
+def _line_spans_ws(cl, sl):
+    """Совпадения по строкам без учёта ведущих/хвостовых пробелов. Список (i, len)."""
+    spans = []
+    if not sl:
+        return spans
+    sk = [s.strip() for s in sl]
+    for i in range(len(cl) - len(sl) + 1):
+        if [w.strip() for w in cl[i:i + len(sl)]] == sk:
+            spans.append((i, len(sl)))
+    return spans
+
+
+def _line_spans_anchor(cl, sl):
+    """Якорное совпадение: первая и последняя строки search (по .strip()) как якоря.
+
+    Берём непустые строки search; первый непустой = верхний якорь, последний
+    непустой = нижний. Находим участки, начинающиеся верхним и заканчивающиеся
+    нижним якорём, с числом строк = len(sl). Возвращает список (i, len)."""
+    spans = []
+    nonempty = [k for k, s in enumerate(sl) if s.strip()]
+    if len(nonempty) < 2:
+        return spans
+    top = sl[nonempty[0]].strip()
+    bot = sl[nonempty[-1]].strip()
+    span = len(sl)
+    for i in range(len(cl) - span + 1):
+        if cl[i].strip() == top and cl[i + span - 1].strip() == bot:
+            spans.append((i, span))
+    return spans
+
+
+def _apply_one(content, search, replace):
+    """Применить ОДИН search/replace. Возвращает (new_content, status).
+
+    status: 'ok' | 'not_found' | 'ambiguous'. При not_found/ambiguous content
+    не меняется (new_content == исходный)."""
+    # Пустой search → допускаем только для пустого файла (как вставку всего тела).
+    if search == "":
+        if content == "":
+            return replace, "ok"
+        return content, "not_found"
+
+    # (1) Точное вхождение подстроки.
+    hits = _find_matches_exact(content, search)
+    if len(hits) == 1:
+        j = hits[0]
+        return content[:j] + replace + content[j + len(search):], "ok"
+    if len(hits) > 1:
+        return content, "ambiguous"
+
+    cl = content.splitlines()
+    sl = search.splitlines()
+
+    # (2) Пробел-гибкое построчное совпадение.
+    spans = _line_spans_ws(cl, sl)
+    if len(spans) > 1:
+        return content, "ambiguous"
+    if len(spans) == 1:
+        i, ln = spans[0]
+        new_lines = cl[:i] + replace.splitlines() + cl[i + ln:]
+        trailing = "\n" if content.endswith("\n") else ""
+        return "\n".join(new_lines) + trailing, "ok"
+
+    # (3) Якорное совпадение (первая+последняя непустые строки как уникальные якоря).
+    spans = _line_spans_anchor(cl, sl)
+    if len(spans) > 1:
+        return content, "ambiguous"
+    if len(spans) == 1:
+        i, ln = spans[0]
+        new_lines = cl[:i] + replace.splitlines() + cl[i + ln:]
+        trailing = "\n" if content.endswith("\n") else ""
+        return "\n".join(new_lines) + trailing, "ok"
+
+    return content, "not_found"
+
+
+def apply_edit_blocks(content, blocks):
+    """Применить список блоков ПОСЛЕДОВАТЕЛЬНО к строке content.
+
+    blocks — список {'search','replace'} (как из parse_edit_blocks).
+    Возвращает (new_content, errors). errors — список строк по блокам, что
+    не применились (0 совпадений или неоднозначность). Если errors непуст,
+    new_content == исходному (НИЧЕГО не пишем — не угадываем)."""
+    cur = content
+    errors = []
+    for k, b in enumerate(blocks, 1):
+        new, status = _apply_one(cur, b.get("search", ""), b.get("replace", ""))
+        if status == "ok":
+            cur = new
+        elif status == "ambiguous":
+            errors.append(f"блок #{k}: search найден в НЕСКОЛЬКИХ местах — "
+                          f"добавь контекста, чтобы он был уникален")
+        else:
+            errors.append(f"блок #{k}: search-блок не найден — СКОПИРУЙ "
+                          f"существующий текст точно (с отступами)")
+    if errors:
+        return content, errors
+    return cur, []
+
+
+def _apply_edit(content, search, replace):
+    """Совместимость: один блок. None если не применился (не найден/неоднозначно)."""
+    new, status = _apply_one(content, search, replace)
+    return new if status == "ok" else None
 
 
 def tool_write_file(args: dict) -> str:
@@ -3304,23 +3508,34 @@ def tool_write_file(args: dict) -> str:
 
 def tool_edit_file(args: dict) -> str:
     path = str(args.get("path", "")).strip()
-    search = str(args.get("search", ""))
-    replace = str(args.get("replace", ""))
     if not path or not _edit_allowed(path):
         return "error: запрещённый путь (ключи/.env/секреты нельзя)"
-    if not search:
-        return "error: нужен непустой search-блок"
+    # Собираем блоки: либо один search/replace, либо пачка через blocks/diff/edits.
+    # blocks/diff может быть Aider-забором (текст) ИЛИ JSON-списком {search,replace}.
+    raw_blocks = args.get("blocks", args.get("diff", args.get("edits")))
+    try:
+        if raw_blocks not in (None, "", []):
+            blocks = parse_edit_blocks(raw_blocks)
+        elif str(args.get("search", "")):
+            blocks = [{"search": str(args.get("search", "")),
+                       "replace": str(args.get("replace", ""))}]
+        else:
+            return "error: нужен search-блок или blocks/diff (SEARCH/REPLACE)"
+    except ValueError as e:
+        return f"error: разбор diff — {e}"
     try:
         p = Path(path).expanduser()
         if not p.exists():
             return "error: файл не найден (для нового используй write_file)"
         content = p.read_text("utf-8", "ignore")
-        new = _apply_edit(content, search, replace)
-        if new is None:
-            return "error: search-блок не найден — СКОПИРУЙ существующий текст точно (с отступами)"
+        new, errors = apply_edit_blocks(content, blocks)
+        if errors:
+            return "error: " + "; ".join(errors)
         _file_backup(p)
         p.write_text(new)
-        return f"✓ {path}: заменён блок ({len(search)}→{len(replace)} симв.)"
+        nb = len(blocks)
+        d = len(new) - len(content)
+        return f"✓ {path}: применено блоков: {nb} (Δ {d:+d} симв.)"
     except Exception as e:
         return f"error: {e}"
 
