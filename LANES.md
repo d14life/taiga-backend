@@ -19,7 +19,7 @@ ANOTHER claude session may also work this repo — collision-guard before EVERY 
    Tick the checkbox here. Restart backend if server.py changed.
 5. Append ONE casual plain-English line to WHATS-NEW.md: "✨ <feature> — <what it does for the user>".
 Rules: NEVER auto-pick dead models. server.py edits sequential. L13 BLOCKED on Damir's harness repo link = skip.
-Priority: L9 · L10 · L11 · L12 · L18 · L15 · L16 · L14 · L3 · L21 · L22
+Priority: L10 · L11 · L12 · L18 · L15 · L16 · L14 · L3 · L21 · L22
 
 ## DONE (committed)
 - [x] L0 Agent S identity rename + name-stamp fix + default-leak fix        (5f8c24e)
@@ -138,7 +138,9 @@ Priority: L9 · L10 · L11 · L12 · L18 · L15 · L16 · L14 · L3 · L21 · L2
 - [x] L8 Memory-write frequency — DONE (taiga-web f3290d0): 1-8 slider «как часто запоминать» in memory
         panel → раз в N ответов (taiga.mem.every); extraction effect gates on it + widens window. Verified cold.
         Original: expose consolidation cadence as a user setting + UI slider.
-- [ ] L9 User hooks per chat: chat-settings → create hook (trigger + action-prompt + AI-help btn).
+- [x] L9 User hooks per chat — DONE (taiga-web dd3ad40): «хуки» button → HooksPanel (trigger substring +
+        action-prompt, ✨ AI-help via /api/improve, per-chat taiga.hooks.<id>); matched hooks inject into
+        system via composeSystem. VERIFIED live (add hook → persists). chat-settings → create hook (trigger + action-prompt + AI-help btn).
 - [ ] L10 Projects: group chats + shared files + instructions + memory (features.ts "soon"→live).
 - [ ] L11 Voice hands-free mode: continuous listen→answer→speak loop on free stack (NanoGPT TTS +
         browser STT), dedicated voice UI; premium voice dropdown (Cartesia/ElevenLabs BYOK).
