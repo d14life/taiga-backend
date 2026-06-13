@@ -2590,10 +2590,10 @@ def venice_stream(model: str, messages: list, max_tokens: int, usage_out: dict =
 
 
 def venice_complete(model: str, messages: list, max_tokens: int = 400, key: str = None,
-                    temperature=None) -> str:
-    """Не-стриминговый запрос — для служебных задач (память, улучшение промпта).
-    По умолчанию общий пул-ключ (это твои внутренние сервисы).
-    temperature — необязательная (0..1.5); при None провайдеру не шлём."""
+                    temperature=None, reasoning_effort: str = None) -> str:
+    """Не-стриминговый запрос — для служебных задач (память, улучшение промпта) и голов мульти-движковых
+    режимов (совет/мозг-эксперт). По умолчанию общий пул-ключ. temperature/reasoning_effort —
+    необязательные; reasoning_effort шлём ТОЛЬКО думающим (gate у вызывающего) и только как параметр."""
     prov = provider_for(model)
     key = key or global_key(provider_name(model))
     if not key:
@@ -2603,6 +2603,8 @@ def venice_complete(model: str, messages: list, max_tokens: int = 400, key: str 
     temperature = _clean_temperature(temperature)
     if temperature is not None:
         body_dict["temperature"] = round(temperature, 3)
+    if reasoning_effort in ("low", "medium", "high") and strip_model_prefix(model) not in _REJECTS_EFFORT:
+        body_dict["reasoning_effort"] = reasoning_effort
     _hp = provider_name(model)
     _t0 = time.time()
     try:
@@ -10246,28 +10248,42 @@ class Handler(BaseHTTPRequestHandler):
                    "mode": "beam" if beam else "council",
                    "members": [strip_model_prefix(r["id"]).split("/")[-1] for r in members]})
 
-        # Совет/Сравнение показывают РЕАЛЬНЫЕ имена моделей → не навязываем личность «Тайга»
-        # (иначе модель в карточке «Grok» заявляет «я Тайга» — противоречие). Каждая отвечает как есть.
+        # Совет/Сравнение показывают РЕАЛЬНЫЕ имена → личность «Тайга» не навязываем (каждая как есть).
+        # МУЛЬТИ-ДВИЖКОВЫЙ режим НАСЛЕДУЕТ спец главного пульта: каждая голова видит ПАМЯТЬ чата (всю
+        # историю, как обычный чат), наследует усилие (deep→reasoning_effort) и бюджет токенов, и может
+        # иметь СВОЙ мастер-промпт (memberPrompts[i]). Головы думают НЕЗАВИСИМО → потом синтез вместе.
         member_sys = "Ответь на вопрос по существу, точно и без воды. Отвечай как ты есть, без выдуманной личности."
         if cfg_system_prefix:
             member_sys = cfg_system_prefix + "\n\n" + member_sys
+        _re = str(req.get("reasoning_effort") or "").lower()
+        c_effort = _re if _re in ("low", "medium", "high") else ("high" if req.get("deep") else None)
+        member_ctx = build_api_messages(raw_messages)          # история чата = «память», видимая голове
+        member_prompts = req.get("memberPrompts") if isinstance(req.get("memberPrompts"), list) else None
+        member_cap = min(max_tokens, 3000 if c_effort == "high" else 1500)
+        _ctx_in = est_tokens(member_sys) + est_tokens(
+            " ".join((m.get("content") or "") for m in member_ctx if isinstance(m.get("content"), str)))
 
-        def ask_one(r):
+        def ask_one(r, idx=0):
             k, _, ke = resolve_key(uid, r["id"])
             if ke or not k:
                 return (r, None, 0, 0)
+            msys = member_sys
+            if member_prompts and idx < len(member_prompts) and str(member_prompts[idx] or "").strip():
+                msys = scrub_identity(str(member_prompts[idx]))[:2000]   # своя мастер-персона головы
+                if cfg_system_prefix:
+                    msys = cfg_system_prefix + "\n\n" + msys
+            eff = c_effort if model_reasons(r["id"]) else None
             try:
-                txt = venice_complete(r["id"], [{"role": "system", "content": member_sys},
-                                                {"role": "user", "content": question}],
-                                      min(max_tokens, 1200), k, temperature=temperature)
-                return (r, txt, est_tokens(question), est_tokens(txt or ""))
+                txt = venice_complete(r["id"], [{"role": "system", "content": msys}] + member_ctx,
+                                      member_cap, k, temperature=temperature, reasoning_effort=eff)
+                return (r, txt, _ctx_in, est_tokens(txt or ""))
             except Exception:
                 return (r, None, 0, 0)
 
         import concurrent.futures
         results = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(members))) as ex:
-            futs = {ex.submit(ask_one, r): r for r in members}
+            futs = {ex.submit(ask_one, r, i): r for i, r in enumerate(members)}
             for fut in concurrent.futures.as_completed(futs):
                 r, txt, ti, to = fut.result()
                 results.append((r, txt, ti, to))
@@ -10303,7 +10319,8 @@ class Handler(BaseHTTPRequestHandler):
         ru, out_total = {}, ""
         try:
             for delta in venice_stream(synth_model, synth_msgs, max_tokens, ru, skey,
-                                       temperature=temperature):
+                                       temperature=temperature,
+                                       reasoning_effort=(c_effort if model_reasons(synth_model) else None)):
                 out_total += delta
                 if not self._sse({"type": "delta", "text": delta}):
                     return
@@ -10839,7 +10856,9 @@ class Handler(BaseHTTPRequestHandler):
                         try:
                             for d in venice_stream(expert_model, expert_msgs,
                                                    max(max_tokens, 3000), eu, expert_key,
-                                                   temperature=temperature):
+                                                   temperature=temperature,
+                                                   reasoning_effort=(req_reasoning_effort
+                                                                     if model_reasons(expert_model) else None)):
                                 out_total += d
                                 if not self._sse({"type": "delta", "text": d}):
                                     return
@@ -10857,7 +10876,9 @@ class Handler(BaseHTTPRequestHandler):
                                         eu = {}
                                         for d in venice_stream(fb, expert_msgs,
                                                                max(max_tokens, 3000), eu, fk,
-                                                               temperature=temperature):
+                                                               temperature=temperature,
+                                                               reasoning_effort=(req_reasoning_effort
+                                                                                 if model_reasons(fb) else None)):
                                             out_total += d
                                             if not self._sse({"type": "delta", "text": d}):
                                                 return
