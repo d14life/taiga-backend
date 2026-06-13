@@ -10145,6 +10145,21 @@ class Handler(BaseHTTPRequestHandler):
                 out = run_code_lang(cmd, "bash", timeout=20)
                 return self._json({"output": out, "owner": True, "local": True})
             self._json({"output": "", "error": res.get("error", "песочница недоступна")}, 502)
+        elif path == "/api/files":            # ФАЙЛЫ из персистентной сессии чата (Files-дерево; ИИ+юзер общие)
+            c = self._body()
+            uid = c.get("user", "default")
+            chat_id = str(c.get("chat_id") or "default")
+            action = c.get("action", "list")
+            fpath = str(c.get("path") or "")
+            import skills_run
+            if action == "read" and fpath:
+                safe = fpath.replace("'", "")
+                r = skills_run.sandbox_session_run(chat_id, "cat '" + safe + "' 2>&1 | head -c 50000")
+                return self._json({"content": r.get("output", "") if r.get("ok") else (r.get("error") or "")})
+            r = skills_run.sandbox_session_run(
+                chat_id, "find . -maxdepth 3 -not -path '*/.*' -type f 2>/dev/null | sed 's|^\\./||' | head -200")
+            files = [f for f in (r.get("output") or "").splitlines() if f.strip()] if r.get("ok") else []
+            self._json({"files": files, "ok": bool(r.get("ok"))})
         elif path == "/api/identity":
             c = self._body()
             uid = c.get("user", "default")
@@ -11284,6 +11299,41 @@ class Handler(BaseHTTPRequestHandler):
         cfg_mode = "brain" if req.get("brain") else ("web" if agent else "chat")
         model, max_tokens, system, active_tools = apply_user_config(
             uid, cfg_mode, model, max_tokens, system, active_tools)
+        # ОБЩАЯ ПЕСОЧНИЦА (#2): run_code/shell ИИ → ТА ЖЕ персистентная E2B-сессия чата, что и терминал
+        # юзера → ИИ и юзер ДЕЛЯТ файлы/состояние. Код пишем в файл через base64 (без ад-эскейпинга).
+        # E2B недоступен и владелец → локальный фолбэк (run_code работает и без песочницы).
+        _chat_sid = str(req.get("chat_id") or req.get("chat") or uid or "default")
+        if "run_code" in active_tools or "shell" in active_tools:
+            import skills_run as _sr, base64 as _b64
+            def _sess_code(args):
+                code = str(args.get("code") or "")
+                lang = str(args.get("lang") or "python").lower()
+                if lang in ("bash", "sh", "shell"):
+                    cmd = code
+                else:
+                    ext = "js" if lang in ("js", "javascript", "node") else "py"
+                    runner = "node" if ext == "js" else "python3"
+                    enc = _b64.b64encode(code.encode()).decode()
+                    cmd = ("echo " + enc + " | base64 -d > /tmp/_taiga_run." + ext
+                           + " && " + runner + " /tmp/_taiga_run." + ext)
+                r = _sr.sandbox_session_run(_chat_sid, cmd)
+                if r.get("ok"):
+                    return r.get("output", "")
+                if is_owner(uid):
+                    return run_code_lang(code, "bash" if lang in ("bash", "sh", "shell") else "python")
+                return "[песочница] " + (r.get("error") or "недоступна")
+            def _sess_shell(args):
+                cmd = str(args.get("cmd") or args.get("command") or "")
+                r = _sr.sandbox_session_run(_chat_sid, cmd)
+                if r.get("ok"):
+                    return r.get("output", "")
+                if is_owner(uid):
+                    return run_code_lang(cmd, "bash")
+                return "[песочница] " + (r.get("error") or "недоступна")
+            if "run_code" in active_tools:
+                active_tools["run_code"] = _sess_code
+            if "shell" in active_tools:
+                active_tools["shell"] = _sess_shell
         # temperature: сохранённый конфиг режима > значение из запроса (0..1.5, иначе дефолт)
         temperature = user_config_temperature(uid, cfg_mode, req.get("temperature"))
         # конфиг мог сменить модель — повторяем защиты: vision + потолок токенов
