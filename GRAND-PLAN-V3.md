@@ -8,7 +8,7 @@ Batches of ≤4 disjoint-file lanes. ≤1 server.py lane + ≤1 chat.tsx lane pe
 ## STATUS (source of truth for resume)
 - [x] BATCH 9  — RAG retrieval-quality (S) + pre-send cost (C) + schema param-form + server-persona editor — DONE (FE 7c98c79 / parent 06eb7a7)
 - [x] BATCH 10 — workflow-runner+negative_prompt (S) + workflows-wire + memory-budget sliders + brand-click catalog — DONE (FE 26f38a0 / parent e384123)
-- [ ] BATCH 11 — stream-recovery holdback (S) + hands-free voice loop (C) + real OOXML docx + per-model playground
+- [x] BATCH 11 — stream-recovery holdback (S) + hands-free voice loop (C) + real OOXML docx + per-model playground — DONE (FE 6e30c3a / parent next)
 - [ ] BATCH 12 — agent typed-events+permission-gate (S) + permission-modal + agent timeline + ACL-for-tools
 - [ ] BATCH 13 — RAG multimodal ingest (S) + image-studio param-form wire + catalog deep-filters + empty/error states pass
 - [ ] BATCH 14 — TaskPacket per-subtask model (S+orchestrator) + mobile/responsive deep polish (C) + onboarding depth + settings IA cleanup

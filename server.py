@@ -1954,7 +1954,11 @@ def _clean_temperature(temperature):
 def venice_stream(model: str, messages: list, max_tokens: int, usage_out: dict = None,
                   key: str = None, temperature=None):
     """Генератор дельт текста. key — конкретный ключ (BYOK/пул); если None — общий пул.
-    usage_out — складываем реальный расход токенов для биллинга.
+    usage_out — складываем реальный расход токенов для биллинга. Доп. ключ
+    usage_out["__finished__"]=True ставится ТОЛЬКО при ЧИСТОМ финише апстрима
+    ([DONE] или finish_reason) — отличает корректное завершение от обрыва/обрезки
+    SSE-потока у дешёвых провайдеров. Существующие читатели смотрят лишь
+    prompt/completion_tokens, поэтому ключ их не трогает (полная обратная совместимость).
     temperature — необязательная (0..1.5); при None провайдеру не шлём (его дефолт)."""
     prov = provider_for(model)
     key = key or global_key(provider_name(model))
@@ -1978,6 +1982,8 @@ def venice_stream(model: str, messages: list, max_tokens: int, usage_out: dict =
                 continue
             payload = line[5:].strip()
             if payload == "[DONE]":
+                if usage_out is not None:
+                    usage_out["__finished__"] = True   # явный чистый финиш апстрима
                 break
             try:
                 obj = json.loads(payload)
@@ -1988,9 +1994,14 @@ def venice_stream(model: str, messages: list, max_tokens: int, usage_out: dict =
                 usage_out["prompt_tokens"] = u.get("prompt_tokens") or usage_out.get("prompt_tokens", 0)
                 usage_out["completion_tokens"] = u.get("completion_tokens") or usage_out.get("completion_tokens", 0)
             try:
-                delta = obj["choices"][0]["delta"].get("content") or ""
+                choice0 = obj["choices"][0]
             except (KeyError, IndexError):
                 continue
+            # finish_reason на последнем choice — тоже признак ЧИСТОГО завершения
+            # (часть дешёвых провайдеров шлёт его вместо/раньше [DONE]).
+            if choice0.get("finish_reason") and usage_out is not None:
+                usage_out["__finished__"] = True
+            delta = (choice0.get("delta") or {}).get("content") or ""
             if delta:
                 yield delta
 
@@ -9056,10 +9067,42 @@ class Handler(BaseHTTPRequestHandler):
         expert_usage = {"prompt_tokens": 0, "completion_tokens": 0}
         out_total = ""
         steps = 0
+        # сколько ПРОЗЫ уже реально ушло юзеру (без учёта холдбэка). Если поток оборвут после того,
+        # как видимый текст уже полился, рестарт запрещён (иначе дубль) — финализируем мягко.
+        emitted_chars = 0
+        drop_retries = 0              # счётчик тихих ретраев именно на ОБРЫВ/ОБРЕЗ стрима (анти-цикл)
+        HOLDBACK = 24                 # хвост прозы держим до следующей дельты / чистого финиша
         tried = {stream_model}        # модели, что уже пробовали (для тихой подмены при сбое провайдера)
         while True:
             buf, buffering, got_any = "", True, False
+            hold = ""                 # ХОЛДБЭК: ещё не отданный хвост прозы (≤HOLDBACK симв.)
             u = {}
+
+            def _emit_prose(text):
+                """Отдать прозу через холдбэк: всё, кроме последних HOLDBACK символов, уходит
+                сразу; хвост придерживаем — обрезок tool-call-головы не утечёт видимой прозой до
+                того, как сработает восстановление. Возвращает False, если клиент отвалился."""
+                nonlocal hold, emitted_chars
+                hold += text
+                if len(hold) > HOLDBACK:
+                    send, hold = hold[:-HOLDBACK], hold[-HOLDBACK:]
+                    if send:
+                        emitted_chars += len(send)
+                        if not self._sse({"type": "delta", "text": send}):
+                            return False
+                return True
+
+            def _flush_prose():
+                """Чистый финиш: выпускаем удержанный хвост. После этого видимый текст
+                ПОБАЙТОВО идентичен тому, что отдавалось раньше без холдбэка."""
+                nonlocal hold, emitted_chars
+                if hold:
+                    send, hold = hold, ""
+                    emitted_chars += len(send)
+                    if not self._sse({"type": "delta", "text": send}):
+                        return False
+                return True
+
             try:
                 for delta in venice_stream(stream_model, msgs, max_tokens, u, stream_key,
                                            temperature=temperature):
@@ -9071,49 +9114,87 @@ class Handler(BaseHTTPRequestHandler):
                         if not head:
                             pass                       # ещё только пробелы — ждём первого значимого символа
                         elif not head.startswith(("{", "`", "<")):
-                            # обычная проза — отдаём сразу (как и раньше), холдбэк не для неё
+                            # обычная проза — отдаём (как и раньше), но через холдбэк-хвост
                             buffering = False
-                            if not self._sse({"type": "delta", "text": buf}):
+                            if not _emit_prose(buf):
                                 return
                             buf = ""
                         elif not _looks_like_tool_head(head, active_tools, steps):
                             # фенс/тег/«{», но это ЯВНО не зреющий tool-call (markdown-код, html, JSON-проза) →
                             # отпускаем как обычный текст, не держим до конца стрима
                             buffering = False
-                            if not self._sse({"type": "delta", "text": buf}):
+                            if not _emit_prose(buf):
                                 return
                             buf = ""
                         # иначе: голова всё ещё похожа на tool-call JSON — ДЕРЖИМ (даже хвост-обрезок не утечёт)
                     else:
-                        if not self._sse({"type": "delta", "text": delta}):
+                        if not _emit_prose(delta):
                             return
             except urllib.error.HTTPError as e:
                 detail = e.read().decode("utf-8", "ignore")[:300]
-                # провайдер лёг (502/429/5xx) И мы ещё НИЧЕГО не отдали → молча на следующую funded
-                if not got_any and e.code in (408, 409, 425, 429, 500, 502, 503, 504):
+                # провайдер лёг (502/429/5xx) И мы ещё НИЧЕГО видимого не отдали → молча на следующую funded.
+                # Видимым считаем уже отданную прозу (emitted_chars): рестарт не должен дублировать текст.
+                if emitted_chars == 0 and e.code in (408, 409, 425, 429, 500, 502, 503, 504):
                     nxt = _next_fallback_model(stream_model, tried, uid, has_images)
                     if nxt:
                         tried.add(nxt[0]); stream_model, stream_key = nxt
+                        # откатываем ВЕСЬ ещё-не-отданный текст этой попытки (буфер + удержанный хвост),
+                        # иначе он склеится с ответом запасной модели и испортит биллинг/контекст инструмента
+                        out_total = out_total[:len(out_total) - len(buf) - len(hold)]
                         continue
                 self._sse({"type": "error", "message": friendly_api_error(e.code, detail, has_images)})
                 return
             except Exception as e:
-                # сетевой обрыв/таймаут до первого байта → тоже пробуем запасную молча
-                if not got_any:
+                # сетевой обрыв/таймаут ПОСРЕДИ потока или до первого байта.
+                # Если видимого текста ещё не было — тихо пробуем запасную (двойной отправки нет).
+                if emitted_chars == 0:
                     nxt = _next_fallback_model(stream_model, tried, uid, has_images)
                     if nxt:
                         tried.add(nxt[0]); stream_model, stream_key = nxt
+                        out_total = out_total[:len(out_total) - len(buf) - len(hold)]
                         continue
-                self._sse({"type": "error", "message": friendly_api_error(None, str(e), has_images)})
-                return
+                # видимая проза уже полилась → НЕ рестартим (был бы дубль). Мягко финализируем:
+                # выпускаем удержанный хвост и доводим до биллинга/done на том, что успели получить.
+                if not _flush_prose():
+                    return
+                buffering = False
+                break
+            else:
+                # цикл завершился БЕЗ исключения — стрим апстрима закончился (чисто ИЛИ обрезан).
+                clean_finish = bool(u.get("__finished__"))
+                # видимого текста ещё не было (вся выдача — в буфере/холдбэке), значит рестарт без дубля возможен.
+                # Решаем, что это именно ОБРЕЗ (а не короткий полный ответ без finish-маркера):
+                #   • незавершённая голова tool-call (buffering ещё True) — почти всегда обрезок; ЛИБО
+                #   • удержанный хвост прозы обрывается НЕ на естественной границе (нет .!?…»)»`)
+                #     и провайдер не прислал чистого финиша.
+                _tail = (buf if buffering else hold).rstrip()
+                _looks_cut = bool(_tail) and _tail[-1] not in ".!?…»)\"'`}»。！？"
+                truncated = (not clean_finish and emitted_chars == 0
+                             and (buffering or _looks_cut) and drop_retries < 2)
+                if truncated:
+                    # ОБРЫВ/ОБРЕЗ SSE до видимого текста → ровно как существующий «провайдер лёг → молча
+                    # подменяем»: один тихий ретрай на запасной (или ту же) модель, без сырой ошибки
+                    # юзеру. Анти-цикл: ≤2 ретрая. Двойной отправки нет — видимого текста ещё не было.
+                    nxt = _next_fallback_model(stream_model, tried, uid, has_images)
+                    drop_retries += 1
+                    # сбрасываем ВЕСЬ ещё-не-отданный текст (недособранный буфер + удержанный хвост)
+                    out_total = out_total[:len(out_total) - len(buf) - len(hold)]
+                    if nxt:
+                        tried.add(nxt[0]); stream_model, stream_key = nxt
+                    # запасной нет → ретраим ту же модель (короткий обрыв у того же провайдера бывает разовым)
+                    continue
+                # чистый финиш, ЛИБО короткий полный ответ без маркера, ЛИБО обрыв ПОСЛЕ видимого текста
+                # (там рестарт = дубль). Во всех случаях выпускаем удержанный хвост прозы и идём дальше.
+                if not _flush_prose():
+                    return
 
             usage_total["prompt_tokens"] += u.get("prompt_tokens", 0)
             usage_total["completion_tokens"] += u.get("completion_tokens", 0)
 
-            if not got_any:
-                # стрим закрылся ЧИСТО, но без единой дельты (обрыв апстрима/пустой ответ до контента).
-                # Ничего юзеру ещё не ушло → тихо пробуем запасную funded-модель (двойной отправки нет,
-                # т.к. got_any=False). Только если запасной нет — показываем ошибку.
+            if not got_any and emitted_chars == 0:
+                # стрим закрылся без единой дельты И ничего видимого не ушло (обрыв апстрима/пустой ответ).
+                # Ничего юзеру ещё не отдано → тихо пробуем запасную funded-модель (двойной отправки нет).
+                # Только если запасной нет — показываем ошибку.
                 nxt = _next_fallback_model(stream_model, tried, uid, has_images)
                 if nxt:
                     tried.add(nxt[0]); stream_model, stream_key = nxt
