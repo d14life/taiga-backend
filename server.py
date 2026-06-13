@@ -926,16 +926,21 @@ def rag_delete(uid: str, name: str = "", workspace=None) -> list:
     _rag_save(uid, kept)
     return rag_docs(uid)
 
-def rag_ingest(uid: str, name: str, text: str, workspace=None) -> int:
+def rag_ingest(uid: str, name: str, text: str, workspace=None, source=None) -> int:
     """Документ → куски → эмбеддинги → хранилище юзера. Переиндексирует одноимённый.
-    workspace/chat_id (опц.) — тег рабочего пространства; пусто → 'global' (виден везде)."""
+    workspace/chat_id (опц.) — тег рабочего пространства; пусто → 'global' (виден везде).
+    source (опц.) — пометка происхождения кусков (напр. 'vision' для VLM-подписи скана/
+    картинки). None → поле не пишем вовсе → текстовые доки байт-в-байт как раньше."""
     ws = _rag_ws(workspace)
     chunks = _rag_chunks(text)
     # переиндексируем одноимённый док ТОЛЬКО в его рабочем пространстве
     items = [it for it in _rag_load(uid)
              if not (it.get("doc") == name and _rag_item_ws(it) == ws)]
     for ch in chunks:
-        items.append({"doc": name, "text": ch, "vec": _rag_embed(ch), "workspace": ws})
+        rec = {"doc": name, "text": ch, "vec": _rag_embed(ch), "workspace": ws}
+        if source:                       # тег только для не-текстовых источников; иначе схема не меняется
+            rec["source"] = source
+        items.append(rec)
     _rag_save(uid, items)
     return len(chunks)
 
@@ -959,9 +964,14 @@ def rag_query(uid: str, query: str, k: int = 4, workspace=None, include_global: 
     qv = _rag_embed(query)
     scored = [(it, _cosine(qv, it.get("vec") or [])) for it in items]
     scored.sort(key=lambda p: p[1], reverse=True)
-    return [{"doc": it["doc"], "text": it["text"], "score": round(sc, 3),
-             "workspace": _rag_item_ws(it)}
-            for it, sc in scored[:k]]
+    out = []
+    for it, sc in scored[:k]:
+        hit = {"doc": it["doc"], "text": it["text"], "score": round(sc, 3),
+               "workspace": _rag_item_ws(it)}
+        if it.get("source"):              # пометка источника (напр. 'vision') — только если есть
+            hit["source"] = it["source"]
+        out.append(hit)
+    return out
 
 
 # ── Серверный «умный поиск» по RAG: мульти-запрос + гибрид dense/keyword + RRF + реранк ──
@@ -6356,6 +6366,132 @@ def extract_file_text(name: str, raw: bytes) -> str:
         return "(не текстовый файл)"
 
 
+# ---------------------------------------------------------------- мультимодальный RAG (VLM-подпись)
+# Картинку (или скан-PDF без извлекаемого текста) НЕ выкинуть из RAG: зрячая модель
+# делает текстовое описание, и оно идёт в обычный chunk→embed конвейер. Текстовые доки
+# не затрагиваются вовсе (VLM зовём ТОЛЬКО для картинок / пустых PDF). Stdlib-only:
+# переиспользуем venice_complete (тот же не-стриминговый вызов, что и служебный RAG-реранк)
+# с OpenAI-style image_url-частью (как build_api_messages шлёт картинки зрячим моделям).
+
+_RAG_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff")
+_RAG_IMAGE_MIME = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
+    ".tif": "image/tiff", ".tiff": "image/tiff",
+}
+_RAG_CAPTION_MAX = 6000        # потолок длины VLM-подписи (символов) — дальше режем
+_RAG_PDF_PAGE_CAP = 4          # скан-PDF: сколько страниц-картинок максимум подписываем
+_RAG_VLM_PROMPT = ("Опиши подробно содержимое изображения/страницы: текст (дословно, если читается), "
+                   "таблицы, объекты, данные. Пиши на языке документа, без вступлений и оценок.")
+
+
+def _rag_is_image(name: str) -> bool:
+    return (name or "").lower().endswith(_RAG_IMAGE_EXTS)
+
+
+def _rag_image_data_url(name: str, raw: bytes) -> str:
+    """bytes картинки → data-URL для image_url-части (как фронт шлёт картинки в чат)."""
+    ext = "." + (name or "").lower().rsplit(".", 1)[-1] if "." in (name or "") else ".png"
+    mime = _RAG_IMAGE_MIME.get(ext, "image/png")
+    return "data:%s;base64,%s" % (mime, base64.b64encode(raw or b"").decode("ascii"))
+
+
+def _rag_pdf_looks_scanned(text: str) -> bool:
+    """Извлечённый из PDF текст подозрительно пуст/мал → вероятно скан (нужен VLM)."""
+    t = (text or "").strip()
+    if not t or t.startswith("(в PDF не нашёл") or t.startswith("(не смог прочитать pdf"):
+        return True
+    # очень мало читаемых букв на «документ» → почти наверняка скан/картинки
+    letters = sum(1 for ch in t if ch.isalnum())
+    return letters < 40
+
+
+def _rag_vision_model() -> str:
+    """Зрячая модель для подписи. Приоритет — курируемая 'vision'-категория, затем любая
+    vision-способная из живого каталога, иначе известный qwen3-vl (последний шанс)."""
+    for mid, _label, _note, cat in CURATED:
+        if cat == "vision" and vision_ok(mid):
+            return mid
+    for mid in CATALOG:
+        if vision_ok(mid):
+            return mid
+    return "qwen3-vl-235b-a22b"
+
+
+def _rag_vlm_caption(data_url: str, hint: str = "") -> str:
+    """ОДИН зрячий вызов: картинка + промпт-подпись → описательный текст (≤ _RAG_CAPTION_MAX).
+    Тихо возвращает '' при любом сбое (нет ключа/модели/сети) — ingest деградирует, не падает."""
+    model = _rag_vision_model()
+    if not data_url or not vision_ok(model):
+        return ""
+    prompt = _RAG_VLM_PROMPT + (("\n" + hint) if hint else "")
+    msgs = [{"role": "user", "content": [
+        {"type": "text", "text": prompt},
+        {"type": "image_url", "image_url": {"url": data_url}}]}]
+    try:
+        # тот же служебный пул-ключ, что и RAG-реранк/память (внутренний сервис, не пер-юзер биллинг)
+        cap = venice_complete(model, msgs, max_tokens=900, temperature=0.2) or ""
+    except Exception:
+        return ""
+    return cap.strip()[:_RAG_CAPTION_MAX]
+
+
+def rag_caption_payload(name: str, raw: bytes, extracted_text: str = None):
+    """Решает, нужен ли зрячий путь для этого файла, и если да — возвращает (caption, pages).
+    Картинка → 1 VLM-вызов. Скан-PDF (текст пуст/мизерный) → до _RAG_PDF_PAGE_CAP вызовов
+    (по странице-картинке, если их удаётся выделить; иначе один вызов по всему PDF как картинке).
+    Возвращает (None, 0) для обычных текстовых доков → зрячий путь НЕ трогается.
+    pages>_RAG_PDF_PAGE_CAP в логе означает усечение (подписали только первые N страниц)."""
+    low = (name or "").lower()
+    if _rag_is_image(name):
+        cap = _rag_vlm_caption(_rag_image_data_url(name, raw))
+        return (cap or None, 1 if cap else 0)
+    if low.endswith(".pdf") and _rag_pdf_looks_scanned(extracted_text):
+        # пытаемся вытащить встроенные картинки-страницы; если не вышло — подписываем PDF как одну картинку
+        pages, total = _rag_pdf_page_images(raw, _RAG_PDF_PAGE_CAP)
+        if total > _RAG_PDF_PAGE_CAP:     # картинок больше, чем cap → подписали только первые N
+            print("── RAG vision: скан-PDF %s — %d картинок, подписываю первые %d"
+                  % (name, total, _RAG_PDF_PAGE_CAP))
+        if pages:
+            caps = []
+            for i, (mime, img) in enumerate(pages):
+                hint = "Это страница %d сканированного PDF." % (i + 1)
+                cap = _rag_vlm_caption("data:%s;base64,%s" % (mime, base64.b64encode(img).decode("ascii")), hint)
+                if cap:
+                    caps.append("[стр. %d]\n%s" % (i + 1, cap))
+            text = "\n\n".join(caps)
+            return (text or None, len(caps))
+        cap = _rag_vlm_caption(_rag_image_data_url("scan.png", raw), "Это сканированный документ.")
+        return (cap or None, 1 if cap else 0)
+    return (None, 0)
+
+
+def _rag_pdf_page_images(raw: bytes, cap: int):
+    """Без сторонних либ: достаём встроенные JPEG-картинки из PDF-потоков (DCTDecode).
+    Возвращает (first_cap_images, total_found): берём ПЕРВЫЕ cap штук, но считаем сколько всего —
+    чтобы вызывающий мог залогировать усечение. Пусто — если распакованных JPEG нет (тогда
+    вызывающий подпишет PDF целиком как одну картинку)."""
+    out = []
+    total = 0
+    try:
+        # JPEG, встроенный в PDF поток: SOI ffd8ff ... EOI ffd9
+        pos = 0
+        while True:
+            i = raw.find(b"\xff\xd8\xff", pos)
+            if i < 0:
+                break
+            j = raw.find(b"\xff\xd9", i + 3)
+            if j < 0:
+                break
+            total += 1
+            if len(out) < cap:
+                out.append(("image/jpeg", raw[i:j + 2]))
+            pos = j + 2
+    except Exception:
+        return out[:cap], total
+    return out[:cap], total
+
+
 # ---------------------------------------------------------------- HTTP сервер
 
 def _now_ts() -> float:
@@ -7350,18 +7486,46 @@ class Handler(BaseHTTPRequestHandler):
         name = str(c.get("name") or "doc")
         ws = c.get("workspace", c.get("chat_id"))  # опц. рабочее пространство/чат; пусто → global
         text = c.get("text") or ""
+        source = None          # пометка кусков; остаётся None для обычных текстовых доков
+        # клиент прислал готовый текст → текстовый док, ничего нового не дёргаем (как раньше)
+        raw = b""
         if not text and c.get("raw_b64"):
             try:
-                text = extract_file_text(name, base64.b64decode(c["raw_b64"]))
+                raw = base64.b64decode(c["raw_b64"])
+            except Exception as e:
+                return self._json({"error": f"не декодировал файл: {e}"}, 400)
+            try:
+                text = extract_file_text(name, raw)
             except Exception as e:
                 return self._json({"error": f"не извлёк текст: {e}"}, 400)
+            # 👁 мультимодальный путь: картинка ИЛИ скан-PDF без извлекаемого текста →
+            # зрячая модель делает текстовую подпись, она и идёт в эмбеддинги (становится искомой).
+            # Текстовые доки (есть нормальный извлечённый текст) сюда НЕ заходят → VLM не зовётся.
+            if _rag_is_image(name) or (name.lower().endswith(".pdf") and _rag_pdf_looks_scanned(text)):
+                owner = is_owner(uid)
+                price = 0.02              # одна зрячая-подпись ≈ как upscale (метрим как медиа)
+                if not owner:
+                    # дешёвый PDF может дать до _RAG_PDF_PAGE_CAP вызовов → резервируем по верхней границе
+                    est = price * (_RAG_PDF_PAGE_CAP if name.lower().endswith(".pdf") else 1)
+                    need = round(est * (1 + load_billing().get("markup_pct", 50) / 100), 6)
+                    if user_balance(uid).get("balance", 0) < need:
+                        return self._json({"error": f"Недостаточно средств для распознавания: ~${need}. Пополни счёт.",
+                                           "need": need}, 402)
+                try:
+                    caption, pages = rag_caption_payload(name, raw, text)
+                except Exception as e:
+                    return self._json({"error": f"не распознал изображение: {e}"}, 502)
+                if caption:
+                    text, source = caption, "vision"
+                    if not owner and pages > 0:
+                        charge_media(uid, price * pages, kind="rag-vision")
         if not str(text).strip():
             return self._json({"error": "пустой документ"}, 400)
         try:
-            n = rag_ingest(uid, name, str(text), workspace=ws)
+            n = rag_ingest(uid, name, str(text), workspace=ws, source=source)
         except Exception as e:
             return self._json({"error": str(e)}, 502)
-        return self._json({"ok": True, "doc": name, "chunks": n,
+        return self._json({"ok": True, "doc": name, "chunks": n, "source": source,
                            "workspace": _rag_ws(ws), "docs": rag_docs(uid, ws)})
 
     def api_rag_query(self):
