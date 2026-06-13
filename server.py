@@ -10543,6 +10543,60 @@ class Handler(BaseHTTPRequestHandler):
             self._sse({"type": "cost", "owner": owner, **info})
         self._sse({"type": "done"})
 
+    def chat_agent_os(self, req):
+        """СЕССИОННЫЙ АГЕНТ-РЕЖИМ: сообщение чата = цель для харнеса (L15). Гоним agent_os.run
+        и стримим в ОБЫЧНОЙ chat-SSE-вокабуле (type: agent_phase/tool/delta/done), чтобы UI чата
+        показал таймлайн и финальный ответ без нового рендер-пути. Вся логика — в agent_os.py."""
+        import agent_os
+        uid = req.get("user", "default")
+        raw_messages = list(req.get("messages") or [])
+        goal = next((m.get("content") or "" for m in reversed(raw_messages)
+                     if m.get("role") == "user"), "")
+        # контекст = предыдущая история (без последнего user-сообщения)
+        ctx = "\n".join(f"{m.get('role')}: {m.get('content')}"
+                        for m in raw_messages[:-1] if isinstance(m.get("content"), str))[-4000:]
+        _tier = str(req.get("tier") or "").lower()
+        tier = _tier if _tier in ("cheap", "mid", "top") else None
+        owner = is_owner(uid)
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        if not goal.strip():
+            self._sse({"type": "error", "message": "Пустая цель для агента."}); return
+        if not owner:
+            need = round(0.05 * (1 + load_billing().get("markup_pct", 50) / 100), 6)
+            if user_balance(uid).get("balance", 0) < need:
+                self._sse({"type": "error",
+                           "message": f"Недостаточно средств: ~${need}. Пополни счёт."}); return
+
+        # мостим таймлайн харнеса в chat-SSE: фазы → agent_phase (UI может показать «думает/делает»),
+        # финал → delta (как обычный ответ). Финал шлём один раз по событию final.
+        def emit(kind, data):
+            if kind == "final":
+                self._sse({"type": "delta", "text": str(data.get("text") or "")})
+            elif kind == "act" and data.get("status") == "done":
+                self._sse({"type": "tool", "name": data.get("tool"),
+                           "ok": bool(data.get("ok"))})
+            else:
+                self._sse({"type": "agent_phase", "phase": kind, **{
+                    k: v for k, v in data.items() if k in
+                    ("label", "phase", "stage", "index", "total", "goal", "sub_goals",
+                     "verified", "reason", "attempt")}})
+
+        try:
+            deps = self._agent_os_deps(uid)
+            r = agent_os.run(deps, uid, goal, context=ctx, emit=emit, tier=tier)
+        except Exception as e:
+            traceback.print_exc(file=sys.stderr)
+            self._sse({"type": "error", "message": friendly_api_error(None, str(e))}); return
+        if not owner:
+            charge_media(uid, 0.05, kind="agent_os")
+        self._sse({"type": "done"})
+
     def chat_compare(self, req):
         """COMPARE-режим: тот же веер моделей, что и у «совета», но БЕЗ синтеза —
         каждый ответ показываем отдельной карточкой (member_answer)."""
@@ -10670,6 +10724,17 @@ class Handler(BaseHTTPRequestHandler):
         _ok, _emsg = _sec_messages_ok(req.get("messages"))
         if not _ok:
             return self._json({"error": _emsg}, 400)
+        # ── СЕССИОННЫЙ АГЕНТ-РЕЖИМ (Damir): «новые чаты стартуют агентом». Включается либо
+        # настройкой юзера (settings.agent_mode_default), либо явным флагом запроса (req.agent_os
+        # — индикатор «🤖 Агент» на чате). Тогда КАЖДОЕ сообщение этого чата идёт через харнес
+        # (scope→think→act→verify), а не одно-модельный ответ. Спец-режимы (совет/сравнение/…)
+        # имеют приоритет — их не перехватываем. Тонкая ветка: вся логика — в agent_os.py.
+        _sess_agent = bool(req.get("agent_os")) or bool(
+            load_settings(_uid).get("agent_mode_default"))
+        _other_mode = any(req.get(k) for k in ("relay", "research", "compare", "beam",
+                                               "council", "brain"))
+        if _sess_agent and not _other_mode:
+            return self.chat_agent_os(req)
         if req.get("relay"):
             return self.chat_relay(req)
         if req.get("research"):
