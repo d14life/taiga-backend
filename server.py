@@ -939,10 +939,20 @@ def rag_ingest(uid: str, name: str, text: str, workspace=None) -> int:
     _rag_save(uid, items)
     return len(chunks)
 
-def rag_query(uid: str, query: str, k: int = 4, workspace=None, include_global: bool = True) -> list:
+def rag_query(uid: str, query: str, k: int = 4, workspace=None, include_global: bool = True,
+              smart=False, **smart_opts) -> list:
     """Топ-k релевантных кусков по косинусу (для инъекции в контекст).
     workspace=None → ищем по всем докам юзера (как раньше). Задан → только это
-    рабочее пространство (+ глобальные доки юзера, если include_global)."""
+    рабочее пространство (+ глобальные доки юзера, если include_global).
+
+    smart=False (ДЕФОЛТ) — поведение байт-в-байт как раньше: один эмбеддинг запроса,
+    косинус по всем кускам в области видимости, топ-k. Ничего нового не дёргается.
+    smart=True — включает серверный «умный поиск» (мульти-запрос + гибридное слияние
+    dense/keyword через RRF + опц. LLM-реранк), см. rag_query_smart. smart_opts —
+    пробрасываются туда (variants/use_improve/rerank/rrf_k/per_k и т.п.)."""
+    if smart:
+        return rag_query_smart(uid, query, k=k, workspace=workspace,
+                               include_global=include_global, **smart_opts)
     items = [it for it in _rag_load(uid) if _rag_in_scope(it, workspace, include_global)]
     if not items:
         return []
@@ -954,9 +964,221 @@ def rag_query(uid: str, query: str, k: int = 4, workspace=None, include_global: 
             for it, sc in scored[:k]]
 
 
-def rag_context(uid: str, messages: list, workspace=None, include_global: bool = True) -> str:
+# ── Серверный «умный поиск» по RAG: мульти-запрос + гибрид dense/keyword + RRF + реранк ──
+# Зеркалит клиентские LangChain-паттерны из taiga-web/src/lib/rag.ts, но НАТИВНО на бэке:
+# MultiQuery (перефразы дешёвой моделью), Ensemble+RRF (слияние dense-косинуса и keyword),
+# опц. LLM-реранк топ-кандидатов. Всё stdlib-only, без новых зависимостей и без новой инфры.
+
+_RAG_RRF_K = 60            # константа Reciprocal Rank Fusion (LangChain-дефолт)
+_RAG_SMART_PER_K = 8       # сколько кусков тянем на КАЖДЫЙ под-запрос/канал до слияния
+_RAG_SMART_RERANK_N = 10   # сколько слитых кандидатов скармливаем LLM-реранку
+
+# Стоп-слова (RU+EN) — чтобы keyword-канал не цеплялся за служебные слова.
+_RAG_STOP = frozenset((
+    "и","в","во","не","что","он","на","я","с","со","как","а","то","все","она","так",
+    "его","но","да","ты","к","у","же","вы","за","бы","по","только","ее","мне","было",
+    "вот","от","меня","о","из","ему","теперь","когда","даже","ну","вдруг","ли","если",
+    "the","a","an","of","to","in","is","it","and","or","for","on","with","as","at","by",
+    "this","that","be","are","was","were","how","what","why","do","does","can","could",
+))
+
+
+def _rag_keywords(q: str) -> list:
+    """Ключевые слова запроса (>=3 символов, не стоп-слова), порядок+уникальность."""
+    seen, out = set(), []
+    for raw in re.split(r"[^\w]+", str(q or "").lower(), flags=re.UNICODE):
+        w = raw.strip()
+        if len(w) < 3 or w in _RAG_STOP or w in seen:
+            continue
+        seen.add(w)
+        out.append(w)
+    return out
+
+
+def _rag_keyword_rank(items: list, query: str, limit: int) -> list:
+    """Keyword-канал (LIKE/токен-оверлап) поверх уже-в-области-видимости кусков.
+    Никакой новой FTS-инфры: считаем долю терминов запроса, встретившихся в куске
+    (+небольшой бонус за фразовое вхождение). Возвращает топ-limit items в порядке убывания."""
+    kw = _rag_keywords(query)
+    if not kw:
+        return []
+    ql = str(query or "").strip().lower()
+    scored = []
+    for it in items:
+        low = (it.get("text") or "").lower()
+        if not low:
+            continue
+        hits = sum(1 for w in kw if w in low)
+        if not hits:
+            continue
+        score = hits / len(kw)
+        if ql and len(ql) >= 4 and ql in low:     # точное фразовое вхождение — бонус
+            score += 0.5
+        scored.append((it, score))
+    scored.sort(key=lambda p: p[1], reverse=True)
+    return [it for it, _ in scored[:limit]]
+
+
+def _rag_rrf_merge(ranked_lists: list, rrf_k: int = _RAG_RRF_K) -> list:
+    """Reciprocal Rank Fusion: на каждый ранжированный список кусков прибавляем
+    1/(k+rank) к слитому скору куска. Дедуп по (doc, нормализованный текст). Возвращает
+    [(item, fused_score), ...] по убыванию. Сохраняем лучший исходный косинус в item."""
+    acc = {}            # key → {"it": item, "fused": float}
+    for lst in ranked_lists:
+        for rank, ent in enumerate(lst):
+            it = ent[0] if isinstance(ent, tuple) else ent
+            dense = ent[1] if isinstance(ent, tuple) else None
+            key = (it.get("doc") or "", (it.get("text") or "").strip().lower())
+            gain = 1.0 / (rrf_k + rank + 1)        # ранги нумеруем с 1
+            slot = acc.get(key)
+            if slot is None:
+                slot = {"it": it, "fused": 0.0, "dense": None}
+                acc[key] = slot
+            slot["fused"] += gain
+            if dense is not None and (slot["dense"] is None or dense > slot["dense"]):
+                slot["dense"] = dense
+    out = [(s["it"], s["fused"], s["dense"]) for s in acc.values()]
+    out.sort(key=lambda p: p[1], reverse=True)
+    return out
+
+
+def _rag_rewrite_queries(query: str, want: int) -> list:
+    """MultiQuery: оригинал + до (want-1) перефразировок дешёвой aux-моделью.
+    Тихо деградирует к эвристике (голые ключевые слова), если LLM недоступен/пуст.
+    Всегда содержит оригинал первым, дедуп без учёта регистра."""
+    q = (query or "").strip()
+    out = [q] if q else []
+    want = max(1, int(want))
+    if want <= 1 or not q:
+        return out[:want]
+    # эвристический запасной вариант — голые ключевые слова (двигает эмбеддинг к сути)
+    kw = _rag_keywords(q)
+    heur = " ".join(kw[:6]) if len(kw) >= 2 else ""
+    try:
+        n = max(1, want - 1)
+        sys = ("Ты — генератор поисковых перефразировок. Дай РОВНО %d коротких "
+               "переформулировок запроса другими словами, сохранив смысл. По одной "
+               "на строку, без нумерации, без пояснений." % n)
+        raw = venice_complete(aux_model("improve"),
+                              [{"role": "system", "content": sys},
+                               {"role": "user", "content": q}],
+                              max_tokens=160, temperature=0.4)
+        for line in (raw or "").splitlines():
+            cand = re.sub(r"^\s*[-*\d.)\]]+\s*", "", line).strip().strip('"').strip()
+            if cand and cand.lower() != q.lower() and cand.lower() not in (x.lower() for x in out):
+                out.append(cand)
+            if len(out) >= want:
+                break
+    except Exception:
+        pass
+    if len(out) < want and heur and heur.lower() not in (x.lower() for x in out):
+        out.append(heur)
+    return out[:want]
+
+
+def _rag_llm_rerank(query: str, hits: list, top_n: int) -> list:
+    """Опц. LLM-реранк: один дешёвый вызов оценивает релевантность топ-кандидатов 0..1,
+    переставляет их. Тихо возвращает исходный порядок при любом сбое/невалидном ответе.
+    hits — list[dict] (как наружу из rag_query); реранжируем только первые top_n."""
+    head = hits[:top_n]
+    if len(head) < 2:
+        return hits
+    try:
+        listing = "\n".join("[%d] %s" % (i, (h.get("text") or "")[:500])
+                            for i, h in enumerate(head))
+        sys = ("Ты — реранкер релевантности. Для каждого фрагмента оцени, насколько он "
+               "релевантен запросу, числом от 0 до 1. Ответ — СТРОГО JSON-массив объектов "
+               '{"i": <индекс>, "s": <0..1>} без пояснений.')
+        usr = "Запрос: %s\n\nФрагменты:\n%s" % (query, listing)
+        raw = venice_complete(aux_model("improve"),
+                              [{"role": "system", "content": sys},
+                               {"role": "user", "content": usr}],
+                              max_tokens=300, temperature=0.0)
+        m = re.search(r"\[.*\]", raw or "", re.DOTALL)
+        if not m:
+            return hits
+        scores = {}
+        for o in json.loads(m.group(0)):
+            try:
+                idx = int(o.get("i"))
+                sc = float(o.get("s"))
+            except Exception:
+                continue
+            if 0 <= idx < len(head):
+                scores[idx] = max(0.0, min(1.0, sc))
+        if not scores:
+            return hits
+        order = sorted(range(len(head)),
+                       key=lambda i: scores.get(i, 0.0), reverse=True)
+        reranked = []
+        for i in order:
+            h = dict(head[i])
+            h["rerank"] = round(scores.get(i, 0.0), 3)
+            reranked.append(h)
+        return reranked + hits[top_n:]
+    except Exception:
+        return hits
+
+
+def rag_query_smart(uid: str, query: str, k: int = 4, workspace=None,
+                    include_global: bool = True, variants=3, use_improve: bool = True,
+                    rerank: bool = True, per_k=None, rrf_k=None) -> list:
+    """Серверный «умный поиск»: мульти-запрос + гибрид dense(косинус)/keyword + RRF [+ LLM-реранк].
+    Область видимости (_rag_in_scope) соблюдается ВЕЗДЕ — фильтруем items один раз, до слияния.
+    Деградирует к обычному косинусу при любом сбое перефраз/эмбеддингов/реранка.
+    variants — сколько под-запросов всего (вкл. оригинал, 1..3); use_improve — звать ли LLM
+    для перефраз; rerank — звать ли LLM-реранк топ-кандидатов; per_k/rrf_k — тюнинг."""
+    items = [it for it in _rag_load(uid) if _rag_in_scope(it, workspace, include_global)]
+    if not items:
+        return []
+    per_k = int(per_k) if per_k else max(int(k), _RAG_SMART_PER_K)
+    rrf_k = int(rrf_k) if rrf_k else _RAG_RRF_K
+    # 1) MultiQuery — оригинал + перефразы (LLM или эвристика). use_improve=False → только эвристика.
+    want = max(1, min(int(variants or 1), 3))
+    queries = _rag_rewrite_queries(query, want if use_improve else 1)
+    if not use_improve and want > 1:
+        kw = _rag_keywords(query)
+        if len(kw) >= 2:
+            queries.append(" ".join(kw[:6]))
+    # 2) Dense-канал на каждый под-запрос (эмбеддинг + косинус по items в области видимости).
+    ranked_lists = []
+    for sub in queries:
+        try:
+            qv = _rag_embed(sub)
+        except Exception:
+            continue
+        scored = [(it, _cosine(qv, it.get("vec") or [])) for it in items]
+        scored.sort(key=lambda p: p[1], reverse=True)
+        ranked_lists.append(scored[:per_k])
+    # 3) Keyword-канал (LIKE/токен-оверлап) на оригинальный запрос — гибрид.
+    kw_hits = _rag_keyword_rank(items, query, per_k)
+    if kw_hits:
+        ranked_lists.append(kw_hits)
+    # Полный провал dense-канала (нет эмбеддингов) → отдаём чистый keyword-результат, если есть;
+    # иначе мягкий фолбэк на классический косинус по оригиналу (чтобы НИКОГДА не вернуть пусто зря).
+    if not ranked_lists:
+        return rag_query(uid, query, k=k, workspace=workspace, include_global=include_global)
+    # 4) RRF-слияние всех каналов.
+    fused = _rag_rrf_merge(ranked_lists, rrf_k)
+    # топ-кандидаты в формат наружу; score = лучший исходный косинус (для порога ragBlock на фронте)
+    cand_n = max(int(k), _RAG_SMART_RERANK_N) if rerank else int(k)
+    hits = []
+    for it, fscore, dense in fused[:cand_n]:
+        hits.append({"doc": it["doc"], "text": it["text"],
+                     "score": round(dense, 3) if dense is not None else 0.0,
+                     "fused": round(fscore, 5),
+                     "workspace": _rag_item_ws(it)})
+    # 5) Опц. LLM-реранк топ-N, затем срез до k.
+    if rerank:
+        hits = _rag_llm_rerank(query, hits, _RAG_SMART_RERANK_N)
+    return hits[:k]
+
+
+def rag_context(uid: str, messages: list, workspace=None, include_global: bool = True,
+                smart=False) -> str:
     """Если у юзера есть загруженные доки — подмешиваем релевантные куски в системный промпт чата.
-    workspace (опц.) ограничивает поиск рабочим пространством текущего чата; пусто → все доки юзера."""
+    workspace (опц.) ограничивает поиск рабочим пространством текущего чата; пусто → все доки юзера.
+    smart=False (ДЕФОЛТ) — обычный косинус-топ-4 (как раньше). smart=True — серверный умный поиск."""
     try:
         if not rag_docs(uid, workspace, include_global):
             return ""
@@ -969,7 +1191,8 @@ def rag_context(uid: str, messages: list, workspace=None, include_global: bool =
                 break
         if not last.strip():
             return ""
-        hits = rag_query(uid, last, k=4, workspace=workspace, include_global=include_global)
+        hits = rag_query(uid, last, k=4, workspace=workspace,
+                         include_global=include_global, smart=bool(smart))
         if not hits:
             return ""
         try:
@@ -7006,8 +7229,24 @@ class Handler(BaseHTTPRequestHandler):
         q = str(c.get("query") or "").strip()
         if not q:
             return self._json({"error": "пустой запрос"}, 400)
+        # smart=off (дефолт) → обычный косинус-топ-k, как раньше. smart=on → серверный
+        # умный поиск (мульти-запрос + гибрид RRF + опц. LLM-реранк). Опции принимаем из
+        # тела (словарь rag.ts RagQueryMultiOpts): variants/useImprove/rerank/rrfK/perK.
+        smart = bool(c.get("smart"))
+        opts = {}
+        if smart:
+            if c.get("variants") is not None:
+                opts["variants"] = int(c.get("variants"))
+            if c.get("useImprove") is not None:
+                opts["use_improve"] = bool(c.get("useImprove"))
+            if c.get("rerank") is not None:
+                opts["rerank"] = bool(c.get("rerank"))
+            if c.get("rrfK") is not None:
+                opts["rrf_k"] = int(c.get("rrfK"))
+            if c.get("perK") is not None:
+                opts["per_k"] = int(c.get("perK"))
         try:
-            hits = rag_query(uid, q, int(c.get("k") or 4), workspace=ws)
+            hits = rag_query(uid, q, int(c.get("k") or 4), workspace=ws, smart=smart, **opts)
         except Exception as e:
             return self._json({"error": str(e)}, 502)
         return self._json({"hits": hits, "docs": rag_docs(uid, ws)})
@@ -8496,7 +8735,9 @@ class Handler(BaseHTTPRequestHandler):
         # RAG: подмешать релевантные куски доков юзера. Если фронт прислал workspace/chat_id —
         # ищем в этом рабочем пространстве (+ глобальные доки); иначе — по всем докам юзера.
         _rag_ws_req = req.get("rag_workspace", req.get("workspace", req.get("chat_id")))
-        system += rag_context(uid, raw_messages, workspace=_rag_ws_req)
+        # smart=off (дефолт) → обычный косинус-топ-4, как раньше; фронт включает «умный поиск» флагом.
+        _rag_smart = bool(req.get("rag_smart") or req.get("smart_rag"))
+        system += rag_context(uid, raw_messages, workspace=_rag_ws_req, smart=_rag_smart)
         system += datetime.now().strftime("\nСегодня %Y-%m-%d (%A), время %H:%M.")
         if agent:
             system += "\n" + TOOLS_PROMPT

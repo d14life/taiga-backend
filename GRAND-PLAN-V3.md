@@ -6,7 +6,7 @@ HONEST SCOPE NOTE: 3 independent scrapers verified the 40+ planning docs are ~95
 Batches of ≤4 disjoint-file lanes. ≤1 server.py lane + ≤1 chat.tsx lane per batch (god-file contention). Agents build+verify (tsc/ast) but DON'T commit; coordinator merges/verifies/commits each batch. Commit LOCAL only (never push). Self-reschedule until done. Live: backend :8777, dev :3000.
 
 ## STATUS (source of truth for resume)
-- [ ] BATCH 9  — RAG retrieval-quality (S) + pre-send cost (C) + schema param-form + server-persona editor
+- [x] BATCH 9  — RAG retrieval-quality (S) + pre-send cost (C) + schema param-form + server-persona editor — DONE (FE 7c98c79 / parent 06eb7a7)
 - [ ] BATCH 10 — workflow-runner+negative_prompt (S) + workflows-wire + memory-budget sliders + brand-click catalog
 - [ ] BATCH 11 — stream-recovery holdback (S) + hands-free voice loop (C) + real OOXML docx + per-model playground
 - [ ] BATCH 12 — agent typed-events+permission-gate (S) + permission-modal + agent timeline + ACL-for-tools
