@@ -25,9 +25,9 @@ Priority: L3 · L4a · L4b · L4c · L19 · L20 · L4f · L6 · L7 · L8 · L9 �
 - [ ] L3 reasoning dial: for models that IGNORE reasoning_effort (grok-nano, deepseek),
         try alternate params (reasoning:{effort}, thinking, extra_body); measure low-vs-high;
         store per-model which param actually deepens. Fall back to prompt-nudge + token floor.
-- [ ] L4a TIERS (Damir): cheapest/mid/top cost-tiers. Each model gets a cost-tier from its $/token.
-        "Auto" within a tier = best_for_task() filtered to that tier → "best CHEAP model for this code task".
-        Backend: cost_tier(model) + best_for_task(task, tier). UI: tier selector chip.
+- [~] L4a TIERS (Damir): BACKEND DONE (1a1ad02) — cost_tier(model) + best_for_task(task,tier) wired into
+        auto + auto-Brain; tier_cost exposed per model. REMAINING: UI tier-selector chip (cheap/mid/top)
+        on the main pad → send req.tier. "best CHEAP model for this code task" works (deepseek-v4 bench 95).
 - [x] L4d Beam=Council merge: Council always uses fusion-critic synthesis; Beam absorbed.  (d02a073)
         VERIFIED taxonomy: Brain=triage/one-leads · Council=N deliberate→fuse · Heavy/Research=single-model.
 - [ ] L4b Mode taxonomy cleanup (Damir-confirmed): Heavy = SINGLE-model max-intensity mode (NOT Brain);
