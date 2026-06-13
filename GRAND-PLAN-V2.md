@@ -11,8 +11,8 @@ Rule: ≤1 server.py lane + ≤1 chat.tsx lane per batch (god-file contention). 
 - [x] BATCH 5 — Beam-fusion, camera+Beam-UI, cron-triggers, sub-meters — DONE (FE 07ba126 / parent c6fc7d5)
 - [x] BATCH 6 — Aider-editblock, OpenHands-risk-gate, richer-RAG-retrievers, model-catalog-badges — DONE (FE b561887 / parent 0f163f2)
 - [x] BATCH 7 — wire smart-RAG+risk-gate, usage-log refactor, MCP-at-creation+memory-budget, custom-instructions+changelog — DONE (FE ae6df49 / parent 8020f0b)
-- [x] BATCH 8 — per-chat RAG workspace, assistant-ui tool-cards, workflow-marketplace, MCP-picker-in-builders — DONE (FE 9a4e364 / parent PENDING)
-- [ ] FINAL — full code review + smoke + report
+- [x] BATCH 8 — per-chat RAG workspace, assistant-ui tool-cards, workflow-marketplace, MCP-picker-in-builders — DONE (FE 9a4e364 / parent 320da29)
+- [x] FINAL — full code review (batches 7-8, zero blockers) + smoke (all green) + report — DONE
 
 ## LANES (each = dedicated agent; detailed prompt at dispatch)
 ### BATCH 1
@@ -72,8 +72,8 @@ Rule: ≤1 server.py lane + ≤1 chat.tsx lane per batch (god-file contention). 
 - ACE-Step free music — needs provider/host.
 - Face-swap deepfake consent guard — Damir-deferred (FINISH-PLAN ОТЛОЖЕНО).
 
-## ✅ FINAL SUMMARY (overnight build complete — all 6 batches + final review)
-All 6 batches DONE, verified (tsc=0 / build PASS / backend smoke green / FTS+council+studio+skills smoke green), committed LOCALLY (never pushed). Final code-review run: cleared as ship-able; the one 🔴 it found (heuristic tool-parser misfiring on prose-JSON in agent mode) was FIXED + verified.
+## ✅ FINAL SUMMARY (overnight build complete — all 8 batches + final review)
+All 8 batches DONE, verified (tsc=0 / build PASS / backend smoke green: init 200 · chat+council stream meta→delta→cost→done · search_chats POST · per-chat RAG back-compat runtime-tested), committed LOCALLY (never pushed). Two final code-review passes: batches 1-6 cleared (one 🔴 — heuristic parser misfiring on prose-JSON — FIXED+verified); batches 7-8 cleared with ZERO blockers (reviewer seeded a legacy no-workspace RAG chunk and confirmed it's still returned in every scope and survives a workspace delete — NO silent data loss).
 
 ### Shipped this session
 - **Robustness:** instruction-source boundary (anti prompt-injection), anti-copy-loop, scoped memory, lean conditional prompt, stream-recovery (holdback + cut-retry + tool-JSON repair), heuristic tool-parser (loose formats on non-function-calling models, prose-JSON-safe).
@@ -85,14 +85,19 @@ All 6 batches DONE, verified (tsc=0 / build PASS / backend smoke green / FTS+cou
 - **UI:** Light/Dark/System + font picker; full model-catalog screen (filters/categories/badges) + dedicated catalog page; usage-analytics dashboard; background-tasks panel; subscription meters (owner); onboarding capability-cards; camera capture; mobile pass (sidebar drawer + 6 panels + tablet breakpoint); premium $100M landing redesign; unified skill/agent registry.
 - **Billing/cron:** total-balance across 5 wallets + live refresh; free=owner-only; subscription hidden from users; usage-log from cost events; cron weekday/time triggers.
 - **Security/QA:** /api/users auth hole closed; cinema-export SSRF+gating; prefixed-model-ID fix; friendly provider errors + silent fallback; vision verified; td3 fast-fail; 14-bug sweep.
+- **Parity polish (batches 7-8):** smart multi-query RAG now WIRED behind a «умный поиск» toggle in the send path; OpenHands risk-gate (riskOf/policyFor/gateAction) now WIRED into the agent permission flow (server _perm_check still authoritative); recordUsage/loadUsage moved to lib/usage-log.ts (component re-exports for back-compat); MCP-connector-attach-at-creation (owner-gated, SSRF-guarded, tokens Fernet-encrypted) + MCP-picker in agent/skill builders; memory budget knobs (protected-recent 2-40 + max-memory-chars 200-2000, clamped, unconfigured users keep prior 6/600 defaults); per-chat RAG workspace scope (AnythingLLM pattern — tag chunks by chat_id, query-within-this-chat, legacy global chunks still resolve); assistant-ui-style structured tool-call cards; workflow gallery (Templates/Мои/Опубликованные); ChatGPT-style custom-instructions + changelog feed.
 
 ### Known follow-ups (non-blocking — for founder review)
-- Smart multi-query RAG (lib/rag ragSearch) is built but the chat send path still calls plain ragQuery — wire behind a "умный поиск" toggle (multi-query adds latency/cost, so not default-on).
-- lib/decision.ts riskOf/policyFor gate is exported but not yet consumed by chat.tsx's permission flow (existing toolRisk/shouldAsk still drive it; new gate is advisory-ready).
-- recordUsage imported into use-taiga-chat from a component — works (SSR-guarded), but belongs in a lib/usage-log.ts (architecture tidy).
+- ~~Smart multi-query RAG behind a toggle~~ → DONE (batch 7: «умный поиск» toggle wires ragSearch into the send path).
+- ~~riskOf/policyFor gate consumed by chat.tsx~~ → DONE (batch 7: gateAction in runCommand; server _perm_check still authoritative).
+- ~~recordUsage moved to lib/usage-log.ts~~ → DONE (batch 7).
+- Per-chat RAG workspace scope is in the backend + builders, but the main chat send path does NOT yet pass chat_id/workspace, so RAG still searches ALL docs by default (back-compat). Wire chat.tsx to send the active chat_id when "query within this chat" is desired (frontend follow-up).
+- McpConnectSection is duplicated in agent-builder.tsx and skill-builder.tsx — extract to a shared component (DRY tidy).
+- MCP `ensure`/`attach` returns HTTP 200 even on SSRF/bad-URL rejection (body carries {ok:false,error}); frontend reads r.ok/r.error correctly so UX is fine, but inconsistent with action:"add" (400). Cosmetic.
+- Plan-mode deny on a mutating tool drops the typed command + clears the input with a toast — intended; confirm the toast wording is clear enough for the user.
 - Heuristic parser recovers fenced/<tool_call>/name(args)/name:value formats; bare unquoted positional (`TOOL: web_search курс`) falls through to prose (safe, not a regression).
 - Edit-block whitespace/anchor fallback normalizes CRLF→LF (cosmetic; exact-match path preserves bytes).
 
 ### Deferred (need founder keys/infra/decision — see DEFERRED list above): payments, self-hosted ML voice/guard, sqlite-vec, E2B sandbox, ComfyUI/manim/FLUX-schnell free-media, Taiga-Coder v2 autonomous loop, GPU host, desktop app, social publishing, login UI, ACE-Step, deepfake guard.
 
-STATUS: autonomous loop STOPPED (all batches done). Live: backend :8777, dev :3000. All work in local git (16 batch commits af5e1bb→0f163f2 + final fix).
+STATUS: autonomous loop STOPPED (all 8 batches done + final review cleared, zero blockers). Live: backend :8777, dev :3000. All work in local git, NEVER pushed (parent af5e1bb→320da29 / FE 930d121→9a4e364, ~18 batch commits + final fix). No wake-up rescheduled — overnight build complete.
