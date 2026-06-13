@@ -19,7 +19,7 @@ ANOTHER claude session may also work this repo — collision-guard before EVERY 
    Tick the checkbox here. Restart backend if server.py changed.
 5. Append ONE casual plain-English line to WHATS-NEW.md: "✨ <feature> — <what it does for the user>".
 Rules: NEVER auto-pick dead models. server.py edits sequential. L13 BLOCKED on Damir's harness repo link = skip.
-Priority: L11 · L12 · L18 · L15 · L16 · L14 · L3 · L21 · L22
+Priority: L12 · L18 · L15 · L16 · L14 · L3 · L21 · L22
 
 ## DONE (committed)
 - [x] L0 Agent S identity rename + name-stamp fix + default-leak fix        (5f8c24e)
@@ -145,7 +145,10 @@ Priority: L11 · L12 · L18 · L15 · L16 · L14 · L3 · L21 · L22
         (folderInstrBlock → composeSystem грунтует все чаты папки); «проект» кнопка+модалка когда чат в папке;
         features.ts soon→live. VERIFIED live (сейв персистит в taiga.folders). Group chats✓ + instructions✓;
         shared FILES + shared MEMORY проекта = следующий слой (на существующих files/RAG + memory).
-- [ ] L11 Voice hands-free mode: continuous listen→answer→speak loop on free stack (NanoGPT TTS +
+- [x] L11 Voice hands-free — DONE (taiga-web 2c98677): continuous loop ALREADY built (handsfree→autoSpeak,
+        onSpeechEnd→submit, rearmMic on TTS end; free Google TTS + browser STT + paid nanogpt). ADDED premium
+        voice dropdown: ElevenLabs BYOK (key in settings, direct browser call, graceful fallback to free).
+        (Cartesia addable identically.) continuous listen→answer→speak loop on free stack (NanoGPT TTS +
         browser STT), dedicated voice UI; premium voice dropdown (Cartesia/ElevenLabs BYOK).
 - [ ] L12 Skills→real: bundle runnable steps, auto-trigger skill search in normal chat, richer builder.
 
