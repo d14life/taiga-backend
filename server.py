@@ -45,6 +45,7 @@ from io import BytesIO
 from pathlib import Path
 import ad_gen                       # L14: UGC-видеореклама (сценарии по брифу) — pure helpers, lazy server ref
 import screen_copilot               # L21: со-пилот по экрану (кадр→зрячая модель→подсказка) — pure helpers
+import video_rag                    # L22: веб-видео → транскрипт+кадры → RAG-стор — pure helpers, lazy server ref
 
 ROOT = Path(__file__).parent
 BASE = Path("~/.mostik-ai").expanduser()
@@ -9968,6 +9969,24 @@ class Handler(BaseHTTPRequestHandler):
             self._json(out)
         elif path == "/api/rag_ingest":       # RAG: документ → эмбеддинги (бэкенд)
             self.api_rag_ingest()
+        elif path == "/api/video_rag":        # L22: веб-видео → транскрипт+кадры → RAG-стор юзера
+            c = self._body()
+            uid = c.get("user", "default")
+            if not self._ip_guard(uid):
+                return
+            url = str(c.get("url") or "")
+            owner = is_owner(uid)
+            with_frames = c.get("frames", True) is not False
+            if not owner and user_balance(uid).get("balance", 0) <= 0:
+                return self._json({"error": "Баланс исчерпан. Пополни счёт."}, 402)
+            out = video_rag.ingest_video(
+                sys.modules[__name__], uid, url,
+                name=str(c.get("name") or ""),
+                workspace=c.get("workspace", c.get("chat_id")),
+                with_frames=with_frames)
+            if out.get("ok") and not owner and "кадры" in (out.get("parts") or []):
+                out.update(charge_media(uid, 0.06, kind="video-rag"))  # 3 зрячих кадра ≈ как rag-vision
+            self._json(out)
         elif path == "/api/rag_query":        # RAG: семантический поиск по докам
             self.api_rag_query()
         elif path == "/api/rag_delete":       # RAG: удалить документ
