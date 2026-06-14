@@ -3744,14 +3744,48 @@ def _recently_empty(model_id: str) -> bool:
     return _AUX_EMPTY.get(strip_model_prefix(model_id), 0) > time.time() - _AUX_EMPTY_TTL
 
 
+def _live_funded_model(role: str) -> str:
+    """Живая модель у НЕ-просевшего провайдера из живого каталога — когда ВСЯ цепочка роли
+    мертва (классика: весь дефолт на Venice, а Venice в 402 → раньше авто-выбор садился на
+    мёртвую модель и стрим висел без ошибки). Для дешёвых/чат-ролей берём самую дешёвую живую,
+    иначе — самую умную живую. Картинки/голос пропускаем."""
+    if not RICH:
+        return ""
+    cheap_roles = ("cheap", "chat", "plan", "style", "memory", "compress", "improve", "craft")
+    cands = []
+    for r in RICH:
+        mid = r.get("id", "")
+        if not mid:
+            continue
+        prov = r.get("provider") or provider_name(mid)
+        if provider_degraded(prov) or is_phantom(mid) or _recently_empty(mid):
+            continue
+        if r.get("kind") in ("image", "voice"):
+            continue
+        cands.append(r)
+    if not cands:
+        return ""
+    if role in cheap_roles:
+        cands.sort(key=lambda r: (r.get("per1k") or 0))      # дешевле первым
+    else:
+        cands.sort(key=lambda r: -(r.get("smart") or 0))     # умнее первым
+    return cands[0].get("id", "")
+
+
 def _first_live(role: str) -> str:
-    """Первая НЕ-фантомная и НЕ-недавно-пустая модель из цепочки роли. Все мёртвы → первая не-фантом
-    → последняя (хоть что-то). Так авто-выбор НИКОГДА не сядет на мёртвую/нестабильную модель."""
+    """Первая НЕ-фантомная, НЕ-недавно-пустая модель У ЖИВОГО провайдера из цепочки роли.
+    Вся цепочка на просевшем провайдере (напр. весь дефолт на Venice 402) → берём живую модель
+    у ОПЛАЧЕННОГО провайдера из каталога. Так авто-выбор НИКОГДА не сядет на мёртвую модель и
+    не повесит стрим (это и был баг дизайн-канваса: «движок думает…» вечно)."""
     chain = _MODEL_FALLBACK.get(role) or [DEFAULTS.get(role, CHEAP_MODEL)]
     for mid in chain:
-        if not is_phantom(mid) and not _recently_empty(mid):
+        if not is_phantom(mid) and not _recently_empty(mid) and not provider_degraded(provider_name(mid)):
             return mid
-    for mid in chain:                 # все недавно-пустые? игнорим TTL, берём хотя бы не-фантом
+    # вся цепочка роли — на мёртвом/просевшем провайдере → живая модель у оплаченного провайдера
+    alt = _live_funded_model(role)
+    if alt:
+        return alt
+    for mid in chain:                 # совсем ничего живого в каталоге → хотя бы не-фантом из цепочки
         if not is_phantom(mid):
             return mid
     return chain[-1]
