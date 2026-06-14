@@ -846,23 +846,44 @@ def _smart_score(r: dict) -> float:
 
 
 def _council_models(n: int) -> list:
-    """Топ-N моделей для «совета»: умные генералисты/думающие, по одной с провайдера (разнообразие)."""
+    """Топ-N моделей для «совета»: умные генералисты/думающие, по одной с провайдера (разнообразие).
+    Совет НЕ должен блокироваться лежащим провайдером (напр. Venice 402/down): сначала сеем
+    участников на ЖИВЫХ провайдерах из COUNCIL_DEFAULT_MODELS (env-конфигурируемо), затем добиваем
+    топ-моделями каталога для разнообразия. Дедуп по id (без префикса), кап n."""
+    picked, seen_prov, seen_id = [], set(), set()
+
+    def _add(rec):
+        _bare = strip_model_prefix(rec["id"])
+        if _bare in seen_id:
+            return
+        picked.append(rec); seen_id.add(_bare); seen_prov.add(rec.get("provider"))
+
+    # 1) живые дефолты (рабочий провайдер). Берём запись из RICH если есть, иначе минимальную;
+    #    пропускаем id, которых нет в живом каталоге (не сеем фантом). Если каталог пуст
+    #    (нет сети/кэша) — фильтр НЕ применяем: эти дефолты заведомо реальны, лучше засеять их,
+    #    чем вернуть пусто (а голый каталог и так дал бы пусто — поведение не хуже прежнего).
+    _valid = _valid_model_ids()
+    _rich_by_id = {r["id"]: r for r in RICH}
+    for mid in COUNCIL_DEFAULT_MODELS:
+        if _valid and strip_model_prefix(mid) not in _valid:
+            continue
+        _add(_rich_by_id.get(mid) or {"id": mid, "provider": provider_name(mid)})
+        if len(picked) >= n:
+            return picked[:n]
+
+    # 2) добиваем топ-моделями каталога (разнообразие провайдеров), как раньше.
     cand = [r for r in RICH
             if r.get("kind") in ("allround", "thinking", "code", "mid")
             and r.get("tier") in ("frontier", "large", "mid")]
     cand.sort(key=_smart_score, reverse=True)
-    picked, seen_prov = [], set()
-    for r in cand:                       # сначала по одному топу с каждого провайдера
+    for r in cand:                       # сначала по одному топу с КАЖДОГО нового провайдера
         if r["provider"] in seen_prov:
             continue
-        picked.append(r); seen_prov.add(r["provider"])
+        _add(r)
         if len(picked) >= n:
-            return picked
-    have = {p["id"] for p in picked}     # добиваем, если провайдеров мало
-    for r in cand:
-        if r["id"] in have:
-            continue
-        picked.append(r)
+            return picked[:n]
+    for r in cand:                       # затем добиваем чем есть
+        _add(r)
         if len(picked) >= n:
             break
     return picked[:n]
@@ -2135,7 +2156,46 @@ Use these only when the user clearly asks to touch files or the system. Be caref
 # 🧠 МОЗГ: дешёвый «ведущий» триажит запрос; умный «эксперт» отвечает на сложное.
 # Обратная логика обычных агентов: мелкая модель дёргает большую как инструмент →
 # дорогие токены тратятся только на по-настоящему сложное → выше маржа.
-BRAIN_DRIVER = "gemma-4-uncensored"      # дешёвый ведущий (можно поменять)
+#
+# ВАЖНО (провайдер-устойчивость): ведущий — это РОУТЕР, ему НЕ нужна фронтир-модель,
+# но провайдер ведущего ОБЯЗАН быть живым, иначе весь пайплайн Мозга падает ошибкой
+# (ни один эксперт не стартует). Поэтому дефолт ведущего — дешёвая БЫСТРАЯ модель на
+# РАБОЧЕМ провайдере (NanoGPT `ng:`), а не на Venice (Venice бывает 402/down). Все три
+# набора (ведущий / эксперты / совет) КОНФИГУРИРУЕМЫ через env — на проде, где Venice
+# профинансирован, можно вернуть Venice-модели, ничего не трогая в коде. Анти-RCE:
+# тут только id LLM-моделей, исполняется лишь LLM-вызов.
+def _env_list(name: str, default: list) -> list:
+    """env-список моделей (запятая/пробел-разделитель) или дефолт. Пустой env → дефолт."""
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return list(default)
+    out = [x.strip() for x in raw.replace(",", " ").split() if x.strip()]
+    return out or list(default)
+
+# Дефолтный ведущий: дешёвый/быстрый и на ЖИВОМ провайдере (NanoGPT). Проверено 2026-06:
+# `ng:gemini-2.5-flash` стримит, корректно триажит (пустяк→отвечает сам, сложное→ask_expert).
+BRAIN_DRIVER = (os.environ.get("TAIGA_BRAIN_DRIVER") or "").strip() or "ng:gemini-2.5-flash"
+# Кросс-провайдерная цепочка ведущих: если выбранный/дефолтный ведущий лёг — берём
+# СЛЕДУЮЩЕГО ведущего отсюда (тоже роутер, сохраняем BRAIN_PROMPT+ask_expert), а НЕ
+# скатываемся на обычный чат. Сначала разные живые NanoGPT-модели (переживём сбой одной),
+# в хвосте — Venice (на случай, когда жив только он). Дешёвые/быстрые в приоритете.
+BRAIN_LEADER_FALLBACKS = _env_list("TAIGA_BRAIN_LEADERS", [
+    "ng:gemini-2.5-flash", "ng:gpt-4o-mini", "ng:deepseek-ai/deepseek-v3.2",
+    "ng:gemma-3-27b-it", "gemma-4-uncensored",
+])
+# Пул экспертов Мозга на ЖИВЫХ провайдерах: сильные модели через NanoGPT (бенч у них тот
+# же — bench() считает по id без префикса), плюс Venice в хвосте. best_n_for_task для
+# Мозга тянет кандидатов в т.ч. отсюда → эксперты реально стартуют, даже если Venice лёг.
+BRAIN_EXPERT_POOL = _env_list("TAIGA_BRAIN_EXPERTS", [
+    "ng:claude-opus-4-8", "ng:deepseek-ai/deepseek-v3.2", "ng:gemini-2.5-flash",
+    "ng:gpt-4o-mini", "ng:gemma-3-27b-it",
+])
+# Дефолтные участники Совета на ЖИВЫХ провайдерах (Совет не должен блокироваться Venice).
+# Сильные, по возможности разнолабые модели через NanoGPT.
+COUNCIL_DEFAULT_MODELS = _env_list("TAIGA_COUNCIL_MODELS", [
+    "ng:claude-opus-4-8", "ng:deepseek-ai/deepseek-v3.2", "ng:gemini-2.5-flash",
+    "ng:gpt-4o-mini", "ng:gemma-3-27b-it",
+])
 IMAGE_MODEL = "venice-sd35"              # модель-генератор картинок для агент-инструмента generate_image
 
 # ── Воркфлоу-раннер: встроенные шаблоны мульти-шаговых пайплайнов поверх существующих
@@ -3301,21 +3361,38 @@ def best_for_task(task: str, pool=None, tier: str = None) -> str:
     return max(cands, key=lambda x: bench(x, task))
 
 
-def best_n_for_task(task: str, n: int = 2, tier: str = None) -> list:
+def best_n_for_task(task: str, n: int = 2, tier: str = None, pool=None) -> list:
     """Топ-N НЕ-фантомных моделей ПОД ЗАДАЧУ по бенчмаркам — для Мозга-ОРКЕСТРАТОРА (L4c/L19):
     ведущий эскалировал → запускаем N лучших-под-задачу специалистов и сплавляем. Тот же отбор,
-    что best_for_task, но возвращает N лучших (по убыванию bench), без дублей."""
+    что best_for_task, но возвращает N лучших (по убыванию bench), без дублей.
+    pool — необязательный список ПРЕДПОЧИТАЕМЫХ кандидатов (эксперты Мозга на ЖИВЫХ
+    провайдерах): он ВСЕГДА примешивается, чтобы при лежащем Venice эксперты реально
+    стартовали (а не отбирались из мёртвой Venice-цепочки)."""
+    _pool = [mid for mid in (pool or []) if not is_phantom(mid)]
     if tier in ("cheap", "mid", "top"):
         cands = [r.get("id") for r in RICH
                  if r.get("kind") in ("allround", "thinking", "code", "mid", "chat", "vision")
                  and not is_phantom(r.get("id", ""))
                  and cost_tier(r.get("id", "")) == tier]
+        # тир задан бюджетом юзера → оставляем каталог-по-тиру, но ЖИВОЙ пул примешиваем впереди
+        # (чтобы хотя бы часть экспертов гарантированно стартовала, если тир-кандидаты на мёртвом провайдере).
+        cands = _pool + list(cands)
+    elif _pool:
+        # тир НЕ задан и есть явный живой пул (эксперты Мозга) → берём ТОЛЬКО его: все N экспертов
+        # с РАБОЧИХ провайдеров (иначе высоко-бенчевые голые Venice-модели из _expert_pool вытесняли
+        # бы живые ng:-варианты и эксперты падали бы ok:false). Пул уже сильный и разнолабый.
+        cands = _pool
     else:
         cands = [mid for mid in _expert_pool() if not is_phantom(mid)]
+    # дедуп по ИМЕНИ модели без провайдер-префикса: одна и та же модель на ДВУХ провайдерах
+    # (ng:claude-opus-4-8 и голый claude-opus-4-8) — это НЕ два разных эксперта. Так Мозг с
+    # brainExperts=2 получает 2 РАЗНЫЕ модели, а живой ng:-вариант (он впереди при равном бенче)
+    # вытесняет дубль на мёртвом Venice. sorted стабилен → порядок при равном балле сохраняется.
     seen, uniq = set(), []
     for mid in sorted(cands, key=lambda x: bench(x, task), reverse=True):
-        if mid not in seen:
-            seen.add(mid)
+        bare = strip_model_prefix(mid)
+        if bare not in seen:
+            seen.add(bare)
             uniq.append(mid)
         if len(uniq) >= max(1, n):
             break
@@ -12133,6 +12210,12 @@ class Handler(BaseHTTPRequestHandler):
             if dkerr or not dkey:                          # выбранный недоступен — берём дефолтного
                 driver_model = BRAIN_DRIVER
                 dkey, dbyok, dkerr = resolve_key(uid, driver_model)
+            if dkerr or not dkey:                          # и дефолтный без ключа — идём по цепочке ведущих
+                for _lm in BRAIN_LEADER_FALLBACKS:         # (кросс-провайдер) → Мозг стартует, если жив хоть один
+                    _lk, _lb, _le = resolve_key(uid, _lm)
+                    if _lk and not _le:
+                        driver_model, dkey, dbyok, dkerr = _lm, _lk, _lb, None
+                        break
             if dkerr or not dkey:
                 brain = False                              # нет ключа ведущего — обычный режим
                 if auto_brain:
@@ -12247,14 +12330,20 @@ class Handler(BaseHTTPRequestHandler):
 
             def _pick_fallback():
                 """Запасная модель ПОТОКА при сбое провайдера. В режиме Мозга, пока стримит ВЕДУЩИЙ
-                (триаж), сначала пробуем ДЕФОЛТНОГО ведущего (BRAIN_DRIVER) — чтобы пайплайн Мозга
-                (ведущий→эксперты→сплав) ОСТАЛСЯ ЖИВ, а не молча скатился на обычный одно-модельный
-                чат запасной моделью (которая протокол ask_expert не знает). Если выбранный ведущий уже
-                и есть дефолтный (или тот тоже лёг) — обычная chat-цепочка. Вне Мозга — поведение прежнее."""
-                if brain and stream_model != expert_model and BRAIN_DRIVER not in tried:
-                    _dk, _db, _de = resolve_key(uid, BRAIN_DRIVER)
-                    if _dk and not _de and BRAIN_DRIVER != stream_model:
-                        return BRAIN_DRIVER, _dk
+                (триаж), берём СЛЕДУЮЩЕГО ведущего из КРОСС-ПРОВАЙДЕРНОЙ цепочки BRAIN_LEADER_FALLBACKS
+                (тоже роутер: система с BRAIN_PROMPT и ask_expert уже выставлены, меняем только модель
+                потока) — чтобы пайплайн Мозга (ведущий→эксперты→сплав) ОСТАЛСЯ ЖИВ, а не молча скатился
+                на обычный одно-модельный чат запасной моделью (которая протокол ask_expert не знает) и не
+                упал ошибкой, когда лёг провайдер ведущего (Venice 402/down). Цепочка кросс-провайдерная →
+                Мозг переживает сбой ЛЮБОГО одного провайдера. Все кандидаты уже-пробованного/без-ключа
+                пропускаем. Только когда ведущих не осталось — обычная chat-цепочка. Вне Мозга — как раньше."""
+                if brain and stream_model != expert_model:
+                    for _lm in BRAIN_LEADER_FALLBACKS:
+                        if _lm in tried or _lm == stream_model:
+                            continue
+                        _dk, _db, _de = resolve_key(uid, _lm)
+                        if _dk and not _de:
+                            return _lm, _dk
                 return _next_fallback_model(stream_model, tried, uid, has_images)
 
             while True:
@@ -12411,7 +12500,10 @@ class Handler(BaseHTTPRequestHandler):
                             # затем СПЛАВЛЯЕМ их фьюжн-критиком (как Совет). Иерархия vs Совет: тут дешёвый
                             # ведущий РЕШИЛ эскалировать; req.tier ограничивает специалистов бюджетом (L4a).
                             _btask = detect_task(raw_messages, has_images)
-                            _experts = best_n_for_task(_btask, brain_experts, tier=req_tier)
+                            # pool=BRAIN_EXPERT_POOL → эксперты на ЖИВЫХ провайдерах примешаны →
+                            # стартуют даже если вся Venice-цепочка лежит (иначе council_step все ok:false).
+                            _experts = best_n_for_task(_btask, brain_experts, tier=req_tier,
+                                                       pool=BRAIN_EXPERT_POOL)
                             _answers = []
                             for _em in _experts:
                                 _ek, _eb, _ekerr = resolve_key(uid, _em)
@@ -12466,11 +12558,15 @@ class Handler(BaseHTTPRequestHandler):
                                         return
                             except Exception:
                                 # эксперт-провайдер лёг (502/down/таймаут) → НЕ показываем сырую ошибку юзеру.
-                                # Правило «только рабочие модели»: молча пробуем funded-запасные из цепочки.
+                                # Правило «только рабочие модели»: молча пробуем funded-запасные. Сначала
+                                # эксперты на ЖИВЫХ провайдерах (BRAIN_EXPERT_POOL), потом обычная chat-цепочка —
+                                # иначе при лежащем Venice одиночный эксперт всегда упирался бы в мёртвый список.
                                 if len(out_total) == streamed0:        # ничего ещё не стримили — можно подменить
-                                    for fb in _MODEL_FALLBACK["chat"]:
-                                        if fb == expert_model:
+                                    _seen_fb = set()
+                                    for fb in list(BRAIN_EXPERT_POOL) + _MODEL_FALLBACK["chat"]:
+                                        if fb == expert_model or fb in _seen_fb:
                                             continue
+                                        _seen_fb.add(fb)
                                         fk, _fb_byok, _fk_err = resolve_key(uid, fb)
                                         if not fk:
                                             continue
