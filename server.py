@@ -3428,9 +3428,16 @@ def _nano_affordable_out(model: str, messages: list, balance_usd: float):
     return int(budget / (out_price / 1_000_000.0))
 
 
-def budget_degrade(model: str, reasoning_effort, max_tokens: int, messages: list = None):
+def budget_degrade(model: str, reasoning_effort, max_tokens: int, messages: list = None,
+                   allow_swap: bool = False):
     """Лестница деградации (см. блок выше). Возвращает (model, reasoning_effort, max_tokens, note).
-    note — строка-пометка для юзера ('' если изменений нет). Любой сбой → всё как было (тихо)."""
+    note — строка-пометка для юзера ('' если изменений нет). Любой сбой → всё как было (тихо).
+
+    ЗАЩИТА ВЫБОРА ЮЗЕРА (Damir 2026-06-14): сначала ВСЕГДА ↓глубину + кап токенов — модель юзера
+    ЦЕЛА. Замена модели (даже на ближайшую дешевле в семье) делается ТОЛЬКО при allow_swap=True,
+    который шлёт лишь АВТО-режим (юзер делегировал выбор модели). Явно выбранную юзером модель
+    НИКОГДА не свапаем — система не должна навязывать смену модели. По умолчанию allow_swap=False
+    → максимально бережно к выбору юзера (только глубина/длина гнутся, движок остаётся его)."""
     note = ""
     try:
         if provider_name(model) != "nanogpt" or not nano_sub_status().get("active"):
@@ -3446,19 +3453,21 @@ def budget_degrade(model: str, reasoning_effort, max_tokens: int, messages: list
         if eff in ("high", "medium") and model_reasons(model):
             note = f"снизил глубину {eff}→low ради бюджета (модель твоя цела)"
             eff = "low"
-        # --- ступень 2: даже сжатый ответ не лезет → ближайшая дешевле в семье ---
+        # --- ступень 2: ближайшая дешевле в семье — ТОЛЬКО в авто-режиме (явный выбор юзера священен) ---
         m2 = model
         MIN_USEFUL = 256
-        if aff < MIN_USEFUL:
+        if allow_swap and aff < MIN_USEFUL:
             cand = nearest_cheaper(model)
             if cand:
                 aff2 = _nano_affordable_out(cand, messages, bal)
                 if aff2 and aff2 > aff:
                     short = strip_model_prefix(cand).split("/")[-1]
-                    note = (note + "; " if note else "") + f"взял ближайшую дешевле — {short}"
+                    note = (note + "; " if note else "") + f"авто-режим: взял ближайшую дешевле — {short}"
                     m2, aff = cand, aff2
-        # --- ступень 3: кап токенов под остаток (как раньше), не в ноль ---
+        # --- ступень 3: кап токенов под остаток (как раньше), не в ноль. Модель юзера не тронута ---
         cap = max(64, min(max_tokens, aff))
+        if not allow_swap and aff < MIN_USEFUL and not note:
+            note = "урезал длину ответа ради бюджета (модель твоя цела)"
         return m2, eff, cap, note
     except Exception:
         return model, reasoning_effort, max_tokens, note
@@ -6301,24 +6310,81 @@ def _orchestrate_worker_runner(uid, seed="", req=None):
             {"role": "assistant", "content": "Понял предысторию. Работаю над своей подзадачей с учётом неё."},
         ]
 
+    # item 5: режим мышления воркеров (выбор юзера на «Сделать агентом», дороже по токенам):
+    #   normal — одна голова на модели воркера (как item 2);
+    #   council — мини-панель (модель воркера + до 2 моделей пула) → фьюжн (как Совет, на воркере);
+    #   brain — воркер думает СИЛЬНЫМ экспертом (первый доступный из BRAIN_EXPERT_POOL).
+    think = str((req or {}).get("worker_think") or "normal").lower()
+    if think not in ("normal", "brain", "council"):
+        think = "normal"
+
     def run(spec):
-        model = _norm_worker_model(spec.get("model"))
+        base_model = _norm_worker_model(spec.get("model"))
         skill_sys = spec.get("skill_system") or "Ты толковый агент-исполнитель. Отвечай по делу."
         sub = str(spec.get("sub") or "").strip()
         prior = str(spec.get("prior") or "").strip()
-        key, _byok, kerr = resolve_key(uid, model)
-        if kerr or not key:                        # ключа под модель нет → не валим прогон
-            return f"[ошибка воркера: {kerr or 'нет ключа модели'}]"
         wsys = skill_sys + ground_full             # персона скилла + RAG/память/источники + протокол тулзов
         focus = sub + (("\n\nКОНТЕКСТ от прошлых агентов:\n" + prior) if prior else "")
-        eff = "low" if model_reasons(model) else None   # воркеры дешёвые по глубине (item 5 поднимет режимом)
-        try:
-            _u = {}
-            txt = _subchat_tool_loop(model, wsys, base_messages, focus, tools, key,
-                                     900, reasoning_effort=eff, usage_out=_u, max_steps=3)
-            return (txt or "").strip()
-        except Exception as e:
-            return f"[ошибка воркера: {str(e)[:160]}]"
+
+        def _head(mid, cap=900, steps=3, eff_hint="low"):
+            """Одна голова-чат через _subchat_tool_loop (память+тулзы). None — нет ключа."""
+            mid = _norm_worker_model(mid)
+            k, _b, ke = resolve_key(uid, mid)
+            if ke or not k:
+                return None
+            eff = eff_hint if (eff_hint and model_reasons(mid)) else None
+            try:
+                txt = _subchat_tool_loop(mid, wsys, base_messages, focus, tools, k,
+                                         cap, reasoning_effort=eff, usage_out={}, max_steps=steps)
+                return (mid, (txt or "").strip())
+            except Exception as e:
+                return (mid, f"[ошибка головы: {str(e)[:120]}]")
+
+        def _bad(t):
+            return (not t) or t.startswith("[ошибка") or t.startswith("[воркер")
+
+        # — СОВЕТОМ: модель воркера + до 2 моделей пула → фьюжн (как Совет, но на одной подзадаче) —
+        if think == "council":
+            ids = [base_model]
+            for r in _council_models(3):
+                if strip_model_prefix(r["id"]) not in {strip_model_prefix(x) for x in ids}:
+                    ids.append(r["id"])
+                if len(ids) >= 3:
+                    break
+            heads = [h for h in (_head(m, cap=700, steps=2) for m in ids) if h and not _bad(h[1])]
+            if not heads:
+                h = _head(base_model)
+                return h[1] if h else "[воркер не дал ответа]"
+            if len(heads) == 1:
+                return heads[0][1]
+            joined = "\n\n".join(f"### мнение {i + 1}\n{t}" for i, (m, t) in enumerate(heads))
+            try:
+                fused = venice_complete(base_model, [
+                    {"role": "system", "content": BEAM_FUSION_PROMPT},
+                    {"role": "user", "content": f"Подзадача: {sub}\n\nМнения голов:\n{joined}\n\n"
+                                                "Сплавь в один выверенный ответ: бери согласованное, "
+                                                "отбрось то, что выдумала лишь одна голова."}],
+                    max_tokens=900) or ""
+                return fused.strip() or heads[0][1]
+            except Exception:
+                return heads[0][1]
+
+        # — МОЗГОМ: думаем СИЛЬНЫМ экспертом (первый доступный из пула экспертов Мозга) —
+        if think == "brain":
+            for em in BRAIN_EXPERT_POOL:
+                k, _b, ke = resolve_key(uid, _norm_worker_model(em))
+                if ke or not k:
+                    continue
+                h = _head(em, cap=1100, steps=3, eff_hint="medium")
+                if h and not _bad(h[1]):
+                    return h[1]
+                break
+            h = _head(base_model)
+            return h[1] if h else "[воркер не дал ответа]"
+
+        # — ОБЫЧНО: одна голова на модели воркера (item 2) —
+        h = _head(base_model)
+        return h[1] if h else "[ошибка воркера: нет ключа модели]"
     return run
 
 
