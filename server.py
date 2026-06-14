@@ -18,6 +18,7 @@
 """
 import ast
 import base64
+import hashlib
 import html as html_mod
 import ipaddress
 import json
@@ -1624,6 +1625,54 @@ def rag_query_smart(uid: str, query: str, k: int = 4, workspace=None,
     return hits[:k]
 
 
+# ── СЕМАНТИЧЕСКИЙ КОМПРЕССОР (суть CLaRa, текст-пространство) ──────────────────────
+# Сжимаем найденные куски до сути ПЕРЕД контекстом: меньше токенов, меньше шума, дешевле.
+# Сначала ЛОКАЛЬНЫЙ MLX-сервис на Mac (приватно/бесплатно), при сбое — дешёвая модель. Кэш по хэшу.
+_RAG_COMPRESS = True
+_MLX_COMPRESS_URL = "http://127.0.0.1:8791/compress"
+_COMPRESS_CACHE = {}
+_COMPRESS_CACHE_MAX = 800
+_COMPRESS_MIN_LEN = 600   # короче — не жмём (нет смысла)
+
+
+def _compress_text(text: str, ratio: int = 6) -> str:
+    """Сжать текст до сути. Локальный MLX → дешёвая модель → оригинал (тихо при любом сбое)."""
+    t = (text or "").strip()
+    if len(t) < _COMPRESS_MIN_LEN:
+        return text
+    try:
+        key = hashlib.sha1(("%d|%s" % (ratio, t)).encode("utf-8", "replace")).hexdigest()
+    except Exception:
+        key = None
+    if key and key in _COMPRESS_CACHE:
+        return _COMPRESS_CACHE[key]
+    out = None
+    try:  # 1) локальный MLX-компрессор на Mac
+        body = json.dumps({"text": t, "ratio": ratio}).encode("utf-8")
+        req = urllib.request.Request(_MLX_COMPRESS_URL, data=body,
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=6) as r:
+            out = (json.loads(r.read().decode("utf-8", "replace")).get("compressed") or "").strip()
+    except Exception:
+        out = None
+    if not out:  # 2) фолбэк — дешёвая модель
+        try:
+            target = max(80, len(t) // max(2, ratio))
+            raw = venice_complete(
+                aux_model("improve"),
+                [{"role": "system", "content": "Сожми текст до сути: сохрани ВСЕ факты, числа, имена; "
+                  "выкинь воду и повторы. Верни ТОЛЬКО сжатый текст, не длиннее ~%d символов." % target},
+                 {"role": "user", "content": t}],
+                max_tokens=max(120, target // 2), temperature=0.0)
+            out = (raw or "").strip()
+        except Exception:
+            out = None
+    out = out or text
+    if key and len(_COMPRESS_CACHE) < _COMPRESS_CACHE_MAX:
+        _COMPRESS_CACHE[key] = out
+    return out
+
+
 def rag_context(uid: str, messages: list, workspace=None, include_global: bool = True,
                 smart=False) -> str:
     """Если у юзера есть загруженные доки — подмешиваем релевантные куски в системный промпт чата.
@@ -1650,7 +1699,7 @@ def rag_context(uid: str, messages: list, workspace=None, include_global: bool =
         except Exception:
             def _rd(s):
                 return s
-        body = _rd("\n".join(f"[{h['doc']}] {h['text']}" for h in hits))
+        body = _rd("\n".join(f"[{h['doc']}] {_compress_text(h['text']) if _RAG_COMPRESS else h['text']}" for h in hits))
         # Найденные куски доков — недоверенные ДАННЫЕ: обрамляем явным делимитером, чтобы
         # модель не приняла текст из документа за команды (anti prompt-injection).
         return ("\n\nКОНТЕКСТ ИЗ ДОКУМЕНТОВ ПОЛЬЗОВАТЕЛЯ — отвечай С ОПОРОЙ на него, "
