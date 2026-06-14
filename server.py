@@ -307,10 +307,14 @@ def aux_model(task: str) -> str:
                 or (load_settings("default").get("aux_models") or {}).get(task) or "main")
     except Exception:
         pick = "main"
+    # Damir 2026-06-14: «автоматический режим» вместо хардкода. _first_live("cheap") идёт по
+    # цепочке дешёвых (uncensored-ПЕРВЫМИ) и пропускает фантомы — включая модели, что отдают
+    # 200+ПУСТО (как мёртвая gemma-4-uncensored): probe теперь это ловит. Так служебка авто-обходит
+    # дохлую модель и сохраняет uncensored, пока он жив. Не возвращаем «main»-фантом молча.
     if pick == "main":
-        return CHEAP_MODEL
-    if RICH and pick not in _valid_model_ids():     # защита от стале-id в настройках
-        return CHEAP_MODEL
+        return _first_live("cheap")
+    if is_phantom(pick) or (RICH and pick not in _valid_model_ids()):  # стале/мёртвый override → авто-выбор
+        return _first_live("cheap")
     return pick
 
 # reasoning-модели тратят токены на «размышление» — им нужен запас, иначе ответ пустеет
@@ -3128,10 +3132,12 @@ def venice_stream(model: str, messages: list, max_tokens: int, usage_out: dict =
 
 
 def venice_complete(model: str, messages: list, max_tokens: int = 400, key: str = None,
-                    temperature=None, reasoning_effort: str = None) -> str:
+                    temperature=None, reasoning_effort: str = None, _vc_depth: int = 0) -> str:
     """Не-стриминговый запрос — для служебных задач (память, улучшение промпта) и голов мульти-движковых
     режимов (совет/мозг-эксперт). По умолчанию общий пул-ключ. temperature/reasoning_effort —
-    необязательные; reasoning_effort шлём ТОЛЬКО думающим (gate у вызывающего) и только как параметр."""
+    необязательные; reasoning_effort шлём ТОЛЬКО думающим (gate у вызывающего) и только как параметр.
+    АВТО-ЗДОРОВЬЕ (Damir): если модель отдаёт 200+ПУСТО (нестабильная gemma-4-uncensored) — ОДНА
+    попытка фолбэка на следующую живую дешёвую (uncensored-first), потом надёжную. _vc_depth гасит рекурсию."""
     # item 3: лестница деградации бюджета (как в venice_stream); служебный путь — пометку не показываем.
     model, reasoning_effort, max_tokens, _ = budget_degrade(model, reasoning_effort, max_tokens, messages)
     prov = provider_for(model)
@@ -3152,9 +3158,34 @@ def venice_complete(model: str, messages: list, max_tokens: int = 400, key: str 
             d = json.load(r)
         out = d["choices"][0]["message"]["content"] or ""
         health_record(_hp, True, (time.time() - _t0) * 1000.0)   # пассивный замер: исход + латентность
+        # АВТО-ЗДОРОВЬЕ служебки: 200+ПУСТО → запоминаем модель как «недавно пустую» (TTL-skip) и ОДИН
+        # раз пробуем следующую живую (uncensored-first из cheap, потом надёжную ng:gemini-2.5-flash).
+        if not out.strip() and _vc_depth < 2:
+            _mark_empty(model)
+            for fb in (_first_live("cheap"), "ng:gemini-2.5-flash"):
+                if fb and strip_model_prefix(fb) != strip_model_prefix(model):
+                    r2 = venice_complete(fb, messages, max_tokens=max_tokens,
+                                         temperature=temperature, reasoning_effort=reasoning_effort,
+                                         _vc_depth=_vc_depth + 1)
+                    if r2 and r2.strip():
+                        return r2
         return out
     except Exception as e:
         health_record(_hp, False, error=getattr(e, "code", None) or e.__class__.__name__)
+        # АВТО-ЗДОРОВЬЕ: модель упала (ошибка/таймаут/5xx — как нестабильная gemma на реальном промпте)
+        # → одна попытка фолбэка на следующую живую дешёвую (uncensored-first), потом надёжную.
+        if _vc_depth < 2:
+            _mark_empty(model)
+            for fb in (_first_live("cheap"), "ng:gemini-2.5-flash"):
+                if fb and strip_model_prefix(fb) != strip_model_prefix(model):
+                    try:
+                        r2 = venice_complete(fb, messages, max_tokens=max_tokens,
+                                             temperature=temperature, reasoning_effort=reasoning_effort,
+                                             _vc_depth=_vc_depth + 1)
+                    except Exception:
+                        r2 = ""
+                    if r2 and r2.strip():
+                        return r2
         return ""
 
 
@@ -3599,11 +3630,33 @@ def phantom_list() -> list:
         return sorted(_phantom.keys())
 
 
+# Авто-здоровье для НЕСТАБИЛЬНЫХ моделей (Damir 2026-06-14): модель, отдавшая 200+ПУСТО на реальной
+# работе (как gemma-4-uncensored — отвечает «hi», но пусто на настоящем промпте), помечается тут с
+# КОРОТКИМ TTL. Это НЕ персистентный фантом-бан (тот сбрасывался бы probe'ом → оскилляция), а мягкий
+# per-process skip: следующий выбор её пропускает, через TTL пробуем снова (само-лечение).
+_AUX_EMPTY: dict = {}
+_AUX_EMPTY_TTL = 1800.0   # сек: сколько пропускаем модель после пустого ответа, потом пробуем снова
+
+
+def _mark_empty(model_id: str):
+    try:
+        _AUX_EMPTY[strip_model_prefix(model_id)] = time.time()
+    except Exception:
+        pass
+
+
+def _recently_empty(model_id: str) -> bool:
+    return _AUX_EMPTY.get(strip_model_prefix(model_id), 0) > time.time() - _AUX_EMPTY_TTL
+
+
 def _first_live(role: str) -> str:
-    """Первая НЕ-фантомная модель из цепочки роли. Все мёртвы → последняя из цепочки
-    (хоть что-то, чтобы не вернуть пусто). Так авто-выбор НИКОГДА не сядет на мёртвую модель."""
+    """Первая НЕ-фантомная и НЕ-недавно-пустая модель из цепочки роли. Все мёртвы → первая не-фантом
+    → последняя (хоть что-то). Так авто-выбор НИКОГДА не сядет на мёртвую/нестабильную модель."""
     chain = _MODEL_FALLBACK.get(role) or [DEFAULTS.get(role, CHEAP_MODEL)]
     for mid in chain:
+        if not is_phantom(mid) and not _recently_empty(mid):
+            return mid
+    for mid in chain:                 # все недавно-пустые? игнорим TTL, берём хотя бы не-фантом
         if not is_phantom(mid):
             return mid
     return chain[-1]
@@ -3620,8 +3673,11 @@ def probe_model_live(model_id: str, timeout: int = 20) -> bool:
         key = global_key(provider_name(model_id))
         if not key:
             return True
+        # Реальный вопрос (не «hi»): мёртвые-но-вежливые модели отвечают на «hi», но дают 200+ПУСТО
+        # на настоящей работе (как gemma-4-uncensored). Содержательный пробник их ловит → фантом.
         body = {"model": strip_model_prefix(model_id),
-                "messages": [{"role": "user", "content": "hi"}], "max_tokens": 4}
+                "messages": [{"role": "user", "content": "Ответь одним словом: столица Франции?"}],
+                "max_tokens": 16}
         with _open_chat(chat_completions_url(prov), body, headers_for(prov, key), timeout) as r:
             d = json.load(r)
         ch = (d.get("choices") or [{}])[0]
