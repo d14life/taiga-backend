@@ -9666,6 +9666,138 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(userfile_delete(uid, name))
         return self._json({"ok": False, "error": "неизвестное действие"}, 400)
 
+    def api_design_system(self):
+        # Бренд-бриф → дизайн-токен-система (JSON). Только LLM-вызов + нормализация.
+        # АНТИ-RCE: НИКОГДА не exec/eval ввод — мы лишь зовём модель и чиним форму ответа.
+        c = self._body()
+        uid = c.get("user", "default")
+        if not self._ip_guard(uid):
+            return
+        brief = str(c.get("brief") or "").strip()
+        if not brief:
+            return self._json({"error": "пустой бриф"}, 400)
+        brief = brief[:SEC_MAX_PROMPT_CHARS]
+        voice = str(c.get("voice") or "").strip()[:400]
+        mode = str(c.get("mode") or "dark").strip().lower()
+        if mode not in ("dark", "light"):
+            mode = "dark"
+
+        # Дефолтная тёмная токен-система — фолбэк, чтобы UI ВСЕГДА получил валидную форму.
+        default_system = {
+            "name": "Untitled",
+            "voice": voice or "neutral",
+            "mode": mode,
+            "palette": {
+                "bg": "#0a0a0a", "surface": "#141414", "ink": "#f5f5f5",
+                "muted": "#9a9a9a", "primary": "#6366f1", "accent": "#22d3ee",
+                "border": "#262626", "success": "#22c55e", "warning": "#f59e0b",
+                "danger": "#ef4444",
+            },
+            "typography": {
+                "display": "Inter", "body": "Inter",
+                "scale": [12, 14, 16, 20, 28, 40], "tracking": "-0.02em",
+            },
+            "radius": {"sm": "4px", "md": "8px", "lg": "16px", "pill": "999px"},
+            "spacing": {"unit": 4, "scale": [4, 8, 12, 16, 24, 32, 48, 64]},
+            "shadows": {
+                "sm": "0 1px 2px rgba(0,0,0,0.4)",
+                "md": "0 4px 12px rgba(0,0,0,0.45)",
+                "lg": "0 12px 32px rgba(0,0,0,0.5)",
+            },
+        }
+
+        sys_prompt = (
+            "You are a senior design-systems engineer. Given a brand brief, output a complete "
+            "design-token system. Return ONLY valid minified JSON — no prose, no explanations, "
+            "no markdown, no code fences. The JSON MUST have EXACTLY these keys and shape:\n"
+            '{"name": str, "voice": str, "mode": "dark"|"light", '
+            '"palette": {"bg","surface","ink","muted","primary","accent","border","success","warning","danger" — '
+            'ALL hex strings like "#0a0a0a"}, '
+            '"typography": {"display": font-family name, "body": font-family name, '
+            '"scale": [6 ascending px numbers], "tracking": e.g. "-0.02em"}, '
+            '"radius": {"sm","md","lg","pill" — css lengths}, '
+            '"spacing": {"unit": int e.g. 4, "scale": [numbers]}, '
+            '"shadows": {"sm","md","lg" — css box-shadow values}}\n'
+            f"Honor the requested mode = \"{mode}\" (pick {mode}-appropriate colors) and the brand voice. "
+            "Make the palette cohesive and on-brand."
+        )
+        user_prompt = "Brand brief:\n" + brief
+        if voice:
+            user_prompt += "\n\nBrand voice: " + voice
+        user_prompt += f"\n\nMode: {mode}"
+
+        parsed = None
+        try:
+            raw = venice_complete(aux_model("craft"),
+                                  [{"role": "system", "content": sys_prompt},
+                                   {"role": "user", "content": user_prompt}],
+                                  max_tokens=900, temperature=0.4)
+            parsed = _extract_json_object(raw)
+        except Exception:
+            parsed = None
+
+        system = self._coerce_design_system(parsed, default_system, mode, voice)
+        # Серверные поля (не доверяем модели их выставлять).
+        system["id"] = os.urandom(8).hex()
+        system["status"] = "draft"
+        system["ts"] = int(time.time())
+        return self._json({"ok": True, "system": system})
+
+    @staticmethod
+    def _coerce_design_system(parsed, default_system, mode, voice):
+        """Достраиваем форму токен-системы из дефолта — любая дыра/мусор от модели чинится,
+        чтобы UI всегда получал полную схему. Минимальная hex-санитизация палитры."""
+        d = default_system
+        src = parsed if isinstance(parsed, dict) else {}
+        out = {}
+        out["name"] = str(src.get("name") or d["name"])[:120]
+        out["voice"] = str(src.get("voice") or voice or d["voice"])[:200]
+        out["mode"] = mode   # режим — серверный, по запросу клиента
+
+        # palette: каждый ключ обязателен, должен быть hex; иначе берём дефолт
+        pal_src = src.get("palette") if isinstance(src.get("palette"), dict) else {}
+        out_pal = {}
+        for k, dv in d["palette"].items():
+            v = pal_src.get(k)
+            out_pal[k] = v if isinstance(v, str) and v.startswith("#") else dv
+        out["palette"] = out_pal
+
+        # typography
+        typ_src = src.get("typography") if isinstance(src.get("typography"), dict) else {}
+        scale = typ_src.get("scale")
+        if not (isinstance(scale, list) and len(scale) == 6
+                and all(isinstance(x, (int, float)) for x in scale)):
+            scale = d["typography"]["scale"]
+        out["typography"] = {
+            "display": str(typ_src.get("display") or d["typography"]["display"])[:80],
+            "body": str(typ_src.get("body") or d["typography"]["body"])[:80],
+            "scale": [round(float(x), 2) if isinstance(x, float) else int(x) for x in scale],
+            "tracking": str(typ_src.get("tracking") or d["typography"]["tracking"])[:24],
+        }
+
+        # radius
+        rad_src = src.get("radius") if isinstance(src.get("radius"), dict) else {}
+        out["radius"] = {k: (str(rad_src.get(k)) if isinstance(rad_src.get(k), (str, int, float)) else dv)
+                         for k, dv in d["radius"].items()}
+
+        # spacing
+        sp_src = src.get("spacing") if isinstance(src.get("spacing"), dict) else {}
+        unit = sp_src.get("unit")
+        sp_scale = sp_src.get("scale")
+        if not (isinstance(sp_scale, list) and sp_scale
+                and all(isinstance(x, (int, float)) for x in sp_scale)):
+            sp_scale = d["spacing"]["scale"]
+        out["spacing"] = {
+            "unit": int(unit) if isinstance(unit, (int, float)) else d["spacing"]["unit"],
+            "scale": [round(float(x), 2) if isinstance(x, float) else int(x) for x in sp_scale],
+        }
+
+        # shadows
+        sh_src = src.get("shadows") if isinstance(src.get("shadows"), dict) else {}
+        out["shadows"] = {k: (str(sh_src.get(k)) if isinstance(sh_src.get(k), str) and sh_src.get(k).strip() else dv)
+                          for k, dv in d["shadows"].items()}
+        return out
+
     def api_verify(self):
         c = self._body()
         uid = c.get("user", "default")
@@ -10535,6 +10667,8 @@ class Handler(BaseHTTPRequestHandler):
             self.api_verify()
         elif path == "/api/userfiles":
             self.api_userfiles()
+        elif path == "/api/design-system":
+            self.api_design_system()
         elif path == "/api/chat":
             self.chat()
         else:
