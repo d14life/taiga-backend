@@ -1643,9 +1643,13 @@ def _verify_response(query: str, response: str, context: str = "") -> dict:
         return {"ok": True, "hallucination": False, "degraded": False, "issues": [], "confidence": 1.0}
     degraded_heur = _looks_degraded(resp)
     try:
-        sys = ("Ты — контролёр качества ответа ИИ. Проверь ответ на (1) ГАЛЛЮЦИНАЦИИ — утверждения "
-               "выдуманные или противоречащие запросу/контексту; (2) ДЕГРАДАЦИЮ — повторы, зацикливание, "
-               "обрыв, уход от темы. Ответь СТРОГО JSON без пояснений: "
+        sys = ("Ты — строгий контролёр качества ответа ИИ. Проверь ответ на: (1) ГАЛЛЮЦИНАЦИИ — "
+               "выдуманные утверждения ИЛИ противоречащие запросу/контексту; (2) ФАКТИЧЕСКИЕ ОШИБКИ — "
+               "проверь КОНКРЕТНЫЕ факты (имена, даты, числа, столицы, определения, события): неверный "
+               "факт = галлюцинация, ДАЖЕ если звучит уверенно (напр. «столица Австралии — Сидней» "
+               "НЕВЕРНО, это Канберра); (3) ДЕГРАДАЦИЮ — повторы, зацикливание, обрыв, уход от темы. "
+               "Поле confidence — насколько ТЫ уверен, что ответ КОРРЕКТЕН (НЕ насколько уверенно он "
+               "написан): сомневаешься в факте — снижай confidence к 0. Ответь СТРОГО JSON без пояснений: "
                '{"hallucination": true|false, "degraded": true|false, "issues": ["кратко по-русски"], "confidence": 0.0}.')
         usr = "ЗАПРОС:\n%s\n\n%sОТВЕТ НА ПРОВЕРКУ:\n%s" % (
             query[:1500], ("КОНТЕКСТ:\n%s\n\n" % context[:2000]) if context else "", resp[:3000])
@@ -3065,7 +3069,7 @@ def _clean_temperature(temperature):
 
 def venice_stream(model: str, messages: list, max_tokens: int, usage_out: dict = None,
                   key: str = None, temperature=None, reasoning_effort: str = None,
-                  reasoning_cb=None, _max_continues: int = 4):
+                  reasoning_cb=None, _max_continues: int = 4, allow_model_swap: bool = False):
     """Генератор дельт текста. key — конкретный ключ (BYOK/пул); если None — общий пул.
     usage_out — складываем реальный расход токенов для биллинга. Доп. ключ
     usage_out["__finished__"]=True ставится ТОЛЬКО при ЧИСТОМ финише апстрима
@@ -3074,8 +3078,10 @@ def venice_stream(model: str, messages: list, max_tokens: int, usage_out: dict =
     prompt/completion_tokens, поэтому ключ их не трогает (полная обратная совместимость).
     temperature — необязательная (0..1.5); при None провайдеру не шлём (его дефолт)."""
     # item 3: лестница деградации бюджета ДО резолва провайдера/ключа (свап остаётся в той же семье
-    # и у того же провайдера → ключ валиден). Тесный nano-баланс → ↓глубину, потом ближайшая дешевле.
-    model, reasoning_effort, max_tokens, _dn = budget_degrade(model, reasoning_effort, max_tokens, messages)
+    # и у того же провайдера → ключ валиден). Тесный nano-баланс → ↓глубину, потом (только в АВТО-режиме,
+    # allow_model_swap=True) ближайшая дешевле в семье. Явный выбор юзера (allow_model_swap=False) — цел.
+    model, reasoning_effort, max_tokens, _dn = budget_degrade(
+        model, reasoning_effort, max_tokens, messages, allow_swap=allow_model_swap)
     if _dn and usage_out is not None:
         usage_out["__degrade_note__"] = _dn
     prov = provider_for(model)
@@ -13723,7 +13729,11 @@ class Handler(BaseHTTPRequestHandler):
                                                temperature=temperature,
                                                reasoning_effort=(req_reasoning_effort
                                                                  if model_reasons(stream_model) else None),
-                                               reasoning_cb=lambda rt: self._sse({"type": "reasoning", "text": rt})):
+                                               reasoning_cb=lambda rt: self._sse({"type": "reasoning", "text": rt}),
+                                               # #1 (revive nearest_cheaper): в АВТО-режиме (юзер не выбирал
+                                               # модель) при тесном бюджете разрешаем свап на ближайшую
+                                               # дешевле в семье; явный выбор юзера — НЕ трогаем.
+                                               allow_model_swap=(not explicit_model)):
                         got_any = True
                         out_total += delta
                         if buffering:
