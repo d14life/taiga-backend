@@ -1520,6 +1520,56 @@ def _rag_llm_rerank(query: str, hits: list, top_n: int) -> list:
         return hits
 
 
+def _looks_degraded(text: str) -> bool:
+    """Грубая эвристика деградации: дословные повторы строк / зацикливание 6-грамм."""
+    t = (text or "").strip()
+    if len(t) < 120:
+        return False
+    lines = [l.strip() for l in t.splitlines() if l.strip()]
+    if lines and len(lines) >= 4 and len(set(lines)) <= max(2, len(lines) // 3):
+        return True
+    words = t.split()
+    if len(words) >= 40:
+        from collections import Counter
+        grams = [" ".join(words[i:i + 6]) for i in range(len(words) - 6)]
+        c = Counter(grams)
+        if c and c.most_common(1)[0][1] >= 4:
+            return True
+    return False
+
+
+def _verify_response(query: str, response: str, context: str = "") -> dict:
+    """Пост-проверка ответа на ГАЛЛЮЦИНАЦИИ и ДЕГРАДАЦИЮ (один дешёвый вызов + эвристика).
+    Возвращает {ok, hallucination, degraded, issues[], confidence}. Тихо ok при сбое — чат не блокируем."""
+    resp = (response or "").strip()
+    if len(resp) < 40:
+        return {"ok": True, "hallucination": False, "degraded": False, "issues": [], "confidence": 1.0}
+    degraded_heur = _looks_degraded(resp)
+    try:
+        sys = ("Ты — контролёр качества ответа ИИ. Проверь ответ на (1) ГАЛЛЮЦИНАЦИИ — утверждения "
+               "выдуманные или противоречащие запросу/контексту; (2) ДЕГРАДАЦИЮ — повторы, зацикливание, "
+               "обрыв, уход от темы. Ответь СТРОГО JSON без пояснений: "
+               '{"hallucination": true|false, "degraded": true|false, "issues": ["кратко по-русски"], "confidence": 0.0}.')
+        usr = "ЗАПРОС:\n%s\n\n%sОТВЕТ НА ПРОВЕРКУ:\n%s" % (
+            query[:1500], ("КОНТЕКСТ:\n%s\n\n" % context[:2000]) if context else "", resp[:3000])
+        raw = venice_complete(aux_model("improve"),
+                              [{"role": "system", "content": sys}, {"role": "user", "content": usr}],
+                              max_tokens=300, temperature=0.0)
+        m = re.search(r"\{.*\}", raw or "", re.DOTALL)
+        v = json.loads(m.group(0)) if m else {}
+        hall = bool(v.get("hallucination"))
+        degr = bool(v.get("degraded")) or degraded_heur
+        issues = [str(x)[:200] for x in (v.get("issues") or [])][:5]
+        if degraded_heur and not any(("повтор" in i.lower() or "зациклив" in i.lower()) for i in issues):
+            issues.append("повтор/зацикливание (эвристика)")
+        conf = float(v.get("confidence") or 0.5)
+        return {"ok": not (hall or degr), "hallucination": hall, "degraded": degr,
+                "issues": issues, "confidence": max(0.0, min(1.0, conf))}
+    except Exception:
+        return {"ok": not degraded_heur, "hallucination": False, "degraded": degraded_heur,
+                "issues": (["повтор/зацикливание (эвристика)"] if degraded_heur else []), "confidence": 0.5}
+
+
 def rag_query_smart(uid: str, query: str, k: int = 4, workspace=None,
                     include_global: bool = True, variants=3, use_improve: bool = True,
                     rerank: bool = True, per_k=None, rrf_k=None) -> list:
@@ -9431,6 +9481,21 @@ class Handler(BaseHTTPRequestHandler):
                       "subtasks": r.get("subtasks")})
 
     # --- ОРКЕСТРАТОР агентов (LangGraph): мозг → воркеры (BYOK) → синтез + таймлайн ---
+    def api_verify(self):
+        c = self._body()
+        uid = c.get("user", "default")
+        if not self._ip_guard(uid):
+            return
+        query = str(c.get("query") or "")
+        response = str(c.get("response") or "")
+        context = str(c.get("context") or "")
+        if not response.strip():
+            return self._json({"error": "пустой ответ"}, 400)
+        try:
+            return self._json(_verify_response(query, response[:SEC_MAX_PROMPT_CHARS], context))
+        except Exception as e:
+            return self._json({"ok": True, "error": str(e)[:160]}, 200)
+
     def api_orchestrate(self):
         c = self._body()
         uid = c.get("user", "default")
@@ -10272,6 +10337,8 @@ class Handler(BaseHTTPRequestHandler):
             self.openai_proxy()
         elif path == "/api/agent_permit":
             self.api_agent_permit()
+        elif path == "/api/verify":
+            self.api_verify()
         elif path == "/api/chat":
             self.chat()
         else:
