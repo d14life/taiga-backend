@@ -6301,6 +6301,14 @@ def _orchestrate_worker_runner(uid, seed="", req=None):
         for _t in ("web_search", "super_search", "fetch_url", "browse", "wiki"):
             tools.pop(_t, None)
     tools_prompt = _scoped_tools_prompt(tools)
+    # АВТОНОМИЯ воркера (Damir 2026-06-14): агент ДЕЛАЕТ, а не переспрашивает. Без этой директивы
+    # воркер-чат вёл себя как чатбот («мне нужна доп. информация / уточни контекст») вместо выдачи
+    # результата. Теперь: действуй с тем, что есть, делай разумные допущения, выдавай конкретику.
+    autonomy = ("Ты — АВТОНОМНЫЙ агент-воркер в команде, а не собеседник. НИКОГДА не проси у "
+                "пользователя уточнений и не задавай встречных вопросов — у тебя их некому задать. "
+                "Действуй с тем, что есть: делай разумные допущения (явно помечай их словом «допускаю»), "
+                "и СРАЗУ выдавай конкретный результат по своей подзадаче. Пустых отговорок «нужен "
+                "контекст» быть не должно.\n\n")
     ground_full = ground + (tools_prompt or "")
     # история-память воркера: seed как настоящие сообщения (как member_ctx у Совета)
     base_messages = []
@@ -6323,7 +6331,7 @@ def _orchestrate_worker_runner(uid, seed="", req=None):
         skill_sys = spec.get("skill_system") or "Ты толковый агент-исполнитель. Отвечай по делу."
         sub = str(spec.get("sub") or "").strip()
         prior = str(spec.get("prior") or "").strip()
-        wsys = skill_sys + ground_full             # персона скилла + RAG/память/источники + протокол тулзов
+        wsys = autonomy + skill_sys + ground_full  # автономия + персона скилла + RAG/память/источники + тулзы
         focus = sub + (("\n\nКОНТЕКСТ от прошлых агентов:\n" + prior) if prior else "")
 
         def _head(mid, cap=900, steps=3, eff_hint="low"):
@@ -12753,7 +12761,11 @@ class Handler(BaseHTTPRequestHandler):
                                 or req.get("compare") or req.get("beam")
                                 or req.get("research") or req.get("agent"))
         auto_brain = False
-        if not explicit_model and not _in_special_mode and not has_images:
+        # gap 5 (Damir 2026-06-14): юзер может ОТКЛЮЧИТЬ молчаливый авто-Мозг (req.auto_brain=false) —
+        # тогда на трудном вопросе отвечает одна выбранная/авто модель, без тихой эскалации в Мозг.
+        # Поле отсутствует/не false → прежнее поведение (авто-Мозг разрешён). Явный режим/картинки — как было.
+        _allow_auto_brain = req.get("auto_brain") is not False
+        if _allow_auto_brain and not explicit_model and not _in_special_mode and not has_images:
             try:
                 auto_brain = query_is_hard(raw_messages)
             except Exception:
