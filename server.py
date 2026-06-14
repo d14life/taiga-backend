@@ -7429,6 +7429,38 @@ def _mem_is_empty_fact(text: str) -> bool:
     return not bool(_mem_tokens(text))
 
 
+def quantize_memory(uid: str) -> dict:
+    """КВАНТИЗАЦИЯ ПАМЯТИ (суть CLaRa): сжимаем ДЛИННЫЕ факты (≥_COMPRESS_MIN_LEN) до сути тем же
+    компрессором (локальный MLX → дешёвая модель). Короткие факты не трогаем. Сейв только если ужалось.
+    Безопасно: при сбое компрессора факт остаётся как был (фолбэк внутри _compress_text)."""
+    try:
+        mem = load_memory(uid)
+    except Exception:
+        return {"ok": False, "uid": uid, "quantized": 0}
+    if not mem:
+        return {"ok": True, "uid": uid, "quantized": 0, "total": 0}
+    out, changed = [], 0
+    for m in mem:
+        if isinstance(m, dict):
+            text = str(m.get("text", ""))
+            if len(text.strip()) >= _COMPRESS_MIN_LEN:
+                comp = _compress_text(text, ratio=4)
+                if comp and comp != text and len(comp) < len(text):
+                    nm = dict(m)
+                    nm["text"] = comp
+                    nm["quantized"] = True
+                    out.append(nm)
+                    changed += 1
+                    continue
+        out.append(m)
+    if changed:
+        try:
+            save_memory(uid, out)
+        except Exception:
+            return {"ok": False, "uid": uid, "quantized": 0, "total": len(mem)}
+    return {"ok": True, "uid": uid, "quantized": changed, "total": len(mem)}
+
+
 def consolidate_memory(uid: str) -> dict:
     """Sleep-time уплотнение долгой памяти юзера. ЛОКАЛЬНО, идемпотентно, консервативно.
 
@@ -7597,6 +7629,12 @@ def consolidate_active_users(max_users: int = 50, idle_sec: int = 6 * 3600) -> d
             r = consolidate_memory(uid)
             if r.get("removed"):
                 results.append({"uid": uid, "removed": r["removed"]})
+            try:
+                q = quantize_memory(uid)
+                if q.get("quantized"):
+                    results.append({"uid": uid, "quantized": q["quantized"]})
+            except Exception:
+                pass
             processed += 1
         except Exception:
             pass
