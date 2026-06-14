@@ -6503,6 +6503,78 @@ def cookie_delete(uid: str, name: str):
             pass
 
 
+# ── #16 СЕРВЕРНОЕ ХРАНЕНИЕ ФАЙЛОВ (opt-in, шифрованное) ──────────────────────────
+# Дефолт ВЫКЛ (приватность uncensored-продукта). Включается настройкой server_files.
+# Файлы шифруются на диске (Fernet, как куки) в user_dir(uid)/files/<имя>.enc.
+SEC_MAX_USERFILE_BYTES = 25_000_000   # 25 МБ на файл
+SEC_MAX_USERFILES = 200               # потолок файлов на юзера
+
+
+def _safe_fname(name: str) -> str:
+    n = re.sub(r"[^\w.\- ]+", "_", str(name or "file")).strip()[:120]
+    return n or "file"
+
+
+def _userfiles_enabled(uid: str) -> bool:
+    try:
+        return bool((load_user_config(uid) or {}).get("server_files"))
+    except Exception:
+        return False
+
+
+def userfile_put(uid: str, name: str, content_b64: str) -> dict:
+    try:
+        raw = base64.b64decode(content_b64 or "")
+    except Exception:
+        return {"ok": False, "error": "битый base64"}
+    if len(raw) > SEC_MAX_USERFILE_BYTES:
+        return {"ok": False, "error": "файл слишком большой (>25 МБ)"}
+    d = user_dir(uid) / "files"
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / (_safe_fname(name) + ".enc")
+    if not p.exists() and len(list(d.glob("*.enc"))) >= SEC_MAX_USERFILES:
+        return {"ok": False, "error": f"слишком много файлов (>{SEC_MAX_USERFILES})"}
+    p.write_bytes(_cookie_fernet().encrypt(raw))
+    try:
+        p.chmod(0o600)
+    except Exception:
+        pass
+    return {"ok": True, "name": _safe_fname(name), "bytes": len(raw)}
+
+
+def userfile_list(uid: str) -> list:
+    d = user_dir(uid) / "files"
+    out = []
+    if d.exists():
+        for p in d.glob("*.enc"):
+            try:
+                out.append({"name": p.stem, "bytes": p.stat().st_size})
+            except Exception:
+                pass
+    return out
+
+
+def userfile_get(uid: str, name: str) -> dict:
+    p = user_dir(uid) / "files" / (_safe_fname(name) + ".enc")
+    if not p.exists():
+        return {"ok": False, "error": "не найдено"}
+    try:
+        raw = _cookie_fernet().decrypt(p.read_bytes())
+        return {"ok": True, "name": _safe_fname(name), "content_b64": base64.b64encode(raw).decode()}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:120]}
+
+
+def userfile_delete(uid: str, name: str) -> dict:
+    p = user_dir(uid) / "files" / (_safe_fname(name) + ".enc")
+    if p.exists():
+        try:
+            p.unlink()
+        except Exception:
+            pass
+    return {"ok": True}
+
+
 def load_memory(uid: str) -> list:
     v = _db_get_json("memory", "uid", uid, [])
     return v if isinstance(v, list) else []
@@ -9569,6 +9641,28 @@ class Handler(BaseHTTPRequestHandler):
                       "subtasks": r.get("subtasks")})
 
     # --- ОРКЕСТРАТОР агентов (LangGraph): мозг → воркеры (BYOK) → синтез + таймлайн ---
+    def api_userfiles(self):
+        # #16 серверное хранение файлов (opt-in, шифр). Дефолт выкл — privacy.
+        c = self._body()
+        uid = c.get("user", "default")
+        if not self._ip_guard(uid):
+            return
+        if not _userfiles_enabled(uid) and not is_owner(uid):
+            return self._json({"ok": False, "disabled": True, "error": "серверное хранение выключено (включи в настройках)"})
+        action = str(c.get("action") or "list")
+        if action == "list":
+            return self._json({"ok": True, "files": userfile_list(uid)})
+        name = str(c.get("name") or "")
+        if not name and action in ("put", "get", "delete"):
+            return self._json({"ok": False, "error": "нет имени файла"}, 400)
+        if action == "put":
+            return self._json(userfile_put(uid, name, str(c.get("content_b64") or "")))
+        if action == "get":
+            return self._json(userfile_get(uid, name))
+        if action == "delete":
+            return self._json(userfile_delete(uid, name))
+        return self._json({"ok": False, "error": "неизвестное действие"}, 400)
+
     def api_verify(self):
         c = self._body()
         uid = c.get("user", "default")
@@ -10436,6 +10530,8 @@ class Handler(BaseHTTPRequestHandler):
             self.api_agent_permit()
         elif path == "/api/verify":
             self.api_verify()
+        elif path == "/api/userfiles":
+            self.api_userfiles()
         elif path == "/api/chat":
             self.chat()
         else:
