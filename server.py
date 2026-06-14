@@ -11832,6 +11832,8 @@ class Handler(BaseHTTPRequestHandler):
             self.api_agent_permit()
         elif path == "/api/agent_answer":
             self.api_agent_answer()
+        elif path == "/api/debate":
+            self.api_debate()
         elif path == "/api/verify":
             self.api_verify()
         elif path == "/api/userfiles":
@@ -11880,6 +11882,80 @@ class Handler(BaseHTTPRequestHandler):
         answer = str(c.get("answer") or "")[:SEC_MAX_PROMPT_CHARS]
         _agent_answer_set(run_id, q_id, answer)
         self._json({"ok": True, "run_id": run_id, "q_id": q_id})
+
+    def api_debate(self):
+        """B2: дебат-петля Архитектор↔Критик со сходимостью. SSE-стрим раундов; на развилке агент
+        задаёт ОТКРЫТЫЙ вопрос (B1) и ждёт ответ. Тело {user, task|topic, max_rounds?, model?, run_id?}.
+        Модель-движок одна на обе персоны (персоны — в системных промптах debate.py). Сходимость:
+        критик «ВЕРДИКТ: согласен» / нет новых замечаний / N раундов."""
+        c = self._body()
+        uid = c.get("user", "default")
+        if not self._ip_guard(uid):
+            return
+        topic = str(c.get("task") or c.get("topic") or "").strip()
+        if not topic:
+            return self._json({"error": "пустая тема дебата"}, 400)
+        if len(topic) > SEC_MAX_PROMPT_CHARS:
+            return self._json({"error": "слишком длинная тема"}, 400)
+        owner = is_owner(uid)
+        if not owner:                          # мульти-вызовный прогон — гейт баланса (как orchestrate)
+            need = round(0.05 * (1 + load_billing().get("markup_pct", 50) / 100), 6)
+            if user_balance(uid).get("balance", 0) < need:
+                return self._json({"error": f"Недостаточно средств: ~${need}.", "need": need}, 402)
+        try:
+            from debate import run_debate
+        except Exception as e:
+            return self._json({"error": f"дебат недоступен: {e}"}, 503)
+        max_rounds = max(2, min(6, int(c.get("max_rounds") or 4)))
+        run_id = str(c.get("run_id") or "").strip() or secrets.token_hex(6)
+        # Движок: одна модель на обе персоны. ВАЖНО: не доверяем route_model для «авто» — он может
+        # дать мёртвую Venice-модель (напр. gemma-4-uncensored), и venice_complete вернёт "" молча →
+        # пустой дебат. Поэтому авто → надёжный дешёвый nano-дефолт (проверен в orchestrate/brain).
+        # Явную модель юзера уважаем; если у неё нет ключа — тот же надёжный дефолт.
+        model = str(c.get("model") or "").strip()
+        if not model or model == "__auto__":
+            model = "ng:gemini-2.5-flash"
+        key, _b, kerr = resolve_key(uid, model)
+        if kerr or not key:
+            model = "ng:gemini-2.5-flash"
+            key, _b, kerr = resolve_key(uid, model)
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        def emit(kind, data):
+            try:
+                self.wfile.write(("data: " + json.dumps({"type": kind, **data}, ensure_ascii=False) + "\n\n").encode())
+                self.wfile.flush()
+            except Exception:
+                pass
+
+        def ask_model(system, user):
+            return venice_complete(model, [{"role": "system", "content": system},
+                                           {"role": "user", "content": user}],
+                                   max_tokens=1100, key=key) or ""
+
+        def ask_human(question, context=""):
+            qid = secrets.token_hex(4)
+            return _agent_question_wait(run_id, qid, question, emit=emit, context=context,
+                                        timeout=_AGENT_QUESTION_TIMEOUT)
+
+        emit("debate_start", {"run_id": run_id, "topic": topic,
+                              "model": strip_model_prefix(model).split("/")[-1]})
+        try:
+            r = run_debate(topic, ask_model, ask_human=ask_human, emit=emit, max_rounds=max_rounds)
+        except Exception as e:
+            emit("error", {"error": str(e)[:200]})
+            _agent_answers_cleanup(run_id)
+            return
+        if not owner:
+            charge_media(uid, 0.05, kind="debate")
+        emit("done", {"blueprint": r.get("blueprint"), "converged": bool(r.get("converged")),
+                      "stop_reason": r.get("stop_reason"), "rounds": len(r.get("rounds") or []),
+                      "questions": r.get("questions")})
+        _agent_answers_cleanup(run_id)
 
     def api_topup(self):
         """Пополнение баланса самим пользователем (ползунок «купить токены»).
