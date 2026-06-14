@@ -2998,6 +2998,11 @@ def venice_stream(model: str, messages: list, max_tokens: int, usage_out: dict =
     SSE-потока у дешёвых провайдеров. Существующие читатели смотрят лишь
     prompt/completion_tokens, поэтому ключ их не трогает (полная обратная совместимость).
     temperature — необязательная (0..1.5); при None провайдеру не шлём (его дефолт)."""
+    # item 3: лестница деградации бюджета ДО резолва провайдера/ключа (свап остаётся в той же семье
+    # и у того же провайдера → ключ валиден). Тесный nano-баланс → ↓глубину, потом ближайшая дешевле.
+    model, reasoning_effort, max_tokens, _dn = budget_degrade(model, reasoning_effort, max_tokens, messages)
+    if _dn and usage_out is not None:
+        usage_out["__degrade_note__"] = _dn
     prov = provider_for(model)
     key = key or global_key(provider_name(model))
     if not key:
@@ -3111,6 +3116,8 @@ def venice_complete(model: str, messages: list, max_tokens: int = 400, key: str 
     """Не-стриминговый запрос — для служебных задач (память, улучшение промпта) и голов мульти-движковых
     режимов (совет/мозг-эксперт). По умолчанию общий пул-ключ. temperature/reasoning_effort —
     необязательные; reasoning_effort шлём ТОЛЬКО думающим (gate у вызывающего) и только как параметр."""
+    # item 3: лестница деградации бюджета (как в venice_stream); служебный путь — пометку не показываем.
+    model, reasoning_effort, max_tokens, _ = budget_degrade(model, reasoning_effort, max_tokens, messages)
     prov = provider_for(model)
     key = key or global_key(provider_name(model))
     if not key:
@@ -3368,6 +3375,93 @@ def cap_nano_max_tokens(model: str, max_tokens: int, messages: list = None) -> i
         return max(64, affordable)                         # хотя бы осмысленный кусок ответа
     except Exception:
         return max_tokens
+
+
+# ── Лестница деградации бюджета (item 3) ─────────────────────────────────────────────
+# При тесном балансе НЕ роняем запрос в 402 и НЕ прыгаем на чужую модель рандомом. Порядок:
+#   1) ↓ГЛУБИНУ (reasoning_effort high→low) — модель ЮЗЕРА ЦЕЛА, просто меньше reasoning-токенов;
+#   2) если и на low осмысленный ответ не влезает в бюджет → БЛИЖАЙШАЯ дешевле в ТОМ ЖЕ семействе
+#      и у того же провайдера (opus 4.8→4.7), а не «в пол» и не чужая (выбор юзера уважаем);
+#   3) кап токенов под остаток (как раньше), но не в ноль.
+# Честная пометка кладётся в usage_out["__degrade_note__"] (вызывающий может показать юзеру).
+# Гейт ТОТ ЖЕ, что у cap_nano_max_tokens (nanogpt + активная подписка + есть цена + низкий баланс) —
+# вне этого пути всё РОВНО как было (back-compat: healthy-баланс → aff>=max_tokens → без изменений).
+def nearest_cheaper(model: str):
+    """Ближайшая дешевле модель ТОГО ЖЕ семейства и провайдера. Среди моделей с такой же
+    _model_family и тем же провайдером, у кого out-цена СТРОГО ниже текущей — берём с НАИВЫСШЕЙ
+    out-ценой (ближайший шаг вниз, не самая дешёвая). None — нет цены/семьи/кандидата."""
+    cur = price_of(model)
+    cur_out = (cur or (0, 0))[1]
+    if not cur_out or cur_out <= 0:
+        return None
+    fam = _model_family(model)
+    if not fam:
+        return None
+    prov = provider_name(model)
+    best, best_out = None, -1.0
+    for mid, pr in PRICE.items():
+        if mid == model:
+            continue
+        po = (pr or (0, 0))[1]
+        if not po or po <= 0 or po >= cur_out:             # строго дешевле по выходу
+            continue
+        if provider_name(mid) != prov:                     # тот же провайдер → ключ/маршрут гарантированы
+            continue
+        if _model_family(mid) != fam:                      # та же линейка (opus≠sonnet) → характер сохраняем
+            continue
+        if po > best_out:                                  # ближайший шаг вниз = самый дорогой из дешёвых
+            best, best_out = mid, po
+    return best
+
+
+def _nano_affordable_out(model: str, messages: list, balance_usd: float):
+    """Сколько выходных токенов влезает в остаток баланса под эту модель (вход+резерв×0.75).
+    None — нет цены (тогда деградацию по бюджету не делаем). Зеркалит математику cap_nano_max_tokens."""
+    in_price, out_price = (PRICE.get(model) or (0, 0))
+    if not out_price or out_price <= 0:
+        return None
+    in_chars = sum(len(str(m.get("content") or "")) for m in (messages or []))
+    in_cost = (in_chars / 3.0) * ((in_price or 0) / 1_000_000.0)
+    budget = (balance_usd or 0) * 0.75 - in_cost
+    if budget <= 0:
+        return 0
+    return int(budget / (out_price / 1_000_000.0))
+
+
+def budget_degrade(model: str, reasoning_effort, max_tokens: int, messages: list = None):
+    """Лестница деградации (см. блок выше). Возвращает (model, reasoning_effort, max_tokens, note).
+    note — строка-пометка для юзера ('' если изменений нет). Любой сбой → всё как было (тихо)."""
+    note = ""
+    try:
+        if provider_name(model) != "nanogpt" or not nano_sub_status().get("active"):
+            return model, reasoning_effort, max_tokens, note
+        bal = nano_balance_usd_raw()
+        if bal is None or bal <= 0:
+            return model, reasoning_effort, max_tokens, note
+        aff = _nano_affordable_out(model, messages, bal)
+        if aff is None or aff >= max_tokens:               # нет цены ИЛИ хватает на полный ответ → не трогаем
+            return model, reasoning_effort, max_tokens, note
+        # --- ступень 1: ↓ глубину (модель юзера ЦЕЛА; меньше reasoning-токенов → дешевле вывод) ---
+        eff = reasoning_effort
+        if eff in ("high", "medium") and model_reasons(model):
+            note = f"снизил глубину {eff}→low ради бюджета (модель твоя цела)"
+            eff = "low"
+        # --- ступень 2: даже сжатый ответ не лезет → ближайшая дешевле в семье ---
+        m2 = model
+        MIN_USEFUL = 256
+        if aff < MIN_USEFUL:
+            cand = nearest_cheaper(model)
+            if cand:
+                aff2 = _nano_affordable_out(cand, messages, bal)
+                if aff2 and aff2 > aff:
+                    short = strip_model_prefix(cand).split("/")[-1]
+                    note = (note + "; " if note else "") + f"взял ближайшую дешевле — {short}"
+                    m2, aff = cand, aff2
+        # --- ступень 3: кап токенов под остаток (как раньше), не в ноль ---
+        cap = max(64, min(max_tokens, aff))
+        return m2, eff, cap, note
+    except Exception:
+        return model, reasoning_effort, max_tokens, note
 
 
 def _chutes_balance() -> dict:
