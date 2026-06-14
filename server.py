@@ -77,13 +77,20 @@ PROVIDERS = {
         "models_url": "https://api.redpill.ai/v1/models",
         "key": Path("~/.redpill_key").expanduser(),
     },
+    # AIMLAPI: OpenAI-совместимый агрегатор (178 текст-моделей). Текст под префиксом "am:"
+    # (медиа-генерация остаётся под "aiml:" — отдельные хендлеры). Pay-as-you-go, крипта/перепродажа ок.
+    "aimlapi": {
+        "url": "https://api.aimlapi.com/v1/chat/completions",
+        "models_url": "https://api.aimlapi.com/models",
+        "key": Path("~/.aimlapi_key").expanduser(),
+    },
 }
 # Комиссия-провайдеры (ты берёшь наценку): Venice, NanoGPT, Chutes, Redpill — ровно 4.
 # Redpill — TEE/no-logs + крипта. Featherless/OpenRouter/Parasail/AtlasCloud убраны (на них не заработать).
 # В интерфейсе провайдеры НЕ показываются — пользователь видит один бренд «Mostik AI».
 
-# Префиксы id → провайдер
-_PREFIXES = {"ng:": "nanogpt", "ch:": "chutes", "rp:": "redpill"}
+# Префиксы id → провайдер. "am:" = AIMLAPI ТЕКСТ (медиа-генерация — отдельный "aiml:", не сюда).
+_PREFIXES = {"ng:": "nanogpt", "ch:": "chutes", "rp:": "redpill", "am:": "aimlapi"}
 
 # Легальный статус под перепродажу (по разбору ToS, 2026-06-10). resale/nsfw + краткая подпись.
 PROVIDER_LEGAL = {
@@ -628,6 +635,26 @@ def _redpill_record(m: dict) -> dict:
         "vision": "image" in ins or f["vision"], "reasoning": f["reasoning"],
         "code": f["code"], "tools": True, "uncensored": f["uncensored"],
         "privacy": "TEE", "moderated": False, "desc": (m.get("description") or "")[:160],
+    }
+
+
+def _aimlapi_record(m: dict) -> dict:
+    # AIMLAPI /models: {id, info:{name,contextLength,description}, type, aliases}. Цен в API НЕТ.
+    info = m.get("info") or {}
+    mid = m.get("id", "")
+    idl = (mid + " " + (info.get("name") or "")).lower()
+    f = _flags_from_id(idl)
+    return {
+        "id": "am:" + mid, "provider": "aimlapi",
+        "name": info.get("name") or mid.split("/")[-1],
+        "ctx": info.get("contextLength") or 0,
+        # цен нет → консервативный mid-дефолт ($2/$6 за млн → per1k≈$0.01), чтобы роутер НЕ
+        # считал aimlapi бесплатным/самым дешёвым и не предпочитал его зря (дедуп оставит дешевле).
+        "in": 2.0, "out": 6.0,
+        "vision": f["vision"], "reasoning": f["reasoning"],
+        "code": f["code"], "tools": True, "uncensored": f["uncensored"],
+        "privacy": "gateway", "moderated": False,
+        "desc": (info.get("description") or "")[:160],
     }
 
 
@@ -2101,6 +2128,11 @@ def load_rich_catalog():
         ("NanoGPT", PROVIDERS["nanogpt"]["models_url"], ua, _nanogpt_record, None),
         ("Chutes", PROVIDERS["chutes"]["models_url"], ua, _chutes_record, None),
         ("Redpill", PROVIDERS["redpill"]["models_url"], ua, _redpill_record, None),
+        # AIMLAPI: только ТЕКСТ-чат (openai/chat-completions); медиа/эмбеддинги/anthropic-batch — мимо.
+        # ВАЖНО: AIMLAPI отдаёт 403 без User-Agent → шлём UA вместе с Bearer (иначе источник пуст).
+        ("AIMLAPI", PROVIDERS["aimlapi"]["models_url"],
+         ({**ua, **_bearer("aimlapi")} if _bearer("aimlapi") else None), _aimlapi_record,
+         lambda m: m.get("type") == "openai/chat-completions"),
     ]
     for name, url, headers, builder, keep in sources:
         if headers is None:
@@ -2742,6 +2774,8 @@ def headers_for(prov: dict, key: str) -> dict:
     if "openrouter.ai" in prov["url"]:
         h["HTTP-Referer"] = "https://mostik.xyz"
         h["X-Title"] = "Mostik AI"
+    if "aimlapi.com" in prov["url"]:
+        h["User-Agent"] = UA   # AIMLAPI отдаёт 403 на запросы без User-Agent
     return h
 
 
