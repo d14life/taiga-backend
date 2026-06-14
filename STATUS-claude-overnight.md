@@ -175,3 +175,164 @@ passes onMerge / onOpenAsChat / seedContext and feeds derived goals into orchest
 - /app (frontend) .......................... green  GET /app → 200 (after backend restart)
 
 ---
+
+## Agent-OS Wave A — live dock + run replay/stepper + task DAG + session lib — fe d4a63ba / be 8ac81d7
+
+Status: GREEN. tsc --noEmit exit 0 (project-wide, incl. new files); GET /app → 200 (dev server live,
+HMR picked up edits). Committed + pushed both repos.
+
+### Features
+- **Live agent dock** — global, always-on floating dock (`position: fixed`), visible on every tab,
+  doesn't cover the composer. Opens a run into replay via `onOpenRun`.
+- **Run replay / stepper** — full-screen overlay; play back a run's recorded trace step-by-step; can
+  "Открыть как чат" (reuses the exact run-to-chat bridge: `runTraceToMessages` → guard empty →
+  close replay → mode chat → new chatId → load).
+- **Task dependency-graph (DAG)** — lives inside the existing `AgentTasks` (sub-tab Задачи, already
+  mounted ~line 5545); no extra wiring needed in chat.tsx.
+- **Unified session lib** — net-new `src/lib/session.ts` (174 lines); standalone, builds clean. Not yet
+  imported by other modules (supporting lib; surface-wiring lands in a later wave).
+
+### Files (taiga-web/src)
+- `components/agent-dock.tsx` (NEW, 486 ln): floating live dock; `onOpenRun(run)` callback.
+- `components/run-replay.tsx` (NEW, 634 ln): full-screen run stepper; `onClose` + `onOpenAsChat`.
+- `lib/session.ts` (NEW, 174 ln): unified session helpers.
+- `components/agent-tasks.tsx` (MOD, +534): task dependency-graph inside Задачи sub-tab.
+- `components/chat.tsx` (MOD, +26): only file touched for mount —
+  - imports `AgentDock`, `RunReplay`, `import type { AgentRun }` (~ln 159-161);
+  - `const [replayRun, setReplayRun] = useState<AgentRun | null>(null)` (~ln 392);
+  - top-level render (just before root `</div>`, alongside McpPanel/Playground/PermissionModal/toast):
+    `<AgentDock onOpenRun={(run) => setReplayRun(run)} />` (ln 6438) + `{replayRun && <RunReplay … />}`
+    (ln 6441-6443).
+
+### UI reachable
+- Dock mounted **once** at top level (outside all tab scroll-containers) → visible on every tab, every
+  mode; fixed-position so it never covers the composer.
+- Replay overlay renders above everything when `replayRun` is set; opened from the dock per spec
+  (`AgentRunsPanel` exposes no replay prop — only onOpen/onOpenAsChat/className — so the dock is the
+  entry point).
+- Task DAG reachable via Задачи sub-tab (already live).
+
+### Binary lines
+- agent dock (live, global) ................ done  fe d4a63ba  (agent-dock.tsx, onOpenRun)
+- run replay / stepper ..................... done  fe d4a63ba  (run-replay.tsx, onClose/onOpenAsChat)
+- task dependency-graph .................... done  fe d4a63ba  (agent-tasks.tsx, in Задачи)
+- unified session lib ..................... done  fe d4a63ba  (lib/session.ts, standalone)
+- chat.tsx wiring (dock + replay mount) .... done  fe d4a63ba  (was PENDING above; now mounted, +26)
+- tsc --noEmit (taiga-web) ................. green  exit 0
+- GET /app ................................ green  200
+- pushed (taiga-web) ...................... done  609254e..d4a63ba main
+- pushed (root bump) ...................... done  f7eb908..8ac81d7 main
+
+---
+
+## Agent-OS Wave B — auto-approve + event triggers/heartbeats + run checkpoints
+
+Three agent-OS slices, all surfaced in the UI. Front commit `7395ee5` (taiga-web), backend/bump
+commit `2feb6d3` (root).
+
+### Features
+- **Auto-approve safe tool-calls** — a per-session policy `ask | smart | full` deciding mid-run
+  tool-permission requests automatically (safe calls auto-approved under `smart`, everything under
+  `full`; default `ask` = unchanged old behavior). Policy is owned by the chat hook and persisted to
+  `localStorage` (`taiga.approve.policy`). Risk classification lives in net-new `lib/tool-risk.ts`
+  (`APPROVE_POLICIES`, `APPROVE_POLICY_LABELS`, `APPROVE_POLICY_HINTS`, `isApprovePolicy`,
+  `type ApprovePolicy`). This is a separate axis from `permMode` (server-side tool gate before a run);
+  approve-policy is the mid-run client decision.
+- **Event triggers / heartbeats** — routines can now fire on events, not just on a clock. A routine
+  carries an optional `trigger: { kind: "time" | "on_run_done" | "on_chat_match", pattern? }`.
+  `time` (default) → time daemon. `on_run_done` → fired when any agent run finishes. `on_chat_match`
+  → fired when a chat message matches `pattern`. Backend contract: `POST /api/routine_event
+  {user, event:"run_done"|"chat_match", text?}` → runs the user's matching event-routines and returns
+  `{ok, fired:[…]}`; the time daemon ignores event-kind triggers (and vice-versa).
+- **Run checkpoints** — the loop engine emits a `checkpoint` event at each stage boundary; replay can
+  insert it as a `note` step (marker `⟢checkpoint⟣`, survives `sanitizeStep`). From the replay overlay
+  you can resume from a checkpoint or branch a fresh agent run seeded with the trace up to that step.
+
+### Files
+- `taiga-web/src/lib/tool-risk.ts` (NEW): approve-policy enum + labels/hints + `isApprovePolicy` guard
+  + per-tool risk classification.
+- `taiga-web/src/lib/use-taiga-chat.ts` (MOD, +183): owns `approvePolicy` / `setApprovePolicy`,
+  `localStorage` persistence (`taiga.approve.policy`), default `ask`, optional `approvePolicy` option.
+- `taiga-web/src/components/chat.tsx` (MOD, +66): compact approve toggle chip (ShieldCheck,
+  Спрашивать/Умный авто/Полный авто) next to the «Права агента» pill; `cycleApprovePolicy()` with hint
+  toast; `branchFromCheckpoint(run, stepIndex)` wired into `<RunReplay onBranch=…>` (seeds the Команда
+  panel from the trace, same seed-bridge as `promoteToAgent`); replay still opened from `AgentDock
+  onOpenRun`.
+- `taiga-web/src/components/agent-automations.tsx` (MOD, +266): `trigger` field on routines, `TriggerKind`,
+  `normalizeTrigger` (defaults to `time`, keeps `pattern` only for `on_chat_match`), `TRIGGERS` picker UI.
+- `taiga-web/src/components/run-replay.tsx` (MOD, +37): `onBranch(run, stepIndex)` prop; resume-from /
+  branch-from-checkpoint buttons.
+- `taiga-web/src/lib/loop-engine.ts` (MOD, +43): `checkpoint` event at stage boundaries; `CHECKPOINT_MARK`,
+  `stageCheckpointStep`, `checkpointLabel`, `isCheckpointStep`.
+- `server.py` (MOD, +165/-25): `POST /api/routine_event` handler (`api_routine_event`), event→trigger.kind
+  mapping, event-routine runner; time daemon scoped to `trigger.kind=="time"` only.
+
+### UI reachable
+- Approve chip lives in the mode-pill cluster (right after «Права агента»), visible wherever the
+  composer is.
+- Trigger picker lives in the routine editor inside Automations.
+- Checkpoint resume / branch buttons render in the run-replay overlay (opened from the global dock).
+
+### Checks (all green)
+- `npx tsc --noEmit` (taiga-web) ........... green  exit 0  (note: literal `--noEmit=0` is invalid tsc
+  flag TS5025; correct form `--noEmit` is the one run)
+- `python3 ast.parse(server.py)` .......... green  AST OK
+- `GET 127.0.0.1:3000/app` ................ green  200
+- `POST /api/routine_event` smoke ......... green  200  `{"ok": true, "fired": []}`
+
+### Binary lines
+- auto-approve safe tool-calls ............. done  fe 7395ee5  (tool-risk.ts + use-taiga-chat.ts + chat.tsx chip)
+- event triggers / heartbeats (FE) ........ done  fe 7395ee5  (agent-automations.tsx trigger picker)
+- event triggers / heartbeats (BE) ........ done  be 2feb6d3  (server.py /api/routine_event)
+- run checkpoints (emit + branch/resume) .. done  fe 7395ee5  (loop-engine.ts + run-replay.tsx + chat.tsx)
+- tsc --noEmit (taiga-web) ................. green  exit 0
+- server.py AST ........................... green  OK
+- GET /app ................................ green  200
+- routine_event smoke ..................... green  200 {"ok":true,"fired":[]}
+- pushed (taiga-web) ...................... done  d4a63ba..7395ee5 main
+- pushed (root bump) ...................... done  8ac81d7..2feb6d3 main
+
+---
+
+## Wave C — sandbox surface + MCP/skill marketplace + eval harness (Agent sub-tabs)
+
+Top unchecked FINISH-ALL item #1. Three parallel-agent components on NEW files, integrated into
+chat.tsx in ONE pass (existing motion-pill sub-tab pattern). Layered on top of the existing
+sandbox/terminal/browser/mcp/skills routes — nothing rewired underneath.
+
+### Features
+- **Песочница** (sub-tab `sandbox`) — computer-use surface: terminal + files + browser sharing ONE
+  session via the chat`s own `chatId`; `onAskPage` bridges page text back into chat (existing
+  `setBigTab("none")`+`setMode("chat")`+`send` path).
+- **Инструменты** (sub-tab `tools`) — MCP / skill marketplace; install wired to the existing
+  `addSkill` store, `installedSkillNames` derived from live `skills` state (skill-badge surface).
+- **Оценки** (sub-tab `evals`) — loop eval harness (embedded), small local store.
+
+### Files
+- `taiga-web/src/components/run-sandbox.tsx` (NEW, 774 lines) — sandbox/computer-use surface.
+- `taiga-web/src/components/tool-marketplace.tsx` (NEW, 1045 lines) — MCP/skill marketplace.
+- `taiga-web/src/components/loop-evals.tsx` (NEW, 1037 lines) — loop eval harness + store.
+- `taiga-web/src/components/chat.tsx` (MOD, +39/-2): imports (L46-48); `agentSub` union extended with
+  `sandbox|tools|evals` (L576); three motion-pills `Песочница`/`Инструменты`/`Оценки` in the Agent
+  sub-nav; three render branches (L5744-5775; former `truth` else-fallback made explicit).
+
+### UI reachable
+- Agent tab → sub-nav pills `Песочница` / `Инструменты` / `Оценки`, alongside the existing
+  Режимы/Автоматизации/Задачи/Прогоны/Ralph/Источник-правды pills.
+
+### Checks (all green)
+- `npx tsc --noEmit` (taiga-web) ........... green  exit 0  (whole project clean)
+- `GET 127.0.0.1:3000/app` ................ green  200
+- backend untouched this wave (no server.py change, no restart needed)
+
+### Binary lines
+- sandbox surface (Песочница) ............. done  fe 4f8a8c7  (run-sandbox.tsx)
+- MCP/skill marketplace (Инструменты) ..... done  fe 4f8a8c7  (tool-marketplace.tsx)
+- eval harness (Оценки) ................... done  fe 4f8a8c7  (loop-evals.tsx)
+- chat.tsx integration (3 sub-tabs) ....... done  fe 4f8a8c7  (imports + agentSub + pills + branches)
+- tsc --noEmit (taiga-web) ................. green  exit 0
+- GET /app ................................ green  200
+- pushed (taiga-web) ...................... done  fe 4f8a8c7 main
+- pushed (root bump) ...................... done  this commit (root gitlink → 4f8a8c7) main
+
+---
