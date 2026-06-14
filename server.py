@@ -1633,6 +1633,7 @@ _MLX_COMPRESS_URL = "http://127.0.0.1:8791/compress"
 _COMPRESS_CACHE = {}
 _COMPRESS_CACHE_MAX = 800
 _COMPRESS_MIN_LEN = 600   # короче — не жмём (нет смысла)
+_MEM_SYNCED_CHATS = set()  # #5: чаты, чья память уже выгружена в песочницу (раз на процесс/чат)
 
 
 def _compress_text(text: str, ratio: int = 6) -> str:
@@ -10296,6 +10297,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"output": "", "error": "Баланс исчерпан."}, 402)
             # ПЕРСИСТЕНТНАЯ сессия чата: cd/env/файлы живут между командами; ИИ (run_code) и юзер делят ОДНУ.
             import skills_run
+            # #5: один раз на чат выгружаем память юзера в песочницу (файл) — ИИ и юзер её видят
+            try:
+                if chat_id not in _MEM_SYNCED_CHATS:
+                    import mem_to_sandbox
+                    mem_to_sandbox.write_memory_to_sandbox(chat_id, uid, load_memory=load_memory,
+                                                           filter_tombstoned=filter_tombstoned)
+                    _MEM_SYNCED_CHATS.add(chat_id)
+            except Exception:
+                pass
             res = skills_run.sandbox_session_run(chat_id, cmd)
             if res.get("ok"):
                 if not is_owner(uid):
