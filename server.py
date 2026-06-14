@@ -6849,6 +6849,9 @@ def validate_user_config(raw) -> dict:
         v = _clamp(mmc, 200, 2000, None)
         if v is not None:
             out["memory_max_chars"] = int(v)
+    # #16 серверное хранение файлов (opt-in) — пробрасываем булев флаг, иначе тумблер не сохранится
+    if isinstance(raw.get("server_files"), bool):
+        out["server_files"] = raw["server_files"]
     return out
 
 
