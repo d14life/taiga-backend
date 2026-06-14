@@ -25,6 +25,9 @@ _FALLBACK = ["gemini-2.5-flash", "mistralai/Mistral-Nemo-Instruct-2407", "sonar"
 # Потолок ожидания всей параллельной фазы воркеров (сек). Кто не успел — синтез без него,
 # чтобы оркестратор не «висел долго не отвечает» из-за одной медленной модели.
 WORKER_BUDGET = 110
+# Чат-в-Агент: потолок контекста из исходного чата (seed), который подмешиваем в план/воркеров.
+# Обрезаем, чтобы один длинный диалог не раздул каждый промпт и стоимость прогона.
+SEED_MAX_CHARS = 8000
 
 # Скиллы-персоны воркеров (вдохновлено ECC — 64 агента / 262 скилла, MIT).
 SKILLS = {
@@ -106,11 +109,19 @@ class OrchState(TypedDict):
 
 
 def run_orchestration(task: str, workers: list = None, emit=None, mode: str = "parallel", tools: dict = None,
-                      verify=None) -> dict:
+                      verify=None, seed: str = None) -> dict:
     """Запуск оркестрации. workers = [{model, provider?, skill, key?, base?, accept?}, ...];
     emit(kind, data) → таймлайн.
     mode='parallel'|'sequential' (sequential = воркеры видят результаты прошлых, для зависимых задач).
     tools={'search': fn} → воркер-researcher реально ищет через супер-поиск.
+
+    Чат-в-Агент (аддитивно, обратно-совместимо):
+    - `seed` — НЕОБЯЗАТЕЛЬНЫЙ контекст из исходного чата (строка). Если задан — подмешивается
+      в системную часть планировщика и в промпт каждого воркера блоком «КОНТЕКСТ ИЗ ЧАТА: …»,
+      обрезанным до SEED_MAX_CHARS, чтобы прогон агента стартовал со знанием предыстории.
+      seed отсутствует/пустой → поведение РОВНО как раньше (никакого блока контекста).
+      АНТИ-RCE: seed — это просто ТЕКСТ для модели; он НИКОГДА не exec/eval, только кладётся
+      в content сообщения. Любой ввод приводится к строке и режется по длине.
 
     TaskPacket (аддитивно, обратно-совместимо):
     - У каждого воркера может быть свой `model` (и `provider`) — тогда именно эта модель работает
@@ -125,12 +136,17 @@ def run_orchestration(task: str, workers: list = None, emit=None, mode: str = "p
     tools = tools or {}
     explicit_workers = bool(workers)          # юзер явно задал воркеров → уважаем их число
     workers = workers or [{"skill": "researcher"}, {"skill": "critic"}]
+    # Чат-в-Агент: нормализуем seed в строку и режем по потолку (всё, что не str → str; None → "").
+    # Это ТОЛЬКО текст для подмешивания в промпты — он никогда не исполняется (анти-RCE).
+    seed_ctx = str(seed or "").strip()[:SEED_MAX_CHARS]
+    seed_block = ("\n\nКОНТЕКСТ ИЗ ЧАТА (предыстория от пользователя, опирайся на неё):\n"
+                  + seed_ctx) if seed_ctx else ""
 
     def plan_node(state):
         emit("step", {"node": "plan", "status": "running", "label": "Декомпозиция задачи"})
         raw = _complete(PLANNER_MODEL, [
             {"role": "system", "content": "Разбей задачу на 2-4 чёткие независимые подзадачи. "
-                                          "Верни ТОЛЬКО JSON-массив строк."},
+                                          "Верни ТОЛЬКО JSON-массив строк." + seed_block},
             {"role": "user", "content": state["task"]}], max_tokens=400)
         plan = _extract_list(raw) or [state["task"]]
         # Уважаем явно заданное число воркеров (1 воркер → 1 подзадача, без удвоения стоимости).
@@ -167,7 +183,7 @@ def run_orchestration(task: str, workers: list = None, emit=None, mode: str = "p
                 emit("agent", {"worker": i, "status": "search_failed", "error": str(e)[:160],
                                "note": "поиск упал — отвечаю без свежих источников"})
                 ctx = "\n\n(Поиск недоступен — отвечай по своим знаниям, отметь что без свежих источников.)"
-        user_msg = sub + (f"\n\nКОНТЕКСТ от прошлых агентов:\n{prior}" if prior else "") + ctx
+        user_msg = sub + seed_block + (f"\n\nКОНТЕКСТ от прошлых агентов:\n{prior}" if prior else "") + ctx
         try:
             res = _complete(model, [
                 {"role": "system", "content": SKILLS.get(skill, SKILLS["general"])},

@@ -10477,6 +10477,10 @@ class Handler(BaseHTTPRequestHandler):
         # поведение как раньше) и даём дешёвый verify-колбэк для envelope приёмки подзадач.
         safe_workers = _sanitize_orchestrate_workers(c.get("workers"), uid)
         verifier = _orchestrate_verifier(uid)
+        # Чат-в-Агент: НЕОБЯЗАТЕЛЬНЫЙ контекст из исходного чата. Просто текст для подмешивания
+        # в план/воркеров (анти-RCE: никогда не исполняется). Нет seed → прежнее поведение.
+        # Режем по тому же потолку, что и одиночный промпт; orchestrator ещё раз подрежет до SEED_MAX_CHARS.
+        seed = str(c.get("seed") or "")[:SEC_MAX_PROMPT_CHARS]
 
         if c.get("stream"):                    # SSE: живой таймлайн для панели (как Copilot Agents)
             self.send_response(200)
@@ -10494,7 +10498,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 r = run_orchestration(task, workers=safe_workers, emit=emit_sse,
                                       mode=c.get("mode", "parallel"), tools={"search": super_search},
-                                      verify=verifier)
+                                      verify=verifier, seed=seed)
             except Exception as e:
                 emit_sse("error", {"error": str(e)})
                 return
@@ -10510,7 +10514,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             r = run_orchestration(task, workers=safe_workers, emit=emit,
                                   mode=c.get("mode", "parallel"), tools={"search": super_search},
-                                  verify=verifier)
+                                  verify=verifier, seed=seed)
         except Exception as e:
             return self._json({"error": friendly_api_error(None, str(e))}, 502)
         r["steps"] = steps
