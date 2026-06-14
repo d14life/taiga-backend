@@ -1370,6 +1370,19 @@ def rag_query(uid: str, query: str, k: int = 4, workspace=None, include_global: 
     if smart:
         return rag_query_smart(uid, query, k=k, workspace=workspace,
                                include_global=include_global, **smart_opts)
+    # ДЕФОЛТ теперь ГИБРИД (Damir 2026-06-14: «гибрид-поиск — самый большой скачок точности»):
+    # dense-косинус + keyword-канал + RRF-слияние, БЕЗ доп. LLM-вызовов (тот же 1 эмбеддинг, что и
+    # чистый косинус; keyword+RRF — чистый питон). smart=True добавляет MultiQuery+LLM-реранк (премиум).
+    # Любой сбой гибрида → классический косинус ниже (никогда не возвращаем пусто зря).
+    if _RAG_HYBRID_DEFAULT:
+        try:
+            h = rag_query_smart(uid, query, k=k, workspace=workspace,
+                                include_global=include_global,
+                                use_improve=False, rerank=False, variants=1)
+            if h:
+                return h
+        except Exception:
+            pass
     items = [it for it in _rag_load(uid) if _rag_in_scope(it, workspace, include_global)]
     if not items:
         return []
@@ -1394,6 +1407,9 @@ def rag_query(uid: str, query: str, k: int = 4, workspace=None, include_global: 
 _RAG_RRF_K = 60            # константа Reciprocal Rank Fusion (LangChain-дефолт)
 _RAG_SMART_PER_K = 8       # сколько кусков тянем на КАЖДЫЙ под-запрос/канал до слияния
 _RAG_SMART_RERANK_N = 10   # сколько слитых кандидатов скармливаем LLM-реранку
+# Гибрид (dense+keyword+RRF) по умолчанию для ОБЫЧНОГО RAG — бесплатный скачок точности без доп.
+# LLM-вызовов. smart=True добавляет MultiQuery+LLM-реранк. Выключить → классический косинус-топ-k.
+_RAG_HYBRID_DEFAULT = True
 
 # Стоп-слова (RU+EN) — чтобы keyword-канал не цеплялся за служебные слова.
 _RAG_STOP = frozenset((
