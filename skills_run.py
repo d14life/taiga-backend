@@ -266,10 +266,13 @@ def _e2b_api_key():
     return os.environ.get("E2B_API_KEY") or ""
 
 
-def run_in_cloud_sandbox(code, lang):
+def run_in_cloud_sandbox(code, lang, stdin_text=None):
     """Тяжёлый/нативный путь: одноразовый E2B Linux-sandbox (реальный терминал, pip, бинарники).
     Один наш аккаунт E2B; расход перекладываем на кредиты юзера на уровне server.py.
-    Ленивая загрузка SDK + мягкая деградация, если ключа/SDK нет. Возврат: {ok, output|error, runtime}."""
+    Ленивая загрузка SDK + мягкая деградация, если ключа/SDK нет. Возврат: {ok, output|error, runtime}.
+
+    stdin_text (опц.) — STDIN для скрипта: пишем во временный файл в песочнице и редиректим в процесс
+    (универсально, без завязки на версию SDK), плюс кладём в env SKILL_INPUT."""
     import os
     key = _e2b_api_key()
     if not key:
@@ -283,15 +286,36 @@ def run_in_cloud_sandbox(code, lang):
     sbx = None
     try:
         sbx = Sandbox.create()
+        _stdin = None if stdin_text is None else str(stdin_text)[:100000]
+        if _stdin is not None:
+            # кладём stdin в файл песочницы → процесс читает реальный STDIN через редирект ниже
+            try:
+                sbx.files.write("/tmp/_skill_stdin", _stdin)
+            except Exception:
+                _stdin = None     # запись не удалась → деградируем без stdin (не падаем)
         if lang in ("python", "js", "javascript", "ts", "typescript"):
-            ex = sbx.run_code(code)
+            if _stdin is not None:
+                try:
+                    ex = sbx.run_code(code, stdin=_stdin)      # новые SDK принимают stdin
+                except TypeError:
+                    ex = sbx.run_code(code)                    # старый SDK — скрипт прочтёт /tmp/_skill_stdin
+            else:
+                ex = sbx.run_code(code)
             out = "".join(ex.logs.stdout or [])
             err = "".join(ex.logs.stderr or [])
             if getattr(ex, "error", None):
                 err += f"\n{ex.error}"
             output = (out + ("\n" + err if err.strip() else "")).strip()
-        else:  # bash и прочее → как shell-команда
-            r = sbx.commands.run(code)
+        else:  # bash и прочее → как shell-команда; stdin через редирект файла
+            if _stdin is not None:
+                # оборачиваем команду так, чтобы её STDIN шёл из файла (script может читать `read`/`cat`)
+                wrapped = "{ " + code + "\n; } < /tmp/_skill_stdin"
+                try:
+                    r = sbx.commands.run(wrapped, envs={"SKILL_INPUT": _stdin})
+                except TypeError:
+                    r = sbx.commands.run(wrapped)              # старый SDK без envs — stdin-редирект всё равно работает
+            else:
+                r = sbx.commands.run(code)
             output = ((r.stdout or "") + ("\n" + r.stderr if (r.stderr or "").strip() else "")).strip()
         return {"ok": True, "runtime": "cloud-sandbox", "output": output[:20000]}
     except Exception as e:
@@ -352,7 +376,7 @@ def sandbox_session_run(chat_id, cmd):
     # НЕ убиваем — сессия персистентна; E2B сам закроет по таймауту.
 
 
-def run_skill_script(user_dir, uid, sid, script_rel, *, is_owner, run_code_lang):
+def run_skill_script(user_dir, uid, sid, script_rel, *, is_owner, run_code_lang, input=None):
     """Запустить бандл-скрипт навыка — БЕЗОПАСНО ГЕЙТИТСЯ.
 
     ВЛАДЕЛЕЦ → прямой запуск через переданный run_code_lang (тот же owner-gated путь, что run_code:
@@ -361,7 +385,11 @@ def run_skill_script(user_dir, uid, sid, script_rel, *, is_owner, run_code_lang)
         "browser-wasm" → фронт исполняет в Pyodide/WebContainer в своей вкладке (zero server cost, безопасно).
     Тяжёлый/нативный путь (бинарники/долгий процесс) → cloud-sandbox-per-user = TODO (отложенная инфра).
 
-    Возврат: {ok, runtime: "server"|"browser-wasm", output?|script, lang, ...}.
+    input (опц., строка) — STDIN для скрипта. На сервере/в облаке подаётся процессу на stdin (и в env
+    как SKILL_INPUT для удобства). Для browser-wasm возвращаем его фронту полем `input`, чтобы он
+    подал строку в Pyodide (stdin там эмулируется фронтом). Поле строго называется `input`.
+
+    Возврат: {ok, runtime: "server"|"cloud-sandbox"|"browser-wasm", output?|code, lang, input?, ...}.
     """
     code, err = _read_script(user_dir, uid, sid, script_rel)
     if err:
@@ -369,24 +397,28 @@ def run_skill_script(user_dir, uid, sid, script_rel, *, is_owner, run_code_lang)
     lang = _lang_for(script_rel)
     if lang == "text":
         return {"ok": False, "error": "это не исполняемый скрипт (.py/.js/.sh)"}
+    stdin_text = None if input is None else str(input)
 
     if is_owner(uid):
-        # owner-only прямой запуск (переиспользуем существующий gated code-run путь)
-        out = run_code_lang(code, "python" if lang == "python" else lang)
+        # owner-only прямой запуск (переиспользуем существующий gated code-run путь) + проброс stdin
+        out = run_code_lang(code, "python" if lang == "python" else lang, stdin_text=stdin_text)
         return {"ok": True, "runtime": "server", "lang": lang, "script": script_rel, "output": out}
 
     # ЮЗЕР, bash/нативное → облачный E2B-sandbox (реальный Linux). Расход метрится на сервере.
     if lang == "bash":
-        res = run_in_cloud_sandbox(code, "bash")
+        res = run_in_cloud_sandbox(code, "bash", stdin_text=stdin_text)
         if res.get("ok"):
             return {"ok": True, "runtime": "cloud-sandbox", "lang": lang,
                     "script": script_rel, "output": res.get("output", "")}
         return {"ok": False, "runtime": "cloud-sandbox", "lang": lang, "script": script_rel,
                 "error": res.get("error", "облачный sandbox недоступен")}
-    # Питон/JS юзера → browser-WASM (бесплатно). Тяжёлый питон тоже можно отправить в E2B при желании.
-    return {"ok": True, "runtime": "browser-wasm", "lang": lang, "script": script_rel,
-            "code": code,
-            "note": "скрипт выполнится в вашем браузере (Pyodide) — безопасно, без затрат сервера"}
+    # Питон/JS юзера → browser-WASM (бесплатно). stdin эмулируется фронтом → отдаём ему `input` как есть.
+    out = {"ok": True, "runtime": "browser-wasm", "lang": lang, "script": script_rel,
+           "code": code,
+           "note": "скрипт выполнится в вашем браузере (Pyodide) — безопасно, без затрат сервера"}
+    if stdin_text is not None:
+        out["input"] = stdin_text          # фронт подаёт это в Pyodide-stdin
+    return out
 
 
 # ───────────────────────────── 3 + 4. AUTO-TRIGGER + INJECT (model-agnostic) ─────────────────────────────
@@ -460,8 +492,10 @@ def make_run_skill_tool(uid, *, user_dir, is_owner, run_code_lang):
         script = str(args.get("script") or "")
         if not sid or not script:
             return 'error: нужны "skill" и "script"'
+        _inp = args.get("input")          # опц. STDIN для скрипта (поле строго "input")
         res = run_skill_script(user_dir, uid, sid, script,
-                               is_owner=is_owner, run_code_lang=run_code_lang)
+                               is_owner=is_owner, run_code_lang=run_code_lang,
+                               input=(None if _inp is None else str(_inp)))
         if not res.get("ok"):
             return "error: " + str(res.get("error"))
         if res.get("runtime") == "server":
@@ -474,6 +508,7 @@ def make_run_skill_tool(uid, *, user_dir, is_owner, run_code_lang):
 
 
 RUN_SKILL_TOOL_PROMPT = (
-    '- run_skill_script args {"skill":"<id>","script":"<file>"} — выполнить скрипт установленного навыка '
-    "(безопасный sandbox: владелец — на сервере, юзер — в браузере). Зови, когда навык требует прогнать "
-    "свой скрипт для результата.")
+    '- run_skill_script args {"skill":"<id>","script":"<file>","input":"<опц. STDIN>"} — выполнить скрипт '
+    "установленного навыка (безопасный sandbox: владелец — на сервере, юзер — в браузере). Поле input "
+    "необязательное: строка, которую скрипт получит на STDIN. Зови, когда навык требует прогнать свой "
+    "скрипт для результата.")

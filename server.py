@@ -52,7 +52,7 @@ ROOT = Path(__file__).parent
 BASE = Path("~/.mostik-ai").expanduser()
 USERS_FILE = BASE / "users.json"
 BASE.mkdir(parents=True, exist_ok=True)
-PORT = 8777
+PORT = int(os.environ.get("MOSTIK_PORT") or 8777)   # env-override для параллельного тест-инстанса
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 
 PROVIDERS = {
@@ -4681,9 +4681,10 @@ def _rlimit_preexec():
         pass
 
 
-def run_code_lang(code: str, lang: str = "python", timeout: int = 12) -> str:
+def run_code_lang(code: str, lang: str = "python", timeout: int = 12, stdin_text=None) -> str:
     """Код-интерпретатор: запуск кода в подпроцессе с таймаутом + OS-лимиты ресурсов.
-    (Полная мульти-тенант изоляция = контейнеры/E2B на деплое; здесь — rlimits + temp cwd.)"""
+    (Полная мульти-тенант изоляция = контейнеры/E2B на деплое; здесь — rlimits + temp cwd.)
+    stdin_text (опц.) — строка, которую подаём процессу на STDIN (для навык-скриптов с input)."""
     code = str(code or "")[:20000]
     lang = (lang or "python").lower()
     if lang in ("py", "python"):
@@ -4697,9 +4698,11 @@ def run_code_lang(code: str, lang: str = "python", timeout: int = 12) -> str:
         cmd = ["/bin/bash", "-c", code]
     else:
         return f"error: язык «{lang}» не поддерживается (python / js / bash)"
+    _stdin = None if stdin_text is None else str(stdin_text)[:100000]
     try:
         with tempfile.TemporaryDirectory() as td:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=td,
+                               input=_stdin,
                                preexec_fn=_rlimit_preexec if sys.platform != "win32" else None)
         out = (r.stdout or "") + (("\n[stderr]\n" + r.stderr) if r.stderr else "")
         return out.strip()[:6000] or "(нет вывода)"
@@ -9371,7 +9374,7 @@ class Handler(BaseHTTPRequestHandler):
           action="import" {url, token?} → тянет весь фолдер (≤2МБ) в стор аккаунта;
           action="list"                 → установленные навыки с метой (folder/scripts/enabled);
           action="toggle" {id, enabled} → вкл/выкл навык (выкл → не авто-триггерится);
-          action="run" {id, script}     → запуск скрипта: владелец на сервере, юзер → browser-wasm-маркер.
+          action="run" {id, script, input?} → запуск скрипта (input = опц. STDIN): владелец на сервере, юзер → browser-wasm-маркер.
         Импорт НЕ исполняет код. Запуск гейтится (анти-RCE, см. skills_run/ARCH-DECISIONS)."""
         import skills_run
         c = self._body()
@@ -9386,9 +9389,11 @@ class Handler(BaseHTTPRequestHandler):
                                               bool(c.get("enabled")))
             return self._json({"ok": ok}, 200 if ok else 404)
         if action == "run":
+            _inp = c.get("input")        # опц. STDIN для скрипта (поле строго "input")
             res = skills_run.run_skill_script(
                 user_dir, uid, str(c.get("id") or ""), str(c.get("script") or ""),
-                is_owner=is_owner, run_code_lang=run_code_lang)
+                is_owner=is_owner, run_code_lang=run_code_lang,
+                input=(None if _inp is None else str(_inp)))
             return self._json(res, 200 if res.get("ok") else 400)
         # action == "import" (по умолчанию)
         url = str(c.get("url") or "").strip()
@@ -9968,6 +9973,38 @@ class Handler(BaseHTTPRequestHandler):
         system["status"] = "draft"
         system["ts"] = int(time.time())
         return self._json({"ok": True, "system": system, "source": used})
+
+    def api_routines(self):
+        """Серверный стор рутин (источник правды по расписанию). Контракт фронта
+        (agent-automations.tsx): POST {user, action:"list"|"save"|"delete", routine?, id?}
+        → {ok, routines}. Реальный запуск делает фоновый поток (_start_routine_scheduler).
+        АНТИ-RCE: храним только текст-промпт, исполняем его ТОЛЬКО моделью; exec/eval нет."""
+        c = self._body()
+        uid = c.get("user", "default")
+        if not self._ip_guard(uid):
+            return
+        action = str(c.get("action") or "list").lower()
+        with _routine_lock:
+            routines = load_routines_store(uid)
+            if action == "save":
+                r = c.get("routine")
+                if not isinstance(r, dict):
+                    return self._json({"error": "нужен объект routine"}, 400)
+                rid = str(r.get("id") or "")
+                idx = next((i for i, x in enumerate(routines) if x.get("id") == rid), -1)
+                if idx >= 0:
+                    routines[idx] = _sanitize_routine(r, routines[idx])
+                else:
+                    if len(routines) >= _ROUTINE_MAX_PER_USER:
+                        return self._json({"error": f"лимит рутин: {_ROUTINE_MAX_PER_USER}"}, 400)
+                    routines.append(_sanitize_routine(r))
+                save_routines_store(uid, routines)
+            elif action == "delete":
+                rid = str(c.get("id") or (c.get("routine") or {}).get("id") or "")
+                routines = [x for x in routines if x.get("id") != rid]
+                save_routines_store(uid, routines)
+            # action == "list" (и любой неизвестный) — просто возвращаем текущее
+        return self._json({"ok": True, "routines": routines})
 
     def api_verify(self):
         c = self._body()
@@ -10842,6 +10879,8 @@ class Handler(BaseHTTPRequestHandler):
             self.api_design_system()
         elif path == "/api/design-system-from-ref":
             self.api_design_system_from_ref()
+        elif path == "/api/routines":
+            self.api_routines()
         elif path == "/api/chat":
             self.chat()
         else:
@@ -12205,6 +12244,19 @@ class Handler(BaseHTTPRequestHandler):
             drop_retries = 0              # счётчик тихих ретраев именно на ОБРЫВ/ОБРЕЗ стрима (анти-цикл)
             HOLDBACK = 24                 # хвост прозы держим до следующей дельты / чистого финиша
             tried = {stream_model}        # модели, что уже пробовали (для тихой подмены при сбое провайдера)
+
+            def _pick_fallback():
+                """Запасная модель ПОТОКА при сбое провайдера. В режиме Мозга, пока стримит ВЕДУЩИЙ
+                (триаж), сначала пробуем ДЕФОЛТНОГО ведущего (BRAIN_DRIVER) — чтобы пайплайн Мозга
+                (ведущий→эксперты→сплав) ОСТАЛСЯ ЖИВ, а не молча скатился на обычный одно-модельный
+                чат запасной моделью (которая протокол ask_expert не знает). Если выбранный ведущий уже
+                и есть дефолтный (или тот тоже лёг) — обычная chat-цепочка. Вне Мозга — поведение прежнее."""
+                if brain and stream_model != expert_model and BRAIN_DRIVER not in tried:
+                    _dk, _db, _de = resolve_key(uid, BRAIN_DRIVER)
+                    if _dk and not _de and BRAIN_DRIVER != stream_model:
+                        return BRAIN_DRIVER, _dk
+                return _next_fallback_model(stream_model, tried, uid, has_images)
+
             while True:
                 buf, buffering, got_any = "", True, False
                 hold = ""                 # ХОЛДБЭК: ещё не отданный хвост прозы (≤HOLDBACK симв.)
@@ -12269,8 +12321,13 @@ class Handler(BaseHTTPRequestHandler):
                     detail = e.read().decode("utf-8", "ignore")[:300]
                     # провайдер лёг (502/429/5xx) И мы ещё НИЧЕГО видимого не отдали → молча на следующую funded.
                     # Видимым считаем уже отданную прозу (emitted_chars): рестарт не должен дублировать текст.
-                    if emitted_chars == 0 and e.code in (408, 409, 425, 429, 500, 502, 503, 504):
-                        nxt = _next_fallback_model(stream_model, tried, uid, has_images)
+                    # Мозг: даже на «не-ретраебельных» кодах (400/404/…) сбой ВЕДУЩЕГО НЕ должен
+                    # ронять пайплайн сырой ошибкой — пробуем дефолтного ведущего/цепочку (если ничего
+                    # видимого ещё не ушло). Вне Мозга — прежний строгий список ретраебельных кодов.
+                    _retriable = e.code in (408, 409, 425, 429, 500, 502, 503, 504)
+                    _brain_driver_down = (brain and stream_model != expert_model)
+                    if emitted_chars == 0 and (_retriable or _brain_driver_down):
+                        nxt = _pick_fallback()
                         if nxt:
                             tried.add(nxt[0]); stream_model, stream_key = nxt
                             # откатываем ВЕСЬ ещё-не-отданный текст этой попытки (буфер + удержанный хвост),
@@ -12282,8 +12339,9 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as e:
                     # сетевой обрыв/таймаут ПОСРЕДИ потока или до первого байта.
                     # Если видимого текста ещё не было — тихо пробуем запасную (двойной отправки нет).
+                    # В Мозге _pick_fallback сперва вернёт дефолтного ведущего → пайплайн остаётся живым.
                     if emitted_chars == 0:
-                        nxt = _next_fallback_model(stream_model, tried, uid, has_images)
+                        nxt = _pick_fallback()
                         if nxt:
                             tried.add(nxt[0]); stream_model, stream_key = nxt
                             out_total = out_total[:len(out_total) - len(buf) - len(hold)]
@@ -12310,7 +12368,7 @@ class Handler(BaseHTTPRequestHandler):
                         # ОБРЫВ/ОБРЕЗ SSE до видимого текста → ровно как существующий «провайдер лёг → молча
                         # подменяем»: один тихий ретрай на запасной (или ту же) модель, без сырой ошибки
                         # юзеру. Анти-цикл: ≤2 ретрая. Двойной отправки нет — видимого текста ещё не было.
-                        nxt = _next_fallback_model(stream_model, tried, uid, has_images)
+                        nxt = _pick_fallback()
                         drop_retries += 1
                         # сбрасываем ВЕСЬ ещё-не-отданный текст (недособранный буфер + удержанный хвост)
                         out_total = out_total[:len(out_total) - len(buf) - len(hold)]
@@ -12329,8 +12387,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not got_any and emitted_chars == 0:
                     # стрим закрылся без единой дельты И ничего видимого не ушло (обрыв апстрима/пустой ответ).
                     # Ничего юзеру ещё не отдано → тихо пробуем запасную funded-модель (двойной отправки нет).
+                    # В Мозге _pick_fallback сперва вернёт дефолтного ведущего → пайплайн остаётся живым.
                     # Только если запасной нет — показываем ошибку.
-                    nxt = _next_fallback_model(stream_model, tried, uid, has_images)
+                    nxt = _pick_fallback()
                     if nxt:
                         tried.add(nxt[0]); stream_model, stream_key = nxt
                         continue
@@ -12552,6 +12611,255 @@ class Handler(BaseHTTPRequestHandler):
             _agent_permit_cleanup(run_id)
 
 
+# ═══════════════════════════════════════════════════════════ РУТИНЫ (планировщик)
+# Серверный per-user стор рутин + фоновый поток-планировщик. Рутина = сохранённый
+# промпт, который сервер сам запускает по расписанию (hourly/daily/weekdays/weekly)
+# через ОБЫЧНЫЙ LLM-путь (venice_complete) и пишет историю прогонов. Источник правды
+# по РАСПИСАНИЮ — сервер; фронт (agent-automations.tsx) зеркалит в localStorage.
+# Контракт ровно как ждёт фронт: POST /api/routines {user, action, routine?, id?} → {ok, routines}.
+# Форма Routine: {id,name,prompt,schedule:{kind,time?,tz?},enabled,createdTs,lastRunTs?,runs:[…]}.
+# RoutineRun: {id, ts, status:"ok"|"failed"|"running", output?}.
+# БЕЗОПАСНОСТЬ: ТОЛЬКО LLM (никакого exec/eval/shell — анти-RCE); весь поток в try/except
+# (никогда не роняет сервер); лимит прогонов/час на юзера; авто-запуск по умолчанию ТОЛЬКО
+# для владельца (или для всех за флагом MOSTIK_ROUTINES_ALL=1).
+
+_ROUTINE_KINDS = ("hourly", "daily", "weekdays", "weekly")
+_ROUTINE_MAX_PER_USER = 50          # потолок числа рутин у одного юзера (анти-DoS диска)
+_ROUTINE_MAX_RUNS_KEPT = 25         # сколько последних прогонов храним в истории рутины
+_ROUTINE_RUNS_PER_HOUR = 8          # лимит фоновых прогонов в час на ЮЗЕРА (анти-разгон расходов)
+_ROUTINE_OUTPUT_CAP = 8000          # обрезаем сохранённый вывод прогона (диск/память)
+_routine_lock = threading.Lock()    # сериализует чтение-правку файла одного юзера в ручке/демоне
+_routine_run_log = {}               # uid -> [unix_ts,…] прогонов за последний час (rate-limit)
+
+
+def _routines_path(uid: str) -> Path:
+    return user_dir(uid) / "routines.json"
+
+
+def load_routines_store(uid: str) -> list:
+    """Список рутин юзера с диска (всегда list, на любой сбой — [])."""
+    try:
+        p = _routines_path(uid)
+        if not p.exists():
+            return []
+        data = json.loads(p.read_text("utf-8") or "[]")
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def save_routines_store(uid: str, routines: list) -> None:
+    """Атомарная запись (tmp+replace), чтобы параллельный демон не прочёл полу-файл."""
+    try:
+        p = _routines_path(uid)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(routines, ensure_ascii=False), "utf-8")
+        tmp.replace(p)
+    except Exception as e:
+        print("routines save err:", e)
+
+
+def _sanitize_routine(r: dict, existing: dict = None) -> dict:
+    """Чиним форму рутины от клиента: серверные поля (id/createdTs/runs/lastRunTs) НЕ
+    доверяем переписывать — сохраняем из existing. Анти-RCE: храним только текст-промпт."""
+    if not isinstance(r, dict):
+        r = {}
+    ex = existing or {}
+    out = {}
+    out["id"] = str(ex.get("id") or r.get("id") or os.urandom(8).hex())
+    out["name"] = str(r.get("name") or ex.get("name") or "Рутина")[:200]
+    out["prompt"] = str(r.get("prompt") or ex.get("prompt") or "")[:SEC_MAX_PROMPT_CHARS]
+    sch = r.get("schedule") if isinstance(r.get("schedule"), dict) else {}
+    kind = str(sch.get("kind") or "").lower()
+    if kind not in _ROUTINE_KINDS:
+        kind = "daily"
+    time_s = str(sch.get("time") or "09:00")[:5]
+    if not re.match(r"^\d{1,2}:\d{2}$", time_s):
+        time_s = "09:00"
+    tz_s = str(sch.get("tz") or "Europe/Moscow")[:64]
+    out["schedule"] = {"kind": kind, "time": time_s, "tz": tz_s}
+    out["enabled"] = bool(r.get("enabled", ex.get("enabled", True)))
+    out["createdTs"] = int(ex.get("createdTs") or r.get("createdTs") or time.time())
+    # история прогонов и lastRunTs — серверные; правит их только демон
+    runs = ex.get("runs") if isinstance(ex.get("runs"), list) else []
+    out["runs"] = runs[-_ROUTINE_MAX_RUNS_KEPT:]
+    if ex.get("lastRunTs") is not None:
+        out["lastRunTs"] = int(ex.get("lastRunTs"))
+    return out
+
+
+def _routine_local_now(tz_s: str):
+    """Локальное «сейчас» в таймзоне рутины. zoneinfo если доступен; иначе — наивно по
+    серверному локальному времени (точность расписания деградирует мягко, не падаем)."""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo(tz_s))
+    except Exception:
+        return datetime.now()
+
+
+def _routine_due(routine: dict, now_ts: float) -> bool:
+    """Пора ли запускать рутину. Логика: вычисляем локальное время в tz; для kind с
+    конкретным временем сверяем «достигли HH:MM» и «ещё не запускали в этом окне»
+    (lastRunTs). hourly — раз в час. Идемпотентность через lastRunTs (анти-двойной-запуск)."""
+    try:
+        if not routine.get("enabled"):
+            return False
+        sch = routine.get("schedule") or {}
+        kind = sch.get("kind")
+        last = float(routine.get("lastRunTs") or 0)
+        if kind == "hourly":
+            return (now_ts - last) >= 3600 - 5      # не чаще раза в час
+        # daily / weekdays / weekly — привязаны к HH:MM в локальной tz
+        loc = _routine_local_now(str(sch.get("tz") or "Europe/Moscow"))
+        try:
+            hh, mm = [int(x) for x in str(sch.get("time") or "09:00").split(":")[:2]]
+        except Exception:
+            hh, mm = 9, 0
+        target_min = hh * 60 + mm
+        now_min = loc.hour * 60 + loc.minute
+        # окно срабатывания: время дня достигнуто (и не ушли больше чем на ~6ч вперёд,
+        # чтобы поздний старт демона не пропустил today), и сегодня ещё не запускались.
+        if not (0 <= (now_min - target_min) <= 360):
+            return False
+        # день недели (Mon=0…Sun=6)
+        wd = loc.weekday()
+        if kind == "weekdays" and wd >= 5:           # сб/вс пропускаем
+            return False
+        if kind == "weekly" and wd != 0:             # «еженедельно» = по понедельникам
+            return False
+        # уже запускались в эти же сутки? lastRunTs в локальной дате == сегодня → нет.
+        if last:
+            try:
+                last_loc = _routine_local_now(str(sch.get("tz") or "Europe/Moscow")).fromtimestamp(
+                    last, tz=getattr(loc, "tzinfo", None))
+                if (last_loc.year, last_loc.month, last_loc.day) == (loc.year, loc.month, loc.day):
+                    return False
+            except Exception:
+                # не смогли сравнить даты → консервативно: не чаще раза в 20ч
+                if (now_ts - last) < 20 * 3600:
+                    return False
+        return True
+    except Exception:
+        return False
+
+
+def _routine_rate_ok(uid: str) -> bool:
+    """Не больше _ROUTINE_RUNS_PER_HOUR фоновых прогонов в час на юзера (анти-разгон расходов)."""
+    now = time.time()
+    with _routine_lock:
+        q = [t for t in _routine_run_log.get(uid, []) if now - t < 3600]
+        if len(q) >= _ROUTINE_RUNS_PER_HOUR:
+            _routine_run_log[uid] = q
+            return False
+        q.append(now)
+        _routine_run_log[uid] = q
+    return True
+
+
+def _routine_run_prompt(uid: str, prompt: str) -> str:
+    """Запуск промпта рутины ОБЫЧНЫМ серверным LLM-путём (как api_design_system). ТОЛЬКО
+    модель — ни exec/shell/файлов (анти-RCE). Возвращает текст ответа ('' при сбое)."""
+    sys_p = (taiga_identity() + "\n\n" +
+             "Это автоматический запуск сохранённой рутины пользователя по расписанию. "
+             "Выполни задачу из промпта и верни готовый результат.")
+    msgs = [{"role": "system", "content": sys_p},
+            {"role": "user", "content": str(prompt)[:SEC_MAX_PROMPT_CHARS]}]
+    try:
+        return venice_complete(aux_model("craft"), msgs, max_tokens=1200, temperature=0.5) or ""
+    except Exception:
+        return ""
+
+
+def _routine_tick_user(uid: str) -> int:
+    """Один проход по рутинам ОДНОГО юзера: запускаем все «созревшие». Возвращает число
+    запущенных. Правка файла под локом — демон и ручка не топчут друг друга."""
+    ran = 0
+    now_ts = time.time()
+    routines = load_routines_store(uid)
+    if not routines:
+        return 0
+    for r in routines:
+        try:
+            if not _routine_due(r, now_ts):
+                continue
+            if not _routine_rate_ok(uid):
+                break                                # юзер уперся в лимит/час → стоп до след. тика
+            run = {"id": os.urandom(8).hex(), "ts": int(time.time()), "status": "running"}
+            out = _routine_run_prompt(uid, r.get("prompt") or "")
+            run["status"] = "ok" if out.strip() else "failed"
+            run["output"] = out[:_ROUTINE_OUTPUT_CAP]
+            # перечитываем-правим под локом (юзер мог сохранить рутину параллельно)
+            with _routine_lock:
+                cur = load_routines_store(uid)
+                for cr in cur:
+                    if cr.get("id") == r.get("id"):
+                        runs = cr.get("runs") if isinstance(cr.get("runs"), list) else []
+                        runs.append(run)
+                        cr["runs"] = runs[-_ROUTINE_MAX_RUNS_KEPT:]
+                        cr["lastRunTs"] = run["ts"]
+                        break
+                save_routines_store(uid, cur)
+            ran += 1
+        except Exception as e:
+            print("routine run err:", e)
+    return ran
+
+
+def _routine_auto_allowed(uid: str) -> bool:
+    """Кого ДВИЖОК запускает в фоне. По умолчанию — только владелец (тратит его ключи/баланс
+    осознанно). Флаг MOSTIK_ROUTINES_ALL=1 включает фоновый запуск для всех юзеров."""
+    if os.environ.get("MOSTIK_ROUTINES_ALL") == "1":
+        return True
+    return is_owner(uid)
+
+
+def _all_routine_users() -> list:
+    """UID-ы, у которых есть файл рутин (сканируем BASE/u/*/routines.json). Тихо игнорим сбои."""
+    out = []
+    try:
+        root = BASE / "u"
+        if not root.exists():
+            return []
+        for d in root.iterdir():
+            try:
+                if d.is_dir() and (d / "routines.json").exists():
+                    out.append(d.name)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return out
+
+
+def _start_routine_scheduler(interval_sec: int = 60):
+    """Фоновый поток-планировщик рутин: раз в interval_sec проверяет рутины всех юзеров и
+    запускает созревшие. ОДИН старт (idempotent-guard). Весь цикл в try/except — НИКОГДА
+    не роняет сервер. Тикаем редко (минута) и дешёво (LLM только для реально созревших)."""
+    if getattr(_start_routine_scheduler, "_started", False):
+        return
+    _start_routine_scheduler._started = True
+
+    def _loop():
+        time.sleep(20)                               # дать серверу подняться
+        while True:
+            try:
+                for uid in _all_routine_users():
+                    try:
+                        if not _routine_auto_allowed(uid):
+                            continue
+                        n = _routine_tick_user(uid)
+                        if n:
+                            print(f"── рутины: запущено {n} для {uid}")
+                    except Exception as e:
+                        print("routine tick err:", e)
+            except Exception as e:
+                print("routine scheduler err:", e)
+            time.sleep(max(15, int(interval_sec)))
+    threading.Thread(target=_loop, daemon=True).start()
+
+
 def _start_catalog_refresher(interval_sec: int = 21600):
     """Фоновый поток: раз в 6ч пересобирает каталог — новинки моделей без рестарта."""
     import threading
@@ -12743,6 +13051,7 @@ def main():
     heal_default_models()
     build_self_texts()                  # само-знание: собрать манифест из живых реестров
     _start_catalog_refresher()
+    _start_routine_scheduler()          # фоновый планировщик per-user рутин (LLM-only, анти-RCE)
     import scheduler
     scheduler.set_runner(_scheduled_runner)
     # sleep-time обслуживание: фоновое уплотнение памяти юзеров (OFF by default — тикает только
