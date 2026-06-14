@@ -7817,6 +7817,75 @@ def extract_file_text(name: str, raw: bytes) -> str:
         return "(не текстовый файл)"
 
 
+# ---------------------------------------------------------------- референс-картинка → доминирующие цвета (stdlib)
+# Деградация для /api/design-system-from-ref, когда зрячей модели нет: декодим base64,
+# и если есть Pillow — берём маленькую палитру, иначе грубо сэмплим RAW-байты как RGB-тройки.
+# Возвращаем dict с hex для primary/accent/bg/surface (или {} при полном сбое). НИКАКОГО exec.
+
+def _ref_rgb_to_hex(rgb) -> str:
+    r, g, b = int(rgb[0]) & 255, int(rgb[1]) & 255, int(rgb[2]) & 255
+    return "#%02x%02x%02x" % (r, g, b)
+
+
+def _ref_extract_colors(data_url: str) -> dict:
+    """Из data-URL картинки → {primary,accent,bg,surface} hex (любого может не быть).
+    primary/accent — самые насыщенные (брендовые) цвета; bg/surface — самый тёмный/светлый.
+    Тихо отдаёт {} при любом сбое — вызывающий тогда берёт дефолтную палитру."""
+    try:
+        b64 = data_url.split(",", 1)[1] if "," in data_url else data_url
+        raw = base64.b64decode(b64 + "=" * (-len(b64) % 4))
+    except Exception:
+        return {}
+    if not raw:
+        return {}
+
+    samples = []   # список (r,g,b)
+    # Путь A: Pillow — корректное декодирование + квантование к небольшой палитре.
+    try:
+        import io
+        from PIL import Image  # type: ignore
+        im = Image.open(io.BytesIO(raw)).convert("RGB")
+        im.thumbnail((96, 96))
+        pal = im.quantize(colors=24, method=getattr(Image, "FASTOCTREE", 2))
+        rgb_pal = pal.convert("RGB")
+        counts = sorted(rgb_pal.getcolors(96 * 96) or [], key=lambda t: -t[0])
+        samples = [c for _n, c in counts[:24]]
+    except Exception:
+        samples = []
+
+    # Путь B (нет Pillow / не декодилось): грубый сэмпл сырых байтов как RGB-троек.
+    if not samples:
+        step = max(3, (len(raw) // 4000) * 3 or 3)
+        for i in range(0, len(raw) - 2, step):
+            samples.append((raw[i], raw[i + 1], raw[i + 2]))
+        samples = samples[:4000]
+    if not samples:
+        return {}
+
+    def lum(c):       # яркость 0..255
+        return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
+
+    def sat(c):       # насыщенность 0..1 (HSV S)
+        mx, mn = max(c), min(c)
+        return 0.0 if mx == 0 else (mx - mn) / mx
+
+    vivid = sorted(samples, key=sat, reverse=True)
+    by_lum = sorted(samples, key=lum)
+    out = {}
+    if vivid and sat(vivid[0]) > 0.12:
+        out["primary"] = _ref_rgb_to_hex(vivid[0])
+        for c in vivid[1:]:
+            # accent — следующий заметно отличный по тону насыщенный цвет
+            if abs(lum(c) - lum(vivid[0])) > 25 or sat(c) > 0.2:
+                out["accent"] = _ref_rgb_to_hex(c)
+                break
+    if by_lum:
+        out["bg"] = _ref_rgb_to_hex(by_lum[0])             # самый тёмный
+        if len(by_lum) > 1:
+            out["surface"] = _ref_rgb_to_hex(by_lum[min(2, len(by_lum) - 1)])
+    return out
+
+
 # ---------------------------------------------------------------- мультимодальный RAG (VLM-подпись)
 # Картинку (или скан-PDF без извлекаемого текста) НЕ выкинуть из RAG: зрячая модель
 # делает текстовое описание, и оно идёт в обычный chunk→embed конвейер. Текстовые доки
@@ -9798,6 +9867,108 @@ class Handler(BaseHTTPRequestHandler):
                           for k, dv in d["shadows"].items()}
         return out
 
+    def api_design_system_from_ref(self):
+        # Картинка-референс → дизайн-токен-система (та же форма, что api_design_system).
+        # Зрячая модель «читает» бренд с картинки → токен-JSON. Если зрячей модели нет —
+        # деградируем на stdlib-извлечение доминирующих цветов (Pillow или сэмпл байтов),
+        # достраиваем остальное из дефолта. ВСЕГДА отдаём {ok:true, system} (200), UI не падает.
+        # АНТИ-RCE: только декод картинки + вызов модели. Никаких exec/eval.
+        c = self._body()
+        uid = c.get("user", "default")
+        if not self._ip_guard(uid):
+            return
+        data_url = str(c.get("image") or "").strip()
+        mode = str(c.get("mode") or "dark").strip().lower()
+        if mode not in ("dark", "light"):
+            mode = "dark"
+        if not data_url.startswith("data:image/"):
+            return self._json({"error": "нужна картинка data:image/...;base64,..."}, 400)
+        # Потолок размера: ~6MB base64 (защита от мега-аплоадов / OOM).
+        if len(data_url) > 6 * 1024 * 1024:
+            return self._json({"error": "картинка слишком большая (макс ~6MB)"}, 413)
+
+        # Дефолтная токен-система (тот же контракт, что api_design_system) — фолбэк формы.
+        voice = "Бренд считан с референс-картинки."
+        default_system = {
+            "name": "Из референса",
+            "voice": voice,
+            "mode": mode,
+            "palette": {
+                "bg": "#0a0a0a", "surface": "#141414", "ink": "#f5f5f5",
+                "muted": "#9a9a9a", "primary": "#6366f1", "accent": "#22d3ee",
+                "border": "#262626", "success": "#22c55e", "warning": "#f59e0b",
+                "danger": "#ef4444",
+            },
+            "typography": {
+                "display": "Inter", "body": "Inter",
+                "scale": [12, 14, 16, 20, 28, 40], "tracking": "-0.02em",
+            },
+            "radius": {"sm": "4px", "md": "8px", "lg": "16px", "pill": "999px"},
+            "spacing": {"unit": 4, "scale": [4, 8, 12, 16, 24, 32, 48, 64]},
+            "shadows": {
+                "sm": "0 1px 2px rgba(0,0,0,0.4)",
+                "md": "0 4px 12px rgba(0,0,0,0.45)",
+                "lg": "0 12px 32px rgba(0,0,0,0.5)",
+            },
+        }
+
+        parsed = None
+        used = "degrade"
+        # 1) Зрячая модель доступна → пусть «смотрит» и выдаёт токен-JSON.
+        vmodel = _rag_vision_model()
+        if vision_ok(vmodel):
+            sys_prompt = (
+                "You are a senior brand & design-systems engineer. LOOK at the reference image "
+                "(a logo, screenshot, poster or moodboard) and DERIVE a brand design-token system "
+                "from its colors, mood and typography. Return ONLY valid minified JSON — no prose, "
+                "no markdown, no code fences. The JSON MUST have EXACTLY these keys and shape:\n"
+                '{"name": short brand-ish name str, "voice": one-sentence brand voice str, '
+                '"mode": "dark"|"light", '
+                '"palette": {"bg","surface","ink","muted","primary","accent","border","success","warning","danger" — '
+                'ALL hex strings like "#0a0a0a"}, '
+                '"typography": {"display": font-family name, "body": font-family name, '
+                '"scale": [6 ascending px numbers], "tracking": e.g. "-0.02em"}, '
+                '"radius": {"sm","md","lg","pill" — css lengths}, '
+                '"spacing": {"unit": int e.g. 4, "scale": [numbers]}, '
+                '"shadows": {"sm","md","lg" — css box-shadow values}}\n'
+                f"Honor the requested mode = \"{mode}\" (pick {mode}-appropriate bg/surface/ink). "
+                "Pull primary & accent straight from the image's dominant brand colors. "
+                "Make the palette cohesive and faithful to the reference."
+            )
+            msgs = [{"role": "user", "content": [
+                {"type": "text", "text": sys_prompt},
+                {"type": "image_url", "image_url": {"url": data_url}}]}]
+            try:
+                raw = venice_complete(vmodel, msgs, max_tokens=900, temperature=0.3)
+                parsed = _extract_json_object(raw)
+                if parsed:
+                    used = "vision"
+            except Exception:
+                parsed = None
+
+        # 2) Деградация (нет зрячей модели ИЛИ она не дала JSON): извлекаем цвета из байтов.
+        if not parsed:
+            colors = _ref_extract_colors(data_url)
+            if colors:
+                pal = dict(default_system["palette"])
+                # primary/accent — самые «брендовые» (насыщенные) цвета; bg/surface — самые тёмные/светлые.
+                if colors.get("primary"):
+                    pal["primary"] = colors["primary"]
+                if colors.get("accent"):
+                    pal["accent"] = colors["accent"]
+                if colors.get("bg"):
+                    pal["bg"] = colors["bg"]
+                if colors.get("surface"):
+                    pal["surface"] = colors["surface"]
+                parsed = {"palette": pal, "voice": "Палитра извлечена из референс-картинки."}
+
+        system = self._coerce_design_system(parsed, default_system, mode, voice)
+        # Серверные поля (модели не доверяем их выставлять).
+        system["id"] = os.urandom(8).hex()
+        system["status"] = "draft"
+        system["ts"] = int(time.time())
+        return self._json({"ok": True, "system": system, "source": used})
+
     def api_verify(self):
         c = self._body()
         uid = c.get("user", "default")
@@ -10669,6 +10840,8 @@ class Handler(BaseHTTPRequestHandler):
             self.api_userfiles()
         elif path == "/api/design-system":
             self.api_design_system()
+        elif path == "/api/design-system-from-ref":
+            self.api_design_system_from_ref()
         elif path == "/api/chat":
             self.chat()
         else:
