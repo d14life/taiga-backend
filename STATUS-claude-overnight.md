@@ -115,3 +115,63 @@ Each feature lives in its OWN new file; chat.tsx is the only integration point (
 - brain branch executes (no silent collapse) green  branch entered + honest error; e2e blocked by env Venice 402 (not code)
 
 ---
+
+## Agent-OS Wave-1 pieces — chat↔agent bridge (additive, chat.tsx wiring NEXT) — fe 9278884 / be ba15490
+
+The mortar for a future Чат⇄Агент bridge. Every piece compiles and is backward-compatible, but
+chat.tsx was NOT touched — the feature is not yet exposed in the hub. With nothing wired, the new
+props are unused and behavior is unchanged everywhere. NEXT step is the chat.tsx integration that
+passes onMerge / onOpenAsChat / seedContext and feeds derived goals into orchestrate(seed).
+
+### What was added (rebuild from this if context is lost)
+
+**lib (taiga-web/src/lib):**
+- `agent-runs.ts` (extended, nothing broken): types `RunStepKind`, `RunStep` (kind/label/content/model?/ok?/ts?);
+  `AgentRun` gains optional `trace?: RunStep[]` + `goal?`; helpers `recordRunTrace`, `getRunTrace`,
+  `loadRunsWithTrace` (trace survives localStorage via recordRun).
+- `run-to-chat.ts` (NEW): `runTraceToMessages(run)` — render a run trace as a chat transcript
+  (goal = first user turn; each step = assistant turn; tool-steps collapsible via message.steps;
+  pure, deterministic ids).
+- `derive-goal.ts` (NEW): `deriveGoal(messages, signal?)` — folds a transcript into ONE agent goal
+  via `POST /api/improve` ({text}→{text}); fallback = trimmed last user message on any error.
+- `orchestrator.ts` (edit): optional trailing `seed?` on `orchestrate` / `orchestrateStream`, sent in
+  the body only when non-empty (old backend ignores it).
+
+**components (taiga-web/src/components):**
+- `loop-studio.tsx`: optional `seedContext?` prop + "контекст из чата" cyan badge; mixes seed into the
+  goal body (capped 4000) so it flows through {{input}} to every stage; records full run trace on
+  done/error via `recordRunTrace` (same id as recordRun → upsert, no dup).
+- `agent-runs-panel.tsx`: optional `onOpenAsChat?(run)` prop + "Открыть как чат" chip (loads via
+  loadRunsWithTrace, hands back the full record w/ trace); ActionChip stopPropagation.
+- `agent-ralph-monitor.tsx`: props typed `{ runs?: AgentRun[] }`; real per-iteration data built from a
+  run's trace (`iterationsFromTrace`: plan/worker/stage/synth→implement, tool→implement, verify→verify
+  (+retry/decompose on fail), note→session note); demo only as fallback when no usable trace.
+- `sidebar.tsx`: optional `onMerge?(ids)` prop + multi-select mode (toggle + ~480ms long-press) to merge
+  chats; entire select UI hidden until onMerge is wired.
+
+**backend:**
+- `server.py`: `/api/orchestrate` reads optional `seed` (clamped SEC_MAX_PROMPT_CHARS) → forwards to
+  `run_orchestration(..., seed=seed)` in BOTH SSE + JSON branches; `_scheduled_runner` intentionally
+  passes no seed (no originating chat).
+- `orchestrator.py`: `run_orchestration(..., seed=None)` — normalized/clamped (SEED_MAX_CHARS=8000) chat
+  context block mixed into the planner system prompt + every worker prompt; content-only, never exec/eval
+  (double clamp: 200k at server.py + 8k here). seed empty/None/whitespace → block "" → prior behavior.
+- `ROADMAP-AGENT-OS.md` (NEW): Agent-OS wave roadmap.
+
+### Binary lines
+- agent-runs trace helpers ................. done  fe 9278884  (RunStep/trace, loadRunsWithTrace)
+- run-to-chat bridge ....................... done  fe 9278884  (runTraceToMessages, pure)
+- derive-goal ............................. done  fe 9278884  (/api/improve fold + fallback)
+- orchestrator seed param (fe) ............ done  fe 9278884  (sent only when non-empty)
+- loop-studio seedContext + trace ......... done  fe 9278884  (badge + recordRunTrace)
+- runs-panel open-as-chat .................. done  fe 9278884  (onOpenAsChat chip)
+- ralph monitor real data ................. done  fe 9278884  (iterationsFromTrace, demo fallback)
+- sidebar multi-select merge .............. done  fe 9278884  (onMerge, hidden until wired)
+- backend seed plumbing ................... done  be ba15490  (server.py + orchestrator.py, model-only)
+- ROADMAP-AGENT-OS.md ..................... done  be ba15490
+- chat.tsx wiring ......................... PENDING (next: pass onMerge/onOpenAsChat/seedContext + deriveGoal→seed)
+- tsc --noEmit (taiga-web) ................. green  exit 0
+- AST server.py + orchestrator.py ......... green  AST OK
+- /app (frontend) .......................... green  GET /app → 200 (after backend restart)
+
+---
