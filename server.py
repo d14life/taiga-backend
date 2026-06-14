@@ -6134,6 +6134,100 @@ def _scoped_tools_prompt(tools) -> str:
         "на языке пользователя с конкретными фактами.")
 
 
+# ── Агент-воркеры = ПОЛНОЦЕННЫЕ чаты (item 2: «агенты были слабее чата») ─────────────
+# Раньше воркер оркестратора = голый _complete (system-персона + подзадача), БЕЗ долгой памяти,
+# БЕЗ RAG/grounding и БЕЗ цикла инструментов (только researcher получал разовый поиск). Из-за
+# этого агенты ощущались слабее обычного чата. Здесь строим колбэк-раннер, прогоняющий КАЖДОГО
+# воркера через ТОТ ЖЕ _subchat_tool_loop, что у Мозга/Совета: персона скилла + ПАМЯТЬ юзера +
+# RAG/источники + безопасные read-тулзы + tool-loop. Передаётся в run_orchestration аддитивно —
+# если раннер не передан, orchestrator.py работает РОВНО как раньше (back-compat).
+# АНТИ-RCE: воркерам раздаём только БЕЗОПАСНЫЙ read-реестр (_subchat_safe_tools) — никакого
+# shell/run_code/записи файлов веером N голов (как и у Совета). seed — только ТЕКСТ для модели.
+_ORCH_NANO_DEFAULTS = {"gemini-2.5-flash", "mistralai/Mistral-Nemo-Instruct-2407", "sonar"}
+
+
+def _norm_worker_model(m: str) -> str:
+    """Привести id воркера к форме реестра server.py (venice_stream/resolve_key).
+    Оркестратор зовёт NanoGPT голыми id (gemini-2.5-flash); серверный роутер ждёт префикс
+    провайдера (ng:). Уже-валидированные пользовательские модели приходят С префиксом —
+    их не трогаем; голые nano-дефолты оркестратора нормализуем в ng:-форму; прочие голые
+    (venice-native, напр. claude-opus-4-8) оставляем как есть (provider_name→venice)."""
+    m = (m or "").strip()
+    if not m:
+        return "ng:gemini-2.5-flash"
+    if any(m.startswith(p) for p in ("ng:", "ch:", "rp:", "or:")):
+        return m
+    if m in _ORCH_NANO_DEFAULTS:
+        return "ng:" + m
+    return m
+
+
+def _orchestrate_worker_runner(uid, seed="", req=None):
+    """Построить раннер ПОЛНОГО ЧАТА для воркеров оркестратора (item 2). Возвращает
+    callable(spec)->str, где spec = {model, skill, skill_system, sub, prior, seed?, key?}.
+
+    Память/RAG/grounding собираем ОДИН раз (как member_ground у Совета) и дописываем к системе
+    КАЖДОГО воркера; история чата (seed) кладётся настоящими сообщениями-памятью (как member_ctx).
+    Тулзы — безопасный read-реестр обычного чата (веб-поиск/фетч/вики/расчёты/…). Если включён
+    grounded — режем веб/поиск/фетч, чтобы воркер отвечал строго из источников (как чат)."""
+    req = req or {}
+    owner = is_owner(uid)
+    seed_ctx = str(seed or "").strip()[:8000]
+    # синтетическая «история» из seed — нужна rag_context/grounding/память как опора (read-only текст)
+    synth_msgs = [{"role": "user", "content": seed_ctx}] if seed_ctx else []
+    ground = ""
+    try:
+        ground += rag_context(uid, synth_msgs,
+                              workspace=req.get("rag_workspace") or req.get("workspace") or req.get("chat_id"),
+                              smart=bool(req.get("rag_smart") or req.get("smart_rag")))
+    except Exception:
+        pass
+    try:
+        ground += memory_block(uid, synth_msgs or None)   # ДОЛГАЯ память юзера — теперь воркер её видит
+    except Exception:
+        pass
+    grounded_sources = []
+    if req.get("grounded"):
+        try:
+            g_addon, grounded_sources = grounding_context(uid, synth_msgs)
+            ground += g_addon or ""
+        except Exception:
+            grounded_sources = []
+    tools = _subchat_safe_tools(uid, owner=owner)
+    if grounded_sources:                          # как обычный чат: отвечать строго из источников
+        for _t in ("web_search", "super_search", "fetch_url", "browse", "wiki"):
+            tools.pop(_t, None)
+    tools_prompt = _scoped_tools_prompt(tools)
+    ground_full = ground + (tools_prompt or "")
+    # история-память воркера: seed как настоящие сообщения (как member_ctx у Совета)
+    base_messages = []
+    if seed_ctx:
+        base_messages = [
+            {"role": "user", "content": "КОНТЕКСТ ИЗ ЧАТА (предыстория от пользователя, опирайся на неё):\n" + seed_ctx},
+            {"role": "assistant", "content": "Понял предысторию. Работаю над своей подзадачей с учётом неё."},
+        ]
+
+    def run(spec):
+        model = _norm_worker_model(spec.get("model"))
+        skill_sys = spec.get("skill_system") or "Ты толковый агент-исполнитель. Отвечай по делу."
+        sub = str(spec.get("sub") or "").strip()
+        prior = str(spec.get("prior") or "").strip()
+        key, _byok, kerr = resolve_key(uid, model)
+        if kerr or not key:                        # ключа под модель нет → не валим прогон
+            return f"[ошибка воркера: {kerr or 'нет ключа модели'}]"
+        wsys = skill_sys + ground_full             # персона скилла + RAG/память/источники + протокол тулзов
+        focus = sub + (("\n\nКОНТЕКСТ от прошлых агентов:\n" + prior) if prior else "")
+        eff = "low" if model_reasons(model) else None   # воркеры дешёвые по глубине (item 5 поднимет режимом)
+        try:
+            _u = {}
+            txt = _subchat_tool_loop(model, wsys, base_messages, focus, tools, key,
+                                     900, reasoning_effort=eff, usage_out=_u, max_steps=3)
+            return (txt or "").strip()
+        except Exception as e:
+            return f"[ошибка воркера: {str(e)[:160]}]"
+    return run
+
+
 # ---------------------------------------------------------------- MCP: нативный клиент (stdlib)
 # Лёгкое ядро: подключаем любой MCP-сервер по Streamable HTTP (JSON-RPC) и отдаём его
 # инструменты агенту. Так Тайга получает весь экосистему MCP без зависимостей.
@@ -10691,6 +10785,9 @@ class Handler(BaseHTTPRequestHandler):
         # в план/воркеров (анти-RCE: никогда не исполняется). Нет seed → прежнее поведение.
         # Режем по тому же потолку, что и одиночный промпт; orchestrator ещё раз подрежет до SEED_MAX_CHARS.
         seed = str(c.get("seed") or "")[:SEC_MAX_PROMPT_CHARS]
+        # item 2 («агенты слабее чата»): воркеры = ПОЛНОЦЕННЫЕ чаты — память юзера + RAG/источники +
+        # безопасные read-тулзы + tool-loop (как Мозг/Совет). Строим раннер один раз для обоих путей.
+        wrunner = _orchestrate_worker_runner(uid, seed, c)
 
         if c.get("stream"):                    # SSE: живой таймлайн для панели (как Copilot Agents)
             self.send_response(200)
@@ -10708,7 +10805,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 r = run_orchestration(task, workers=safe_workers, emit=emit_sse,
                                       mode=c.get("mode", "parallel"), tools={"search": super_search},
-                                      verify=verifier, seed=seed)
+                                      verify=verifier, seed=seed, worker_runner=wrunner)
             except Exception as e:
                 emit_sse("error", {"error": str(e)})
                 return
@@ -10724,7 +10821,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             r = run_orchestration(task, workers=safe_workers, emit=emit,
                                   mode=c.get("mode", "parallel"), tools={"search": super_search},
-                                  verify=verifier, seed=seed)
+                                  verify=verifier, seed=seed, worker_runner=wrunner)
         except Exception as e:
             return self._json({"error": friendly_api_error(None, str(e))}, 502)
         r["steps"] = steps
@@ -13820,7 +13917,8 @@ def _scheduled_runner(uid, task, workers):
     from orchestrator import run_orchestration
     # TaskPacket: тот же санитайз per-subtask моделей + verify-колбэк, что и в /api/orchestrate
     r = run_orchestration(task, workers=_sanitize_orchestrate_workers(workers, uid),
-                          tools={"search": super_search}, verify=_orchestrate_verifier(uid))
+                          tools={"search": super_search}, verify=_orchestrate_verifier(uid),
+                          worker_runner=_orchestrate_worker_runner(uid))
     if not is_owner(uid):
         charge_media(uid, 0.05, kind="scheduled")
     return r

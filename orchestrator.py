@@ -109,7 +109,7 @@ class OrchState(TypedDict):
 
 
 def run_orchestration(task: str, workers: list = None, emit=None, mode: str = "parallel", tools: dict = None,
-                      verify=None, seed: str = None) -> dict:
+                      verify=None, seed: str = None, worker_runner=None) -> dict:
     """Запуск оркестрации. workers = [{model, provider?, skill, key?, base?, accept?}, ...];
     emit(kind, data) → таймлайн.
     mode='parallel'|'sequential' (sequential = воркеры видят результаты прошлых, для зависимых задач).
@@ -164,32 +164,50 @@ def run_orchestration(task: str, workers: list = None, emit=None, mode: str = "p
         skill = w.get("skill", "general")
         emit("agent", {"worker": i, "model": model, "provider": provider, "skill": skill,
                        "status": "running", "task": sub})
-        ctx = ""
-        if skill == "researcher" and tools.get("search"):     # researcher реально ищет
-            emit("agent", {"worker": i, "status": "searching"})
+        # item 2: ПОЛНОЦЕННЫЙ воркер-чат. Если передан worker_runner (из server.py) — прогоняем
+        # воркера как обычный чат-ход: персона скилла + ПАМЯТЬ юзера + RAG/источники + безопасные
+        # тулзы + tool-loop (воркер САМ ищет/считает). seed подмешивается раннером как память.
+        # Нет раннера → прежний голый _complete (back-compat: standalone-импорт orchestrator).
+        if worker_runner:
+            emit("agent", {"worker": i, "status": "thinking"})
             try:
-                sr = tools["search"](sub)
-                ans = "\n".join(a.get("answer", "") for a in (sr.get("answers") or [])[:3])
-                srcs = "; ".join(s.get("url", "") for s in (sr.get("sources") or [])[:6])
-                if ans.strip() or srcs.strip():
-                    ctx = f"\n\nРЕЗУЛЬТАТЫ ПОИСКА (опирайся на них):\n{ans}\nИсточники: {srcs}"
-                else:
-                    # поиск отработал, но пусто — честно сигналим, не делаем вид что нашли
-                    emit("agent", {"worker": i, "status": "search_empty",
-                                   "note": "поиск ничего не вернул — отвечаю без свежих источников"})
-                    ctx = "\n\n(Поиск не дал результатов — отвечай по своим знаниям, отметь это.)"
+                res = worker_runner({
+                    "model": model, "skill": skill,
+                    "skill_system": SKILLS.get(skill, SKILLS["general"]),
+                    "sub": sub, "prior": prior, "seed": seed_ctx,
+                    "key": w.get("key"), "base": w.get("base"),
+                })
             except Exception as e:
-                # не молчим: даём сигнал в таймлайн и помечаем контекст, воркер всё равно отвечает
-                emit("agent", {"worker": i, "status": "search_failed", "error": str(e)[:160],
-                               "note": "поиск упал — отвечаю без свежих источников"})
-                ctx = "\n\n(Поиск недоступен — отвечай по своим знаниям, отметь что без свежих источников.)"
-        user_msg = sub + seed_block + (f"\n\nКОНТЕКСТ от прошлых агентов:\n{prior}" if prior else "") + ctx
-        try:
-            res = _complete(model, [
-                {"role": "system", "content": SKILLS.get(skill, SKILLS["general"])},
-                {"role": "user", "content": user_msg}], key=w.get("key"), base=w.get("base"))
-        except Exception as e:
-            res = f"[ошибка воркера: {e}]"
+                res = f"[ошибка воркера: {e}]"
+            if not str(res or "").strip():
+                res = "[воркер не дал ответа]"
+        else:
+            ctx = ""
+            if skill == "researcher" and tools.get("search"):     # researcher реально ищет
+                emit("agent", {"worker": i, "status": "searching"})
+                try:
+                    sr = tools["search"](sub)
+                    ans = "\n".join(a.get("answer", "") for a in (sr.get("answers") or [])[:3])
+                    srcs = "; ".join(s.get("url", "") for s in (sr.get("sources") or [])[:6])
+                    if ans.strip() or srcs.strip():
+                        ctx = f"\n\nРЕЗУЛЬТАТЫ ПОИСКА (опирайся на них):\n{ans}\nИсточники: {srcs}"
+                    else:
+                        # поиск отработал, но пусто — честно сигналим, не делаем вид что нашли
+                        emit("agent", {"worker": i, "status": "search_empty",
+                                       "note": "поиск ничего не вернул — отвечаю без свежих источников"})
+                        ctx = "\n\n(Поиск не дал результатов — отвечай по своим знаниям, отметь это.)"
+                except Exception as e:
+                    # не молчим: даём сигнал в таймлайн и помечаем контекст, воркер всё равно отвечает
+                    emit("agent", {"worker": i, "status": "search_failed", "error": str(e)[:160],
+                                   "note": "поиск упал — отвечаю без свежих источников"})
+                    ctx = "\n\n(Поиск недоступен — отвечай по своим знаниям, отметь что без свежих источников.)"
+            user_msg = sub + seed_block + (f"\n\nКОНТЕКСТ от прошлых агентов:\n{prior}" if prior else "") + ctx
+            try:
+                res = _complete(model, [
+                    {"role": "system", "content": SKILLS.get(skill, SKILLS["general"])},
+                    {"role": "user", "content": user_msg}], key=w.get("key"), base=w.get("base"))
+            except Exception as e:
+                res = f"[ошибка воркера: {e}]"
         emit("agent", {"worker": i, "status": "done", "result": res[:160]})
         out = {"worker": i, "skill": skill, "model": model, "task": sub, "result": res}
         if provider:
@@ -242,9 +260,15 @@ def run_orchestration(task: str, workers: list = None, emit=None, mode: str = "p
     def synth_node(state):
         emit("step", {"node": "synth", "status": "running", "label": "Синтез результата"})
         joined = "\n\n".join(f"### {r['task']}\n{r['result']}" for r in state["results"])
+        # item 2: синтез ТОЖЕ видит предысторию чата (seed) и не выдумывает фактов — иначе финал
+        # галлюцинировал имя/язык/числа, которых нет ни в результатах, ни в контексте (агент был
+        # «хуже чата»). seed пуст → блок пустой → поведение как раньше (back-compat).
         final = _complete(SYNTH_MODEL, [
             {"role": "system", "content": "Собери единый связный ответ из результатов агентов. "
-                                          "Без повторов, по делу, по-русски."},
+                                          "Без повторов, по делу, по-русски. ОПИРАЙСЯ строго на "
+                                          "результаты агентов и контекст из чата ниже — НЕ выдумывай "
+                                          "фактов (имён, языков, чисел), которых там нет; если данных "
+                                          "нет — так и скажи." + seed_block},
             {"role": "user", "content": f"Задача: {state['task']}\n\nРезультаты агентов:\n{joined}"}],
             max_tokens=1200)
         emit("step", {"node": "synth", "status": "done"})
