@@ -6822,6 +6822,29 @@ def _db():
     return _DB_CONN
 
 
+def _wal_checkpoint():
+    """Свернуть WAL в основной файл БД (TRUNCATE). В WAL-режиме записи копятся в taiga.db-wal и
+    сливаются в основной файл лишь на чекпойнте — без периодического сворачивания -wal пухнет
+    (durable и так, но файл рос до МБ). Тихо при сбое — это housekeeping, не критичный путь."""
+    try:
+        with _DB_LOCK:
+            _db().execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    except Exception:
+        pass
+
+
+def _start_wal_checkpoint_daemon(interval_sec: int = 1800):
+    """Фоновый поток: раз в ~30 мин сворачивает WAL (Damir 2026-06-14). Демон, не держит выход."""
+    import time as _t
+
+    def _loop():
+        while True:
+            _t.sleep(max(60, interval_sec))
+            _wal_checkpoint()
+
+    threading.Thread(target=_loop, daemon=True).start()
+
+
 def _db_init_schema(conn):
     conn.executescript(
         """
@@ -14393,6 +14416,7 @@ def main():
                 print("phantom-cron err:", e)
             time.sleep(6 * 3600)
     threading.Thread(target=_phantom_cron, daemon=True).start()
+    _start_wal_checkpoint_daemon()        # housekeeping: сворачиваем WAL раз в ~30 мин (не пухнет -wal)
 
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     print(f"── Mostik AI · http://127.0.0.1:{PORT}")
