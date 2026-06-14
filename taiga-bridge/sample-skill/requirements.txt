@@ -1,0 +1,7 @@
+# Per-skill pip dependencies. The Taiga Skill Bridge reads this file, creates a
+# per-skill venv, and pip-installs these BEFORE running any script — so a skill
+# that needs real packages (requests/numpy/pandas/...) actually works natively.
+#
+# `requests` is used here precisely because it is NOT in the stdlib and NOT in
+# base Pyodide — i.e. exactly the case the browser sandbox cannot satisfy.
+requests
