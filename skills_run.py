@@ -23,6 +23,44 @@ import threading
 import time as _time
 from pathlib import Path
 
+# Анализатор возможностей навыка (Lane A, repo-root) — статический, НЕ исполняет навык.
+# Мягкая зависимость: если файла нет/ошибка импорта — деградируем (badge="unsupported").
+try:
+    import skill_caps as _skill_caps
+except Exception:
+    _skill_caps = None
+
+
+def _analyze_caps(skill_dir):
+    """Прогнать static-анализатор по фолдеру навыка → (caps_dict, badge).
+    Fail-soft: ЛЮБАЯ ошибка → ({}, "unsupported"); импорт навыка НИКОГДА не падает из-за анализа."""
+    if _skill_caps is None:
+        return {}, "unsupported"
+    try:
+        res = _skill_caps.analyze_skill(str(skill_dir))
+        if not isinstance(res, dict):
+            return {}, "unsupported"
+        badge = res.pop("badge", None) or "unsupported"
+        return res, badge
+    except Exception:
+        return {}, "unsupported"
+
+
+def _caps_summary(caps):
+    """Короткая человекочитаемая сводка caps для панели (без полного словаря).
+    Возвращает {language, packages[], needs[], media[], claude} — компактно для фронта."""
+    caps = caps or {}
+    needs = [k.split("needs_", 1)[1] for k in (
+        "needs_argv", "needs_resources", "needs_shell", "needs_network", "needs_node")
+        if caps.get(k)]
+    return {
+        "language": caps.get("language", "none"),
+        "packages": list(caps.get("third_party_packages") or [])[:12],
+        "needs": needs,
+        "media": list(caps.get("media_verbs") or [])[:6],
+        "claude": bool(caps.get("claude_authored")),
+    }
+
 # ── Капы (анти-DoS / анти-abuse) ──
 FOLDER_MAX_BYTES = 2 * 1024 * 1024      # ≤2МБ на весь навык-фолдер (Damir: «cap total size e.g. ≤2MB»)
 FOLDER_MAX_FILES = 60                   # потолок числа файлов в одном навыке
@@ -163,11 +201,16 @@ def import_skill_folder(uid, url, *, user_dir, parse_github_repo_url, github_tre
         h = re.search(r"^#\s+(.+)$", skill_text, re.M)
         name = h.group(1).strip() if h else (repo if not root else root.rsplit("/", 1)[-1])
     sk = store_user_skill(uid, name, desc, body, source_url=url)
-    # дописываем мету фолдера в индекс-запись (folder=slug, scripts=[...])
-    _attach_folder_meta(user_dir, uid, sk.get("id"), sdir.name, scripts)
-    return {"ok": True, "skill": {**sk, "folder": sdir.name, "scripts": scripts},
+    # СТАТИЧЕСКИЙ анализ возможностей навыка (caps + badge) — НЕ исполняет код, fail-soft.
+    caps, badge = _analyze_caps(sdir)
+    # дописываем мету фолдера в индекс-запись (folder=slug, scripts=[...], caps, badge)
+    _attach_folder_meta(user_dir, uid, sk.get("id"), sdir.name, scripts, caps=caps, badge=badge)
+    return {"ok": True,
+            "skill": {**sk, "folder": sdir.name, "scripts": scripts,
+                      "badge": badge, "caps": _caps_summary(caps)},
             "files": saved, "scripts": scripts, "skipped": skipped[:12],
-            "bytes": total, "folder": True, "branch": used_branch, "repo": f"{owner}/{repo}"}
+            "bytes": total, "folder": True, "branch": used_branch, "repo": f"{owner}/{repo}",
+            "badge": badge, "caps": _caps_summary(caps)}
 
 
 def _index_path(user_dir, uid):
@@ -190,13 +233,19 @@ def _save_index(user_dir, uid, idx):
     tmp.replace(p)
 
 
-def _attach_folder_meta(user_dir, uid, sid, folder_slug, scripts):
-    """Дописать в индекс-запись навыка инфо о фолдере (folder, scripts) + по умолчанию enabled."""
+def _attach_folder_meta(user_dir, uid, sid, folder_slug, scripts, caps=None, badge=None):
+    """Дописать в индекс-запись навыка инфо о фолдере (folder, scripts) + по умолчанию enabled.
+    Также персистим результат static-анализатора: caps (полный словарь) + badge (чип-совместимость),
+    чтобы фронт показал бейдж, а рантайм-выбор (server/browser-wasm/E2B) шёл по этим caps."""
     idx = _load_index(user_dir, uid)
     for s in idx:
         if s.get("id") == sid:
             s["folder"] = folder_slug
             s["scripts"] = scripts
+            if caps is not None:
+                s["caps"] = caps
+            if badge is not None:
+                s["badge"] = badge
             s.setdefault("enabled", True)
             break
     _save_index(user_dir, uid, idx)
@@ -219,21 +268,31 @@ def set_skill_enabled(user_dir, uid, sid, enabled):
 
 
 def list_installed(user_dir, uid):
-    """Список установленных личных навыков с метой (folder?/scripts/enabled) для панели."""
+    """Список установленных личных навыков с метой (folder?/scripts/enabled/badge/caps) для панели.
+
+    badge ∈ {full,partial,instruction-only,needs-server,unsupported} — чип-совместимости (фронт
+    рисует бейдж). caps — короткая сводка (язык/пакеты/потребности/медиа/claude) для тултипа.
+    Старые навыки без сохранённого badge (импорт до анализатора) → badge="" / caps={} (фронт
+    деградирует мягко)."""
     out = []
     for s in _load_index(user_dir, uid):
         out.append({
             "id": s.get("id"), "name": s.get("name"), "description": s.get("description", ""),
             "folder": bool(s.get("folder")), "scripts": s.get("scripts") or [],
             "enabled": s.get("enabled", True), "source": s.get("source", ""),
+            "badge": s.get("badge") or "",
+            "caps": _caps_summary(s.get("caps")) if s.get("caps") else {},
         })
     return out
 
 
 # ───────────────────────────── 2. RUN bundled scripts (GATED) ─────────────────────────────
 
-def _read_script(user_dir, uid, sid, script_rel):
-    """Прочитать текст бандл-скрипта из фолдера навыка (с анти-traversal)."""
+def _resolve_script(user_dir, uid, sid, script_rel):
+    """Найти бандл-скрипт навыка + вернуть всё нужное для запуска/выбора рантайма.
+    Возвращает (info, err): при успехе (dict, None), при отказе (None, "причина").
+    info = {code, sdir(Path), target(Path), rec(index-запись с caps/badge/scripts)}.
+    Анти-traversal: финальный путь обязан остаться ВНУТРИ фолдера навыка."""
     idx = _load_index(user_dir, uid)
     rec = next((s for s in idx if s.get("id") == sid), None)
     if not rec or not rec.get("folder"):
@@ -248,7 +307,17 @@ def _read_script(user_dir, uid, sid, script_rel):
         return None, "скрипт не найден"
     if target.stat().st_size > FILE_MAX_BYTES:
         return None, "скрипт слишком большой"
-    return target.read_text("utf-8", "ignore"), None
+    return {"code": target.read_text("utf-8", "ignore"),
+            "sdir": sdir, "target": target, "rec": rec}, None
+
+
+def _read_script(user_dir, uid, sid, script_rel):
+    """Прочитать текст бандл-скрипта из фолдера навыка (с анти-traversal). Тонкая обёртка
+    над _resolve_script (сохранена для совместимости — возвращает только (text, err))."""
+    info, err = _resolve_script(user_dir, uid, sid, script_rel)
+    if err:
+        return None, err
+    return info["code"], None
 
 
 def _e2b_api_key():
@@ -376,48 +445,112 @@ def sandbox_session_run(chat_id, cmd):
     # НЕ убиваем — сессия персистентна; E2B сам закроет по таймауту.
 
 
-def run_skill_script(user_dir, uid, sid, script_rel, *, is_owner, run_code_lang, input=None):
-    """Запустить бандл-скрипт навыка — БЕЗОПАСНО ГЕЙТИТСЯ.
+def _caps_needs_server(caps, lang):
+    """Жёсткое требование сервера/нативного рантайма по caps (или по языку как фолбэк).
+    True → скрипт НЕ запустится в браузере (shell/сеть/Node/не-Pyodide-пакет), нужен E2B/нативный мост."""
+    if caps:
+        if (caps.get("needs_shell") or caps.get("needs_network")
+                or caps.get("needs_node") or (caps.get("pyodide_no") or [])):
+            return True
+        return False
+    # caps нет (старый навык) → решаем по языку: bash/js всегда нужен сервер, python — нет.
+    return lang in ("bash", "js")
 
-    ВЛАДЕЛЕЦ → прямой запуск через переданный run_code_lang (тот же owner-gated путь, что run_code:
-        subprocess + rlimits + timeout). Реальная мульти-тенант-изоляция = sandbox ниже, тут owner-only.
-    ЮЗЕР    → НИКОГДА на бэкенде (анти-RCE по ARCH-DECISIONS). Возвращаем сам скрипт + runtime-маркер
-        "browser-wasm" → фронт исполняет в Pyodide/WebContainer в своей вкладке (zero server cost, безопасно).
-    Тяжёлый/нативный путь (бинарники/долгий процесс) → cloud-sandbox-per-user = TODO (отложенная инфра).
+
+def run_skill_script(user_dir, uid, sid, script_rel, *, is_owner, run_code_lang,
+                     input=None, argv=None, run_code_file=None):
+    """Запустить бандл-скрипт навыка — БЕЗОПАСНО ГЕЙТИТСЯ + ВЫБОР РАНТАЙМА ПО caps.
+
+    ВЛАДЕЛЕЦ (script) → НАТИВНЫЙ запуск ИЗ ПАПКИ НАВЫКА: `python <skilldir>/<script> <argv...>`,
+        cwd=skilldir, stdin=input, реальный env. Это чинит argv/sys.argv (argparse/click), cwd и
+        чтение СОСЕДНИХ ресурсов (open("references/x.md"), __file__-относительные пути) — то, что
+        ломалось при старом `python -I -c <code>` в пустой временной папке. Безопасность сохранена:
+        rlimits + timeout + кап вывода (см. run_code_file в server.py). Если file-раннер не передан
+        (старый вызов) — деградируем на прежний run_code_lang (без argv/cwd, но рабочий).
+    ЮЗЕР    → НИКОГДА на бэкенде (анти-RCE по ARCH-DECISIONS). По caps/badge:
+        • pure/pyodide-ok python/js → runtime-маркер "browser-wasm" (+code, +input, +pyodide-пакеты),
+          фронт исполняет в Pyodide/WebContainer в своей вкладке (zero server cost, безопасно);
+        • needs-server (shell/сеть/Node/не-Pyodide-пакет) → E2B-облако, если есть ~/.e2b_key,
+          иначе понятный маркер "needs-native-bridge" (UI покажет CTA настроить E2B/мост).
 
     input (опц., строка) — STDIN для скрипта. На сервере/в облаке подаётся процессу на stdin (и в env
-    как SKILL_INPUT для удобства). Для browser-wasm возвращаем его фронту полем `input`, чтобы он
-    подал строку в Pyodide (stdin там эмулируется фронтом). Поле строго называется `input`.
+    как SKILL_INPUT). Для browser-wasm возвращаем его фронту полем `input` (Pyodide-stdin эмулируется
+    фронтом). Поле строго называется `input`.
+    argv (опц., список) — аргументы командной строки для скрипта (owner-нативный путь — реальный
+    sys.argv; browser-wasm — отдаём фронту полем `argv`, Pyodide-шим выставит sys.argv).
 
-    Возврат: {ok, runtime: "server"|"cloud-sandbox"|"browser-wasm", output?|code, lang, input?, ...}.
+    Возврат: {ok, runtime: "server"|"cloud-sandbox"|"browser-wasm"|"needs-native-bridge",
+              output?|code, lang, input?, argv?, badge?, ...}.
     """
-    code, err = _read_script(user_dir, uid, sid, script_rel)
+    info, err = _resolve_script(user_dir, uid, sid, script_rel)
     if err:
         return {"ok": False, "error": err}
+    code = info["code"]
+    sdir = info["sdir"]
+    target = info["target"]
+    rec = info["rec"]
+    caps = rec.get("caps") or {}
+    badge = rec.get("badge") or ""
     lang = _lang_for(script_rel)
     if lang == "text":
         return {"ok": False, "error": "это не исполняемый скрипт (.py/.js/.sh)"}
     stdin_text = None if input is None else str(input)
+    argv_list = [str(a) for a in argv] if argv else []
 
     if is_owner(uid):
-        # owner-only прямой запуск (переиспользуем существующий gated code-run путь) + проброс stdin
-        out = run_code_lang(code, "python" if lang == "python" else lang, stdin_text=stdin_text)
-        return {"ok": True, "runtime": "server", "lang": lang, "script": script_rel, "output": out}
+        # ── owner-нативный путь: запуск ИЗ ПАПКИ НАВЫКА с argv/cwd/stdin (фиделити-шим) ──
+        if run_code_file is not None:
+            out = run_code_file(str(target), lang, cwd=str(sdir),
+                                argv=argv_list, stdin_text=stdin_text)
+        else:
+            # фолбэк (file-раннер не пробросили): старый -c путь, без argv/cwd, но рабочий
+            out = run_code_lang(code, "python" if lang == "python" else lang,
+                                stdin_text=stdin_text)
+        res = {"ok": True, "runtime": "server", "lang": lang, "script": script_rel,
+               "output": out, "badge": badge}
+        if argv_list:
+            res["argv"] = argv_list
+        return res
 
-    # ЮЗЕР, bash/нативное → облачный E2B-sandbox (реальный Linux). Расход метрится на сервере.
-    if lang == "bash":
-        res = run_in_cloud_sandbox(code, "bash", stdin_text=stdin_text)
-        if res.get("ok"):
-            return {"ok": True, "runtime": "cloud-sandbox", "lang": lang,
-                    "script": script_rel, "output": res.get("output", "")}
-        return {"ok": False, "runtime": "cloud-sandbox", "lang": lang, "script": script_rel,
-                "error": res.get("error", "облачный sandbox недоступен")}
-    # Питон/JS юзера → browser-WASM (бесплатно). stdin эмулируется фронтом → отдаём ему `input` как есть.
+    # ── ЮЗЕР: на голом бэкенде НЕ запускаем. Выбор по caps/badge. ──
+    needs_server = _caps_needs_server(caps, lang)
+    if needs_server:
+        # нативное требование (shell/сеть/Node/не-Pyodide-пакет) → E2B, если есть ключ.
+        if _e2b_api_key():
+            res = run_in_cloud_sandbox(code, lang, stdin_text=stdin_text)
+            if res.get("ok"):
+                return {"ok": True, "runtime": "cloud-sandbox", "lang": lang,
+                        "script": script_rel, "output": res.get("output", ""), "badge": badge}
+            return {"ok": False, "runtime": "cloud-sandbox", "lang": lang, "script": script_rel,
+                    "error": res.get("error", "облачный sandbox недоступен"), "badge": badge}
+        # ключа нет → честный маркер: нужен нативный мост или E2B (UI покажет CTA)
+        why = []
+        if caps.get("needs_shell"):
+            why.append("shell/бинарники")
+        if caps.get("needs_network"):
+            why.append("сеть")
+        if caps.get("needs_node"):
+            why.append("Node.js")
+        if caps.get("pyodide_no"):
+            why.append("пакеты не из Pyodide: " + ", ".join((caps.get("pyodide_no") or [])[:6]))
+        if not why and lang in ("bash", "js"):
+            why.append("bash/Node" if lang == "bash" else "Node.js")
+        return {"ok": False, "runtime": "needs-native-bridge", "lang": lang, "script": script_rel,
+                "badge": badge or "needs-server", "reason": "; ".join(why) or "нативное окружение",
+                "error": ("этому навыку нужно нативное окружение (" + ("; ".join(why) or "shell/сеть/Node")
+                          + "). Настройте E2B-ключ (~/.e2b_key) или нативный мост — тогда запустим.")}
+
+    # Питон/JS юзера, который УМЕЕТ в браузер (pure stdlib / только pyodide_ok) → browser-WASM.
     out = {"ok": True, "runtime": "browser-wasm", "lang": lang, "script": script_rel,
-           "code": code,
+           "code": code, "badge": badge,
            "note": "скрипт выполнится в вашем браузере (Pyodide) — безопасно, без затрат сервера"}
+    # фронту: какие Pyodide-пакеты подгрузить (loadPackagesFromImports + micropip) — чтобы import работал
+    if caps.get("pyodide_ok"):
+        out["pyodide_packages"] = list(caps.get("pyodide_ok") or [])
     if stdin_text is not None:
         out["input"] = stdin_text          # фронт подаёт это в Pyodide-stdin
+    if argv_list:
+        out["argv"] = argv_list            # фронт выставит sys.argv в Pyodide-шиме
     return out
 
 
@@ -462,7 +595,10 @@ def match_skills(user_dir, uid, message, *, skill_body, limit=AUTO_TRIGGER_MAX):
         out.append({"id": s.get("id"), "name": s.get("name"),
                     "description": s.get("description", ""), "score": round(float(score), 1),
                     "body": body[:8000], "scripts": s.get("scripts") or [],
-                    "folder": bool(s.get("folder"))})
+                    "folder": bool(s.get("folder")),
+                    # caps/badge нужны вызывающему для МОДЕЛЬ-ПИНА claude-authored навыков
+                    # (claude_authored + recommended_model) и для индикатора в UI.
+                    "caps": s.get("caps") or {}, "badge": s.get("badge") or ""})
     return out
 
 
@@ -484,18 +620,24 @@ def build_skill_injection(matched):
     return "\n".join(parts), names
 
 
-def make_run_skill_tool(uid, *, user_dir, is_owner, run_code_lang):
+def make_run_skill_tool(uid, *, user_dir, is_owner, run_code_lang, run_code_file=None):
     """Фабрика тулзы run_skill_script для агент/чат-цикла (модель-агностично: любой модели доступна).
-    Возвращает callable(args)->str. Юзеру отдаёт browser-wasm-маркер (фронт исполнит); владельцу — вывод."""
+    Возвращает callable(args)->str. Юзеру отдаёт browser-wasm-маркер (фронт исполнит); владельцу — вывод.
+    run_code_file (опц.) — file-based раннер из server.py для owner-фиделити-шима (argv/cwd/resources)."""
     def _tool(args):
         sid = str(args.get("skill") or args.get("id") or "")
         script = str(args.get("script") or "")
         if not sid or not script:
             return 'error: нужны "skill" и "script"'
         _inp = args.get("input")          # опц. STDIN для скрипта (поле строго "input")
+        _argv = args.get("argv")          # опц. список аргументов командной строки (sys.argv)
+        if isinstance(_argv, str):
+            _argv = [_argv]
         res = run_skill_script(user_dir, uid, sid, script,
                                is_owner=is_owner, run_code_lang=run_code_lang,
-                               input=(None if _inp is None else str(_inp)))
+                               run_code_file=run_code_file,
+                               input=(None if _inp is None else str(_inp)),
+                               argv=(list(_argv) if isinstance(_argv, (list, tuple)) else None))
         if not res.get("ok"):
             return "error: " + str(res.get("error"))
         if res.get("runtime") == "server":
@@ -508,7 +650,9 @@ def make_run_skill_tool(uid, *, user_dir, is_owner, run_code_lang):
 
 
 RUN_SKILL_TOOL_PROMPT = (
-    '- run_skill_script args {"skill":"<id>","script":"<file>","input":"<опц. STDIN>"} — выполнить скрипт '
-    "установленного навыка (безопасный sandbox: владелец — на сервере, юзер — в браузере). Поле input "
-    "необязательное: строка, которую скрипт получит на STDIN. Зови, когда навык требует прогнать свой "
-    "скрипт для результата.")
+    '- run_skill_script args {"skill":"<id>","script":"<file>","input":"<опц. STDIN>",'
+    '"argv":["<опц. аргументы>"]} — выполнить скрипт установленного навыка (безопасный sandbox: '
+    "владелец — нативно на сервере из папки навыка с argv/cwd/соседними ресурсами, юзер — в браузере "
+    "или E2B). Поле input необязательное: строка на STDIN. Поле argv необязательное: список аргументов "
+    "командной строки (станет sys.argv у скрипта, для CLI-навыков с argparse). Зови, когда навык требует "
+    "прогнать свой скрипт для результата.")

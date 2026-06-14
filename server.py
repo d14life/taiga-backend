@@ -5060,6 +5060,51 @@ def run_code_lang(code: str, lang: str = "python", timeout: int = 12, stdin_text
         return f"error: {e}"
 
 
+def run_code_file(script_path: str, lang: str = "python", *, cwd: str = None,
+                  argv=None, stdin_text=None, timeout: int = 12) -> str:
+    """OWNER-фиделити-раннер для НАВЫК-СКРИПТОВ: запускает СУЩЕСТВУЮЩИЙ файл скрипта
+    `python <script_path> <argv...>` с cwd=<папка навыка> и РЕАЛЬНЫМ env (а НЕ `-c <code>`
+    в пустой temp-папке, как run_code_lang). Это чинит:
+      • sys.argv / argparse / click — у скрипта есть argv[0]=путь + переданные аргументы;
+      • cwd = папка навыка → open("references/x.md") и относительные пути РАБОТАЮТ;
+      • __file__ указывает на реальный файл → __file__-относительные чтения РАБОТАЮТ.
+    Безопасность как у run_code_lang: rlimits (CPU/RAM/форк-бомба/размер файла) + timeout +
+    кап вывода. Owner-only путь (вызывается ТОЛЬКО из owner-ветки run_skill_script). STDIN —
+    как input (и дублируется в env SKILL_INPUT). Возврат: stdout(+stderr), подрезанный."""
+    lang = (lang or "python").lower()
+    sp = str(script_path)
+    if lang in ("py", "python"):
+        cmd = [sys.executable, sp]
+    elif lang in ("js", "javascript", "node", "mjs"):
+        node = shutil.which("node")
+        if not node:
+            return "error: Node.js не установлен — JS запустить нельзя"
+        cmd = [node, sp]
+    elif lang in ("sh", "bash"):
+        cmd = ["/bin/bash", sp]
+    else:
+        return f"error: язык «{lang}» не поддерживается (python / js / bash)"
+    # аргументы командной строки скрипта (станут sys.argv[1:])
+    if argv:
+        cmd += [str(a) for a in argv][:64]
+    _stdin = None if stdin_text is None else str(stdin_text)[:100000]
+    # реальный env + SKILL_INPUT (как в облачном пути) для удобства скриптов
+    env = dict(os.environ)
+    if _stdin is not None:
+        env["SKILL_INPUT"] = _stdin
+    run_cwd = cwd or os.path.dirname(sp) or None
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                           cwd=run_cwd, input=_stdin, env=env,
+                           preexec_fn=_rlimit_preexec if sys.platform != "win32" else None)
+        out = (r.stdout or "") + (("\n[stderr]\n" + r.stderr) if r.stderr else "")
+        return out.strip()[:6000] or "(нет вывода)"
+    except subprocess.TimeoutExpired:
+        return f"error: превышено время выполнения ({timeout}s)"
+    except Exception as e:
+        return f"error: {e}"
+
+
 def tool_run_code(args: dict) -> str:
     return run_code_lang(args.get("code", ""), args.get("lang", "python"))
 
@@ -9738,10 +9783,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": ok}, 200 if ok else 404)
         if action == "run":
             _inp = c.get("input")        # опц. STDIN для скрипта (поле строго "input")
+            _argv = c.get("argv")        # опц. список аргументов командной строки (станет sys.argv)
+            if isinstance(_argv, str):
+                _argv = [_argv]
             res = skills_run.run_skill_script(
                 user_dir, uid, str(c.get("id") or ""), str(c.get("script") or ""),
-                is_owner=is_owner, run_code_lang=run_code_lang,
-                input=(None if _inp is None else str(_inp)))
+                is_owner=is_owner, run_code_lang=run_code_lang, run_code_file=run_code_file,
+                input=(None if _inp is None else str(_inp)),
+                argv=(list(_argv) if isinstance(_argv, (list, tuple)) else None))
             return self._json(res, 200 if res.get("ok") else 400)
         # action == "import" (по умолчанию)
         url = str(c.get("url") or "").strip()
@@ -12260,11 +12309,35 @@ class Handler(BaseHTTPRequestHandler):
             if _matched:
                 _inj, fired_skills = skills_run.build_skill_injection(_matched)
                 system += _inj
-                # если у сматченных навыков есть скрипты — даём модели тулзу их запускать (модель-агностично)
+                # если у сматченных навыков есть скрипты — даём модели тулзу их запускать (модель-агностично).
+                # run_code_file → owner-фиделити-шим (argv/cwd/соседние ресурсы); юзеру он не используется.
                 if any(m.get("scripts") for m in _matched):
                     skill_tools = {"run_skill_script": skills_run.make_run_skill_tool(
-                        uid, user_dir=user_dir, is_owner=is_owner, run_code_lang=run_code_lang)}
+                        uid, user_dir=user_dir, is_owner=is_owner,
+                        run_code_lang=run_code_lang, run_code_file=run_code_file)}
                     system += "\n" + skills_run.RUN_SKILL_TOOL_PROMPT
+                # ── МОДЕЛЬ-ПИН для CLAUDE-AUTHORED навыков ──
+                # Anthropic-навыки (дизайн/бренд/письмо) выходят на нативное качество ТОЛЬКО на
+                # Claude-классе. Если сматчен claude_authored-навык с recommended_model, а юзер НЕ
+                # выбирал модель руками (__auto__) — пиним ход на эту Claude-модель. НИКОГДА не
+                # перетираем явный выбор юзера. Гейтинг как у прочих платных путей: ставим модель,
+                # дальше она проходит ту же лестницу cost-degradation (L23b) — у юзера без баланса
+                # она мягко деградирует, владельцу/подписке идёт как есть. Робастно (в try выше).
+                if not explicit_model:
+                    _pin = None
+                    for _m in _matched:
+                        _c = _m.get("caps") or {}
+                        if _c.get("claude_authored") and _c.get("recommended_model"):
+                            _rm = str(_c.get("recommended_model"))
+                            if re.search(r"claude|opus|sonnet|haiku", _rm, re.IGNORECASE):
+                                _pin = _rm
+                                break
+                    if _pin and _pin != model and not is_phantom(_pin):
+                        model = _pin
+                        # повторяем модель-зависимые защиты после пина (как при смене модели конфигом)
+                        if has_images and not vision_ok(model):
+                            model = _first_live("cheap")
+                        max_tokens = max(max_tokens, reasoning_token_floor(model, req_reasoning_effort))
         except Exception:
             fired_skills = []
             skill_tools = {}
