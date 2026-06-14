@@ -5866,15 +5866,18 @@ def _agent_answers_cleanup(run_id: str):
 
 
 def _agent_question_wait(run_id: str, q_id: str, question: str, emit=None,
-                         context: str = "", timeout: float = _AGENT_QUESTION_TIMEOUT):
+                         context: str = "", timeout: float = _AGENT_QUESTION_TIMEOUT,
+                         options=None):
     """Эмитит ОТКРЫТЫЙ вопрос в стрим и ждёт текстовый ответ юзера. Возвращает строку-ответ ИЛИ
     None (таймаут / нет emit / пусто). emit(kind, data) — колбэк таймлайна; шлём
     {type:"question", q_id, question, context}. Никогда не блокирует дольше timeout (поток
     стрима не зависает); ручка /api/agent_answer кладёт ответ из другого потока."""
     if emit:
         try:
+            _opts = [str(o)[:120] for o in (options or []) if str(o).strip()][:6]
             emit("question", {"run_id": run_id, "q_id": q_id, "question": str(question)[:2000],
-                              "context": str(context or "")[:2000]})
+                              "context": str(context or "")[:2000],
+                              **({"options": _opts} if _opts else {})})
         except Exception:
             pass
     else:
@@ -12140,8 +12143,21 @@ class Handler(BaseHTTPRequestHandler):
 
         def ask_human(question, context=""):
             qid = secrets.token_hex(4)
+            # B1: к открытому вопросу генерим 2-3 КОРОТКИХ варианта-кнопки (как в Claude) — юзер тапает
+            # вместо печати; textarea для своего остаётся. Дешёвый вызов; сбой → просто без кнопок.
+            opts = []
+            try:
+                _raw = venice_complete("ng:gemini-2.5-flash", [
+                    {"role": "system", "content": "Дай 2-3 КОРОТКИХ (2-5 слов) вероятных варианта ответа "
+                     "на вопрос. Верни ТОЛЬКО JSON-массив строк, без пояснений."},
+                    {"role": "user", "content": question}], max_tokens=120, temperature=0.3) or ""
+                _a, _b = _raw.find("["), _raw.rfind("]")
+                if _a != -1 and _b > _a:
+                    opts = [str(x).strip()[:120] for x in json.loads(_raw[_a:_b + 1]) if str(x).strip()][:3]
+            except Exception:
+                opts = []
             return _agent_question_wait(run_id, qid, question, emit=emit, context=context,
-                                        timeout=_AGENT_QUESTION_TIMEOUT)
+                                        timeout=_AGENT_QUESTION_TIMEOUT, options=opts)
 
         emit("debate_start", {"run_id": run_id, "topic": topic,
                               "model": strip_model_prefix(model).split("/")[-1]})
