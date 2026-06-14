@@ -5704,6 +5704,57 @@ def _agent_permit_wait(run_id: str, tool_id: str, name: str,
     return None
 
 
+# --- Открытый вопрос-гейт (B1): агент задаёт ОТКРЫТЫЙ вопрос (не да/нет) на дизайн-развилке ---
+# Та же механика, что пермишен-гейт, но ответ — СВОБОДНЫЙ ТЕКСТ. In-memory стор ответов по
+# (run_id, q_id), заполняется ручкой POST /api/agent_answer, читается циклом коротким поллом.
+# Первый потребитель — дебат-петля Архитектор↔Критик (B2): на развилке зовёт _agent_question_wait.
+_AGENT_ANSWERS = {}            # (run_id, q_id) -> str (свободный текст ответа юзера)
+_AGENT_ANSWERS_LOCK = threading.Lock()
+_AGENT_QUESTION_TIMEOUT = 180.0   # сек: открытый вопрос ждём дольше (юзер печатает развёрнуто)
+_AGENT_QUESTION_POLL = 0.3
+
+
+def _agent_answer_set(run_id: str, q_id: str, answer: str):
+    """Сохранить текстовый ответ юзера (зовётся ручкой /api/agent_answer)."""
+    with _AGENT_ANSWERS_LOCK:
+        _AGENT_ANSWERS[(run_id, q_id)] = answer
+
+
+def _agent_answer_get(run_id: str, q_id: str):
+    with _AGENT_ANSWERS_LOCK:
+        return _AGENT_ANSWERS.get((run_id, q_id))
+
+
+def _agent_answers_cleanup(run_id: str):
+    """Снести ответы прогона (в finally стрима — без утечки памяти)."""
+    with _AGENT_ANSWERS_LOCK:
+        for k in [k for k in _AGENT_ANSWERS if k[0] == run_id]:
+            _AGENT_ANSWERS.pop(k, None)
+
+
+def _agent_question_wait(run_id: str, q_id: str, question: str, emit=None,
+                         context: str = "", timeout: float = _AGENT_QUESTION_TIMEOUT):
+    """Эмитит ОТКРЫТЫЙ вопрос в стрим и ждёт текстовый ответ юзера. Возвращает строку-ответ ИЛИ
+    None (таймаут / нет emit / пусто). emit(kind, data) — колбэк таймлайна; шлём
+    {type:"question", q_id, question, context}. Никогда не блокирует дольше timeout (поток
+    стрима не зависает); ручка /api/agent_answer кладёт ответ из другого потока."""
+    if emit:
+        try:
+            emit("question", {"run_id": run_id, "q_id": q_id, "question": str(question)[:2000],
+                              "context": str(context or "")[:2000]})
+        except Exception:
+            pass
+    else:
+        return None                # некому показать вопрос → не висим, идём с допущением
+    deadline = time.time() + max(0.0, timeout)
+    while time.time() < deadline:
+        a = _agent_answer_get(run_id, q_id)
+        if a is not None:
+            return a
+        time.sleep(_AGENT_QUESTION_POLL)
+    return None
+
+
 def _repair_tool_json(text: str):
     """Попытка починить ОБРЕЗАННЫЙ/переогороженный JSON вызова инструмента (stream-recovery).
     Чистый Python, без зависимостей: снимаем код-фенсы и спец-теги, берём от первой «{»,
@@ -11779,6 +11830,8 @@ class Handler(BaseHTTPRequestHandler):
             self.openai_proxy()
         elif path == "/api/agent_permit":
             self.api_agent_permit()
+        elif path == "/api/agent_answer":
+            self.api_agent_answer()
         elif path == "/api/verify":
             self.api_verify()
         elif path == "/api/userfiles":
@@ -11813,6 +11866,20 @@ class Handler(BaseHTTPRequestHandler):
                                "allow_once|always|deny"}, 400)
         _agent_permit_set(run_id, tool_id, decision)
         self._json({"ok": True, "run_id": run_id, "tool_id": tool_id, "decision": decision})
+
+    def api_agent_answer(self):
+        """B1: текстовый ОТВЕТ юзера на открытый вопрос агента (дизайн-развилка).
+        Контракт: POST {run_id, q_id, answer}. Ответ {ok:true}. Кладётся в in-memory стор по
+        (run_id, q_id); ожидающий поток (_agent_question_wait) подхватит его поллом. Пустой answer
+        тоже валиден (= «реши сам» с пустой подсказкой) — отличаем None (нет ответа) от ''."""
+        c = self._body()
+        run_id = str(c.get("run_id") or "").strip()
+        q_id = str(c.get("q_id") or "").strip()
+        if not run_id or not q_id:
+            return self._json({"error": "нужно run_id и q_id"}, 400)
+        answer = str(c.get("answer") or "")[:SEC_MAX_PROMPT_CHARS]
+        _agent_answer_set(run_id, q_id, answer)
+        self._json({"ok": True, "run_id": run_id, "q_id": q_id})
 
     def api_topup(self):
         """Пополнение баланса самим пользователем (ползунок «купить токены»).
