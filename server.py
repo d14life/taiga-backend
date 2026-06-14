@@ -5950,6 +5950,190 @@ def parse_tool_call(text: str, allowed: dict, _heuristic: bool = True):
     return heuristic_tool_call(text, allowed) if _heuristic else None
 
 
+# ── ПОЛНЫЙ ЧАТ-САБ-АГЕНТ (для голов Мозга/Совета) ─────────────────────────────────
+# Founder: «Совет = N обычных чатов вместе; каждый участник/эксперт ДОЛЖЕН иметь ту же
+# память и инструменты, что и обычный чат — не урезанный one-shot». Раньше эксперт Мозга
+# и советники получали голый venice_complete БЕЗ цикла инструментов: они не могли вызвать
+# веб-поиск/фетч/расчёт как обычный чат. Этот помощник даёт голове ПОЛНЫЙ контекст обычного
+# хода: тот же system (туда УЖЕ вшиты RAG + grounding/источники + память), ВСЯ история
+# messages и НАСТОЯЩИЙ цикл инструментов (parse_tool_call → _perm_check/хуки → tool → петля),
+# как в обычном чате. Возвращает финальный текст.
+#
+# Анти-RCE: исполняем ТОЛЬКО функции из переданного словаря tools (тот же безопасный реестр,
+# что и обычный чат). Никакого exec/eval ввода пользователя — только LLM-вызовы и уже
+# существующие тулзы. По умолчанию голове даём ЛИШЬ безопасные read-тулзы (perm="auto" режет
+# мутирующее), мутирующие/опасные тулзы (shell/run_code/файлы) НЕ раздаём веером голов.
+def _subchat_tool_loop(model, system, base_messages, focus, tools, key,
+                       max_tokens, temperature=None, reasoning_effort=None,
+                       usage_out=None, on_delta=None, on_tool=None,
+                       max_steps=4, perm="auto"):
+    """Прогнать ОДНУ голову (эксперт Мозга / советник) как ПОЛНОЦЕННЫЙ чат-ход.
+
+    system        — полный системный промпт обычного чата (RAG+grounding+память уже внутри).
+    base_messages — ВСЯ история чата в API-формате (как у обычного хода); НЕ роняем её.
+    focus         — короткая фокус-инструкция ведущего (одна фраза ask_expert); добавляется
+                    ОТДЕЛЬНЫМ user-сообщением в КОНЕЦ, НЕ заменяя историю (история = память).
+    tools         — безопасный реестр инструментов {name: fn}; пусто/None → без цикла тулзов.
+    on_delta(txt) — если задан, ФИНАЛЬНЫЙ ответ стримится через него (live-UX одиночного
+                    эксперта); шаги-инструменты не стримятся. None → только собираем текст.
+    on_tool(name, args, ok) — необязательный колбэк-индикатор вызванного инструмента.
+    Возвращает финальный текст головы (или '' при полном провале).
+
+    Всегда ходим через venice_stream (надёжнее venice_complete: ретраи/докачка/finish-маркер).
+    Голову МОЖЕТ хотеть вызвать инструмент → буферизуем ГОЛОВУ ответа: пока она похожа на
+    tool-call JSON ({/`/<) — держим (не отдаём пользователю); иначе сразу стримим как прозу.
+    После стрима: если буфер — tool-call → исполняем и крутим петлю; иначе это финал."""
+    convo = [{"role": "system", "content": system}] + list(base_messages)
+    if focus and str(focus).strip():
+        # фокус ведущего как ДОБАВКА к памяти, а не вместо неё: история остаётся видна голове.
+        convo.append({"role": "user", "content":
+                      "[ФОКУС от ведущего — на чём сосредоточиться, отвечай с учётом всей "
+                      f"переписки выше]\n{str(focus).strip()}"})
+    final = ""
+    steps = 0
+
+    def _acct(u):
+        if usage_out is not None and u:
+            usage_out["prompt_tokens"] = usage_out.get("prompt_tokens", 0) + u.get("prompt_tokens", 0)
+            usage_out["completion_tokens"] = usage_out.get("completion_tokens", 0) + u.get("completion_tokens", 0)
+
+    while True:
+        use_tools = bool(tools) and steps < max_steps
+        u = {}
+        out = ""               # полный ответ головы этого хода
+        buffering = use_tools  # держим прозу, пока «голова» может оказаться tool-call JSON
+        emitted = ""           # что уже отдали пользователю (для стрима)
+        try:
+            for d in venice_stream(model, convo, max_tokens, u, key,
+                                   temperature=temperature, reasoning_effort=reasoning_effort):
+                out += d
+                if not buffering:
+                    if on_delta is not None and d:
+                        if not on_delta(d):
+                            _acct(u)
+                            return final + out
+                        emitted += d
+                    continue
+                head = out.lstrip()
+                if not head:
+                    continue                          # ещё пробелы — ждём первого значимого символа
+                if not head.startswith(("{", "`", "<")):
+                    # обычная проза → отпускаем буфер и дальше стримим как есть
+                    buffering = False
+                    if on_delta is not None:
+                        if not on_delta(out):
+                            _acct(u)
+                            return final + out
+                        emitted += out
+                # иначе: всё ещё похоже на tool-call → держим до конца хода
+        except Exception:
+            _acct(u)
+            # стрим упал → если что-то успели отдать, это и есть результат; иначе пусто
+            return final + (out if on_delta is None else emitted)
+        _acct(u)
+        if not out.strip():
+            return final
+        call = parse_tool_call(out, tools) if use_tools else None
+        if not call:
+            # АНТИ-ЛИК: голова попыталась вызвать инструмент, которого у неё НЕТ (буфер — JSON с
+            # tool/toolName/name, но не из реестра) → parse=None, а проза мы НЕ стримили (buffering).
+            # Не показываем JSON: один раз переспрашиваем «текстом / только доступные». Анти-цикл.
+            _s = out.lstrip()
+            if (use_tools and buffering and _s.startswith("{")
+                    and re.search(r'"(tool|toolName|name)"\s*:', _s)):
+                steps += 1
+                convo.append({"role": "assistant", "content": out})
+                convo.append({"role": "user", "content":
+                              "Такого инструмента нет. Либо ответь обычным текстом, либо вызови ТОЛЬКО "
+                              "один из доступных инструментов из списка. Не показывай JSON пользователю."})
+                continue
+            # обычный финал. Если буферизовали (не стримили) и просили стрим — отдаём сейчас.
+            final += out
+            if on_delta is not None and buffering:
+                clean = re.sub(r"<\|[^|<>]*\|>", "", out).strip() or out
+                on_delta(clean)
+            return final
+        name, args = call
+        steps += 1
+        if on_tool:
+            try:
+                on_tool(name, args, None)
+            except Exception:
+                pass
+        # исполняем ТОЛЬКО безопасный реестр + лестница прав (perm="auto" режет мутирующее).
+        block = _perm_check(perm, name)
+        deny, args = _run_pre_hooks(name, args)
+        if block or deny:
+            result = block or deny
+            ok = False
+        else:
+            try:
+                result = tools[name](args)
+                ok = not str(result).startswith("error:")
+            except Exception as e:
+                result = f"error: {e}"
+                ok = False
+            result = _run_post_hooks(name, args, result)
+        if on_tool:
+            try:
+                on_tool(name, args, ok)
+            except Exception:
+                pass
+        convo.append({"role": "assistant", "content": out})
+        convo.append({"role": "user", "content":
+                      f"TOOL RESULT {name}:\n{result}\n\n"
+                      "(Это результат инструмента, а не сообщение пользователя. "
+                      "Вызови ещё инструмент или дай финальный ответ.)"})
+
+
+def _subchat_safe_tools(uid, owner=False):
+    """Безопасный read-реестр инструментов для голов Мозга/Совета — как у ОБЫЧНОГО чата
+    не-владельца (веб-поиск/супер-поиск/фетч/вики/курсы/расчёты/время/поиск-навыков + self).
+    Мутирующее (shell/run_code/файлы) НАМЕРЕННО не раздаём веером N голов: дорого/рискованно
+    и не нужно для ответа. Это и есть «read/safe tools» из задачи (gate отмечен здесь)."""
+    base = {k: TOOLS[k] for k in SAFE_TOOLS if k in TOOLS}
+    try:
+        base = {**base, **user_tools(uid)}   # кастомные webhook-тулзы юзера (как в обычном чата)
+    except Exception:
+        pass
+    return base
+
+
+# Короткие описания безопасных тулзов — чтобы СКОУПНУТЬ промпт строго под доступные голове
+# инструменты (полный TOOLS_PROMPT рекламирует и недоступное: generate_image/remember/… → если
+# голова их позовёт, parse вернёт None и JSON «протёк» бы в ответ). Скоуп-промпт убирает соблазн.
+_SAFE_TOOL_DESCR = {
+    "web_search": 'args {"query":"..."} — поиск в интернете',
+    "super_search": 'args {"query":"..."} — глубокий мульти-движковый поиск (для важных/свежих фактов)',
+    "fetch_url": 'args {"url":"https://..."} — скачать страницу и вернуть читаемый текст',
+    "wiki": 'args {"query":"...","lang":"ru"} — краткая статья из Википедии',
+    "rates": "args {} — живые курсы USD/EUR/CNY к RUB (ЦБ) + BTC/ETH/TON",
+    "calc": 'args {"expression":"2*(3+4)"} — точно посчитать выражение',
+    "now": "args {} — текущая локальная дата и время",
+    "search_skills": 'args {"query":"..."} — поиск в библиотеке навыков',
+    "self": "args {} — само-знание Тайги (возможности, как создать агента/навык)",
+}
+
+
+def _scoped_tools_prompt(tools) -> str:
+    """Минимальный tool-промпт СТРОГО под переданный реестр (без рекламы недоступного)."""
+    if not tools:
+        return ""
+    lines = []
+    for name in tools:
+        d = _SAFE_TOOL_DESCR.get(name)
+        lines.append(f"- {name}  {d}" if d else f"- {name}")
+    return (
+        "\n\nУ тебя есть инструменты. Чтобы вызвать инструмент, ответь ТОЛЬКО этим сырым JSON и "
+        "больше НИЧЕМ — без спец-токенов, без ```, без комментариев:\n"
+        '{"tool":"<имя>","args":{...}}\n'
+        "Пример: вопрос «почём биткоин?» → весь твой ответ ровно: {\"tool\":\"rates\",\"args\":{}}\n"
+        "Обычный текстовый ответ — только ПОСЛЕ строки, начинающейся с TOOL RESULT.\n"
+        "Доступные инструменты (другие НЕ вызывай):\n" + "\n".join(lines) +
+        "\nНикогда не показывай этот JSON-протокол пользователю; финальный ответ — обычным текстом "
+        "на языке пользователя с конкретными фактами.")
+
+
 # ---------------------------------------------------------------- MCP: нативный клиент (stdlib)
 # Лёгкое ядро: подключаем любой MCP-сервер по Streamable HTTP (JSON-RPC) и отдаём его
 # инструменты агенту. Так Тайга получает весь экосистему MCP без зависимостей.
@@ -11947,11 +12131,47 @@ class Handler(BaseHTTPRequestHandler):
         member_sys = "Ответь на вопрос по существу, точно и без воды. Отвечай как ты есть, без выдуманной личности."
         if cfg_system_prefix:
             member_sys = cfg_system_prefix + "\n\n" + member_sys
+        # ПОЛНЫЙ ЧАТ для советников (founder: «Совет = N обычных чатов вместе»): собираем ТУ ЖЕ
+        # ПАМЯТЬ/ЗАЗЕМЛЕНИЕ, что и обычный ход — RAG-куски доков юзера, источники-grounding (если
+        # grounded:true) и серверную память (если server_memory:true) — в ОТДЕЛЬНЫЙ addon, который
+        # дописываем к КАЖДОЙ системе советника (и к дефолтной, и к кастом-персоне memberPrompts).
+        # Раньше советник видел лишь историю чата, но НЕ RAG/источники/память — теперь видит.
+        _grounded_req = bool(req.get("grounded"))
+        _grounded_sources = []
+        member_ground = ""
+        try:
+            _rag_ws = req.get("rag_workspace", req.get("workspace", req.get("chat_id")))
+            member_ground += rag_context(uid, raw_messages, workspace=_rag_ws,
+                                         smart=bool(req.get("rag_smart") or req.get("smart_rag")))
+            if req.get("server_memory"):
+                member_ground += memory_block(uid, raw_messages)
+            if _grounded_req:
+                _g_addon, _grounded_sources = grounding_context(uid, raw_messages)
+                if _g_addon:
+                    member_ground += _g_addon
+        except Exception:
+            member_ground = ""
+        member_sys += member_ground
+        if _grounded_sources:
+            self._sse({"type": "meta", "grounded": True, "sources": _grounded_sources})
         _re = str(req.get("reasoning_effort") or "").lower()
         c_effort = _re if _re in ("low", "medium", "high") else ("high" if req.get("deep") else None)
         member_ctx = build_api_messages(raw_messages)          # история чата = «память», видимая голове
         member_prompts = req.get("memberPrompts") if isinstance(req.get("memberPrompts"), list) else None
         member_cap = min(max_tokens, 3000 if c_effort == "high" else 1500)
+        # инструменты советника = безопасный read-реестр обычного чата (веб-поиск/фетч/вики/расчёты/…),
+        # чтобы советник МОГ САМ искать/считать как обычный чат. Если инжектнули grounding-источники —
+        # режем веб/поиск/фетч (как обычный чат), чтобы советник отвечал СТРОГО из источников.
+        member_tools = _subchat_safe_tools(uid, owner=owner)
+        if _grounded_sources:
+            for _t in ("web_search", "super_search", "fetch_url", "browse", "wiki"):
+                member_tools.pop(_t, None)
+        # советник должен ЗНАТЬ протокол вызова тулзов (как обычный чат) — иначе тулзы доступны,
+        # но модель их не зовёт. СКОУПНЫЙ промпт строго под member_tools (без рекламы недоступного).
+        _member_tp = _scoped_tools_prompt(member_tools)
+        if _member_tp:
+            member_ground += _member_tp
+            member_sys += _member_tp
         _ctx_in = est_tokens(member_sys) + est_tokens(
             " ".join((m.get("content") or "") for m in member_ctx if isinstance(m.get("content"), str)))
 
@@ -11961,14 +12181,20 @@ class Handler(BaseHTTPRequestHandler):
                 return (r, None, 0, 0)
             msys = member_sys
             if member_prompts and idx < len(member_prompts) and str(member_prompts[idx] or "").strip():
-                msys = scrub_identity(str(member_prompts[idx]))[:2000]   # своя мастер-персона головы
+                # своя мастер-персона головы — НО ту же память/grounding/RAG ДОПИСЫВАЕМ (как обычный ход).
+                msys = scrub_identity(str(member_prompts[idx]))[:2000]
                 if cfg_system_prefix:
                     msys = cfg_system_prefix + "\n\n" + msys
+                msys += member_ground
             eff = c_effort if model_reasons(r["id"]) else None
             try:
-                txt = venice_complete(r["id"], [{"role": "system", "content": msys}] + member_ctx,
-                                      member_cap, k, temperature=temperature, reasoning_effort=eff)
-                return (r, txt, _ctx_in, est_tokens(txt or ""))
+                # советник = ПОЛНЫЙ чат: msys (RAG+grounding+память) + ВСЯ история + безопасные тулзы.
+                _u = {}
+                txt = _subchat_tool_loop(r["id"], msys, member_ctx, "", member_tools, k,
+                                         member_cap, temperature=temperature, reasoning_effort=eff,
+                                         usage_out=_u)
+                return (r, txt, _u.get("prompt_tokens") or _ctx_in,
+                        _u.get("completion_tokens") or est_tokens(txt or ""))
             except Exception:
                 return (r, None, 0, 0)
 
@@ -12660,7 +12886,12 @@ class Handler(BaseHTTPRequestHandler):
                 stream_model, stream_key = driver_model, dkey
 
         msgs = [{"role": "system", "content": system}] + build_api_messages(raw_messages)
-        expert_msgs = [{"role": "system", "content": base_system}] + build_api_messages(raw_messages)
+        expert_history = build_api_messages(raw_messages)         # ВСЯ переписка = память эксперта
+        expert_msgs = [{"role": "system", "content": base_system}] + expert_history
+        # Эксперт Мозга — ПОЛНОЦЕННЫЙ чат: base_system уже несёт RAG+grounding+память, история выше,
+        # а тут добавляем безопасные read-тулзы (как у обычного чата), чтобы эксперт мог сам искать/
+        # считать/фетчить. Мутирующее (shell/run_code/файлы) НЕ раздаём (anti-RCE / дорого).
+        expert_tools = _subchat_safe_tools(uid, owner=is_owner(uid)) if brain else {}
         last_user = next((m.get("content") or "" for m in reversed(raw_messages)
                           if m.get("role") == "user"), "")
 
@@ -12940,25 +13171,29 @@ class Handler(BaseHTTPRequestHandler):
                             # стартуют даже если вся Venice-цепочка лежит (иначе council_step все ok:false).
                             _experts = best_n_for_task(_btask, brain_experts, tier=req_tier,
                                                        pool=BRAIN_EXPERT_POOL)
+                            # фокус ведущего (одна фраза ask_expert) — ДОБАВКА к памяти, НЕ замена истории.
+                            _focus = (call[1].get("question") if isinstance(call[1], dict) else None) or last_user
                             _answers = []
                             for _em in _experts:
                                 _ek, _eb, _ekerr = resolve_key(uid, _em)
                                 if not _ek:
                                     continue
-                                _eu, _txt = {}, ""
-                                try:
-                                    for _d in venice_stream(_em, expert_msgs, max(max_tokens, 3000), _eu, _ek,
-                                                            temperature=temperature,
-                                                            reasoning_effort=(req_reasoning_effort
-                                                                              if model_reasons(_em) else None)):
-                                        _txt += _d
-                                except Exception:
-                                    _txt = ""
+                                # каждый специалист — ПОЛНЫЙ чат: base_system (RAG+grounding+память) +
+                                # ВСЯ история (expert_history) + фокус ведущего + безопасные read-тулзы.
+                                _eu = {}
+                                _txt = _subchat_tool_loop(
+                                    _em, base_system, expert_history, _focus, expert_tools, _ek,
+                                    max(max_tokens, 3000), temperature=temperature,
+                                    reasoning_effort=(req_reasoning_effort if model_reasons(_em) else None),
+                                    usage_out=_eu,
+                                    on_tool=lambda n, a, ok, _m=_em: (ok is not None) and self._sse(
+                                        {"type": "tool", "name": n, "args": a,
+                                         "by": strip_model_prefix(_m).split("/")[-1]}))
                                 expert_usage["prompt_tokens"] += _eu.get("prompt_tokens", 0)
                                 expert_usage["completion_tokens"] += _eu.get("completion_tokens", 0)
                                 self._sse({"type": "council_step",
-                                           "model": strip_model_prefix(_em).split("/")[-1], "ok": bool(_txt.strip())})
-                                if _txt.strip():
+                                           "model": strip_model_prefix(_em).split("/")[-1], "ok": bool((_txt or "").strip())})
+                                if (_txt or "").strip():
                                     _answers.append((_em, _txt))
                             if _answers:
                                 # синтез = сильнейший из ответивших (best_n отсортирован по bench)
@@ -12983,44 +13218,54 @@ class Handler(BaseHTTPRequestHandler):
                                         _orch_ok = False
                             # оркестрация не дала ответа → мягко падаем на одиночного эксперта ниже
                         if not _orch_ok:
+                            # фокус ведущего (одна фраза ask_expert) — ДОБАВКА к памяти, НЕ замена истории.
+                            _efocus = (call[1].get("question") if isinstance(call[1], dict) else None) or last_user
+                            def _stream_out(txt):
+                                # стримим финал эксперта пользователю и копим в out_total для биллинга
+                                nonlocal out_total
+                                out_total += txt
+                                return self._sse({"type": "delta", "text": txt})
+                            # одиночный эксперт = ПОЛНЫЙ чат: base_system (RAG+grounding+память) +
+                            # ВСЯ история + фокус ведущего + безопасные read-тулзы; финал стримится.
+                            # Хелпер сам глотает сбой провайдера (вернёт пусто); если эксперт ничего
+                            # не отдал — НИЖЕ молча пробуем funded-запасные (как и раньше при 402/down).
                             try:
-                                for d in venice_stream(expert_model, expert_msgs,
-                                                       max(max_tokens, 3000), eu, expert_key,
-                                                       temperature=temperature,
-                                                       reasoning_effort=(req_reasoning_effort
-                                                                         if model_reasons(expert_model) else None)):
-                                    out_total += d
-                                    if not self._sse({"type": "delta", "text": d}):
-                                        return
+                                _subchat_tool_loop(
+                                    expert_model, base_system, expert_history, _efocus, expert_tools,
+                                    expert_key, max(max_tokens, 3000), temperature=temperature,
+                                    reasoning_effort=(req_reasoning_effort if model_reasons(expert_model) else None),
+                                    usage_out=eu, on_delta=_stream_out,
+                                    on_tool=lambda n, a, ok: (ok is not None) and self._sse(
+                                        {"type": "tool", "name": n, "args": a}))
                             except Exception:
-                                # эксперт-провайдер лёг (502/down/таймаут) → НЕ показываем сырую ошибку юзеру.
-                                # Правило «только рабочие модели»: молча пробуем funded-запасные. Сначала
-                                # эксперты на ЖИВЫХ провайдерах (BRAIN_EXPERT_POOL), потом обычная chat-цепочка —
-                                # иначе при лежащем Venice одиночный эксперт всегда упирался бы в мёртвый список.
-                                if len(out_total) == streamed0:        # ничего ещё не стримили — можно подменить
-                                    _seen_fb = set()
-                                    for fb in list(BRAIN_EXPERT_POOL) + _MODEL_FALLBACK["chat"]:
-                                        if fb == expert_model or fb in _seen_fb:
-                                            continue
-                                        _seen_fb.add(fb)
-                                        fk, _fb_byok, _fk_err = resolve_key(uid, fb)
-                                        if not fk:
-                                            continue
-                                        try:
-                                            eu = {}
-                                            for d in venice_stream(fb, expert_msgs,
-                                                                   max(max_tokens, 3000), eu, fk,
-                                                                   temperature=temperature,
-                                                                   reasoning_effort=(req_reasoning_effort
-                                                                                     if model_reasons(fb) else None)):
-                                                out_total += d
-                                                if not self._sse({"type": "delta", "text": d}):
-                                                    return
-                                            expert_model, expert_key = fb, fk   # для биллинга — кто реально ответил
-                                            break
-                                        except Exception:
-                                            eu = {}
-                                            continue
+                                pass
+                            if len(out_total) == streamed0:
+                                # эксперт ничего не отдал (402/down/пусто) → НЕ показываем сырую ошибку.
+                                # Правило «только рабочие модели»: молча пробуем funded-запасные — сначала
+                                # эксперты на ЖИВЫХ провайдерах (BRAIN_EXPERT_POOL), потом обычная chat-цепочка.
+                                # Запасные тоже идут ПОЛНЫМ чатом (base_system+история+тулзы), как основной.
+                                _seen_fb = set()
+                                for fb in list(BRAIN_EXPERT_POOL) + _MODEL_FALLBACK["chat"]:
+                                    if fb == expert_model or fb in _seen_fb:
+                                        continue
+                                    _seen_fb.add(fb)
+                                    fk, _fb_byok, _fk_err = resolve_key(uid, fb)
+                                    if not fk:
+                                        continue
+                                    eu = {}
+                                    try:
+                                        _subchat_tool_loop(
+                                            fb, base_system, expert_history, _efocus, expert_tools, fk,
+                                            max(max_tokens, 3000), temperature=temperature,
+                                            reasoning_effort=(req_reasoning_effort if model_reasons(fb) else None),
+                                            usage_out=eu, on_delta=_stream_out,
+                                            on_tool=lambda n, a, ok: (ok is not None) and self._sse(
+                                                {"type": "tool", "name": n, "args": a}))
+                                    except Exception:
+                                        eu = {}
+                                    if len(out_total) > streamed0:
+                                        expert_model, expert_key = fb, fk   # для биллинга — кто реально ответил
+                                        break
                                 if len(out_total) == streamed0:        # совсем никто не ответил
                                     self._sse({"type": "delta", "text":
                                                "Модели-эксперты сейчас перегружены — попробуй ещё раз через пару секунд."})
