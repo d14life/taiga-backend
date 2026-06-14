@@ -6376,12 +6376,39 @@ def _orchestrate_worker_runner(uid, seed="", req=None):
     think = str((req or {}).get("worker_think") or "normal").lower()
     if think not in ("normal", "brain", "council"):
         think = "normal"
+    # Damir 2026-06-14 «normal vs advanced»: ось ГЛУБИНЫ воркера, ОТДЕЛЬНО от «Мышления». Фронтир так
+    # и делает (лид тяжёлый, воркеры лёгкие): не каждому воркеру нужны память+тулзы.
+    #   full  — память+RAG+тулзы+петля (item 2, как было);
+    #   light — одна дешёвая модель без памяти/тулзов (быстро/дёшево) для простых подзадач;
+    #   auto  — full, но тривиально-короткие подзадачи гонит light (умный дефолт).
+    depth = str((req or {}).get("agent_depth") or "auto").lower()
+    if depth not in ("light", "full", "auto"):
+        depth = "auto"
+
+    def _is_trivial(s):
+        s = (s or "").strip()
+        return len(s) < 90 and not re.search(
+            r"код|class |def |function|```|http|ресёрч|research|анализ|сравни|посчита|вычисл|источник",
+            s, re.I)
 
     def run(spec):
         base_model = _norm_worker_model(spec.get("model"))
         skill_sys = spec.get("skill_system") or "Ты толковый агент-исполнитель. Отвечай по делу."
         sub = str(spec.get("sub") or "").strip()
         prior = str(spec.get("prior") or "").strip()
+        # ЛЁГКИЙ агент (normal): одна дешёвая модель, без памяти/RAG/тулзов — быстро и дёшево.
+        if depth == "light" or (depth == "auto" and _is_trivial(sub)):
+            lk, _lb, lke = resolve_key(uid, base_model)
+            if not lke and lk:
+                try:
+                    _lt = venice_complete(base_model, [
+                        {"role": "system", "content": autonomy + skill_sys},
+                        {"role": "user", "content": sub + (("\n\nКОНТЕКСТ от прошлых агентов:\n" + prior) if prior else "")}],
+                        max_tokens=700, key=lk)
+                    return (_lt or "").strip() or "[воркер не дал ответа]"
+                except Exception as e:
+                    return f"[ошибка воркера: {str(e)[:140]}]"
+            # нет ключа на лёгком пути → падаем в полный ниже
         wsys = autonomy + skill_sys + ground_full  # автономия + персона скилла + RAG/память/источники + тулзы
         focus = sub + (("\n\nКОНТЕКСТ от прошлых агентов:\n" + prior) if prior else "")
 
@@ -11857,6 +11884,10 @@ class Handler(BaseHTTPRequestHandler):
             self.api_agent_answer()
         elif path == "/api/debate":
             self.api_debate()
+        elif path == "/api/export_memory":
+            self.api_export_memory()
+        elif path == "/api/followups":
+            self.api_followups()
         elif path == "/api/verify":
             self.api_verify()
         elif path == "/api/userfiles":
@@ -11979,6 +12010,74 @@ class Handler(BaseHTTPRequestHandler):
                       "stop_reason": r.get("stop_reason"), "rounds": len(r.get("rounds") or []),
                       "questions": r.get("questions")})
         _agent_answers_cleanup(run_id)
+
+    def api_export_memory(self):
+        """Экспорт ВСЕЙ памяти юзера (приватность/портативность, Damir 2026-06-14). POST {user}.
+        Возвращает JSON {user, memory, notes, exported_at} — юзер качает свои данные одной кнопкой."""
+        c = self._body()
+        uid = c.get("user", "default")
+        if not self._ip_guard(uid):
+            return
+        try:
+            mem = load_memory(uid)
+        except Exception:
+            mem = []
+        try:
+            notes = load_notes(uid)
+        except Exception:
+            notes = []
+        self._json({"user": uid, "memory": mem, "notes": notes,
+                    "exported_at": _now_ts(), "format": "taiga-memory-v1"})
+
+    def api_followups(self):
+        """Подсказки СЛЕДУЮЩЕГО ШАГА (до 4) по контексту последнего обмена (Damir 2026-06-14).
+        POST {user, messages}. Дешёвая модель → JSON кнопок {label, send}. Контекст-зависимо:
+        «привет» → одни, кодинг → тесты/рефактор, ресёрч → глубже/источники. Пусто при сбое/нет шагов."""
+        c = self._body()
+        uid = c.get("user", "default")
+        if not self._ip_guard(uid):
+            return
+        msgs = c.get("messages") if isinstance(c.get("messages"), list) else []
+        tail = []
+        for m in msgs[-6:]:
+            if not isinstance(m, dict):
+                continue
+            t = str(m.get("content") or "").strip()[:1500]
+            if t:
+                tail.append((str(m.get("role") or "user"), t))
+        if not tail:
+            return self._json({"suggestions": []})
+        sys = ("Ты предлагаешь СЛЕДУЮЩИЙ ШАГ по диалогу. Дай 2-4 КОРОТКИХ варианта, что юзер может "
+               "сделать дальше — каждый как кнопка. Опирайся на ПОСЛЕДНИЙ ответ ассистента: код → "
+               "напиши тесты/отрефактори/объясни/найди баги; ресёрч → копнуть глубже/источники/сравни; "
+               "приветствие/смолток → что умеешь/пример; план → детализируй шаг; идея → за/против. "
+               "Верни ТОЛЬКО JSON: {\"suggestions\":[{\"label\":\"2-5 слов на кнопке\",\"send\":\"что "
+               "отправить при клике\"}]}. На языке юзера, конкретно по теме, без общих фраз. Если юзер "
+               "попрощался или шагов явно нет — {\"suggestions\":[]}.")
+        convo = "\n".join(f"{r}: {t}" for r, t in tail)
+        # надёжная дешёвая модель (aux_model/CHEAP_MODEL может указывать на мёртвую Venice → "" молча).
+        try:
+            raw = venice_complete("ng:gemini-2.5-flash", [
+                {"role": "system", "content": sys},
+                {"role": "user", "content": convo}], max_tokens=300, temperature=0.4) or ""
+        except Exception:
+            return self._json({"suggestions": []})
+        s = raw.strip()
+        a, b = s.find("{"), s.rfind("}")
+        out = []
+        if a != -1 and b > a:
+            try:
+                d = json.loads(s[a:b + 1])
+                for it in (d.get("suggestions") or [])[:4]:
+                    if not isinstance(it, dict):
+                        continue
+                    label = str(it.get("label") or "").strip()[:60]
+                    send = str(it.get("send") or label).strip()[:400]
+                    if label and send:
+                        out.append({"label": label, "send": send})
+            except Exception:
+                out = []
+        self._json({"suggestions": out})
 
     def api_topup(self):
         """Пополнение баланса самим пользователем (ползунок «купить токены»).

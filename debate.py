@@ -65,6 +65,13 @@ def _extract_question(text: str) -> Optional[str]:
     return m.group(1).strip() if m else None
 
 
+def _clean_blueprint(text: str) -> str:
+    """Убрать ведущую служебную метку, которую модель иногда эхает из истории
+    («[Архитектор, раунд N]:» / «[ЭХО …]:»). Косметика финального чертежа."""
+    out = re.sub(r"^\s*\[(?:Архитектор|ЭХО)[^\]]*\]:?\s*", "", text or "", flags=re.IGNORECASE).strip()
+    return out or (text or "")
+
+
 def _critic_agreed(text: str) -> bool:
     """Критик явно написал ВЕРДИКТ: согласен."""
     return bool(_VERDICT_AGREE_RE.search(text))
@@ -164,7 +171,7 @@ def run_debate(
     except Exception as exc:  # noqa: BLE001
         arch_reply = f"[Ошибка архитектора в раунде 0: {exc}]"
 
-    blueprint = arch_reply
+    blueprint = _clean_blueprint(arch_reply)
     arch_history.append(f"[Архитектор, раунд 0]:\n{arch_reply}")
 
     rounds.append({"round": 0, "role": "architect", "text": arch_reply})
@@ -230,7 +237,7 @@ def run_debate(
         except Exception as exc:  # noqa: BLE001
             arch_reply = f"[Ошибка архитектора в раунде {rnd}: {exc}]"
 
-        blueprint = arch_reply
+        blueprint = _clean_blueprint(arch_reply)
         arch_history.append(f"[Архитектор, раунд {rnd}]:\n{arch_reply}")
         rounds.append({"round": rnd, "role": "architect", "text": arch_reply})
         _safe_emit(emit, "debate", {"round": rnd, "role": "architect", "text": arch_reply, "status": "ok"})
