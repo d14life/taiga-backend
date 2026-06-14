@@ -1271,19 +1271,74 @@ def _rag_load(uid: str) -> list:
         hit = _RAG_LOAD_CACHE.get(uid)
         if hit and hit[0] > now:
             return hit[1]
-    v = _db_get_json("rag", "uid", uid, [])
-    v = v if isinstance(v, list) else []
+    # #6: читаем из строковой таблицы (индекс по uid). Пусто → ленивая миграция старого блоба → строки.
+    v = _rag_rows_load(uid)
+    if not v:
+        blob = _db_get_json("rag", "uid", uid, [])
+        blob = blob if isinstance(blob, list) else []
+        if blob:                            # старый блоб ещё не перелит → переливаем ОДИН раз
+            try:
+                _rag_rows_save(uid, blob)
+            except Exception:
+                pass
+            v = blob
     with _PERF_LOCK:
         if len(_RAG_LOAD_CACHE) >= _RAG_LOAD_CACHE_MAX and uid not in _RAG_LOAD_CACHE:
             _RAG_LOAD_CACHE.clear()         # простая эвикция: переполнение → полный сброс
         _RAG_LOAD_CACHE[uid] = (now + _RAG_LOAD_TTL, v)
     return v
 
+
+def _rag_rows_load(uid: str) -> list:
+    """#6: куски юзера из rag_chunks (индекс по uid) тем же форматом, что старый блоб
+    ({doc,text,vec,workspace,source?}). Не грузим весь блоб целиком — только строки этого юзера."""
+    out = []
+    try:
+        with _DB_LOCK:
+            rows = _db().execute(
+                "SELECT pos, doc, text, vec, ws, source FROM rag_chunks WHERE uid=? ORDER BY pos, id",
+                (uid,)).fetchall()
+        for r in rows:
+            it = {"doc": r["doc"], "text": r["text"] or "",
+                  "vec": json.loads(r["vec"]) if r["vec"] else [],
+                  "workspace": r["ws"] or _RAG_GLOBAL_WS}
+            if r["source"]:
+                it["source"] = r["source"]
+            out.append(it)
+    except Exception:
+        return out
+    return out
+
+
+def _rag_rows_save(uid: str, items: list):
+    """#6: заменить ВСЕ куски юзера в rag_chunks (DELETE+INSERT в транзакции) — тот же контракт
+    replace-all, что у старого блоба, поэтому rag_ingest/rag_delete не меняются."""
+    with _DB_LOCK:
+        conn = _db()
+        conn.execute("DELETE FROM rag_chunks WHERE uid=?", (uid,))
+        for i, it in enumerate(items or []):
+            if not isinstance(it, dict):
+                continue
+            conn.execute(
+                "INSERT INTO rag_chunks (uid, pos, doc, text, vec, ws, source) VALUES (?,?,?,?,?,?,?)",
+                (uid, i, it.get("doc"), str(it.get("text") or ""),
+                 json.dumps(it.get("vec") or [], ensure_ascii=False),
+                 _rag_ws(it.get("workspace")), it.get("source")))
+        conn.commit()
+
+
 def _rag_save(uid: str, items: list):
     try:
-        _db_put_json("rag", "uid", uid, items)
+        _rag_rows_save(uid, items)          # #6: пишем в строки (источник истины)
+        try:
+            _db_put_json("rag", "uid", uid, [])   # очищаем старый блоб (анти-резурекция при удалении всего)
+        except Exception:
+            pass
     except Exception:
-        pass
+        try:
+            _db_put_json("rag", "uid", uid, items)   # строки упали → запасной путь в блоб (не теряем данные)
+        except Exception:
+            pass
     finally:
         _invalidate_rag_cache(uid)          # запись → следующий _rag_load перечитает из БД
 
@@ -6974,8 +7029,22 @@ def _db_init_schema(conn):
         );
         CREATE TABLE IF NOT EXISTS rag (
             uid    TEXT PRIMARY KEY,
-            data   TEXT NOT NULL           -- JSON-массив кусков [{doc, text, emb}, ...]
+            data   TEXT NOT NULL           -- JSON-массив кусков [{doc, text, emb}, ...]  (СТАРЫЙ блоб — бэкап)
         );
+        -- #6 (Damir 2026-06-14): RAG по-кусочными СТРОКАМИ + индекс по uid (готовность к росту:
+        -- тяжёлый кодер с большим репо больше не грузит весь блоб + json.loads каждый запрос).
+        -- Блоб-таблица rag остаётся как бэкап; чтение/запись идут через строки (ленивая миграция).
+        CREATE TABLE IF NOT EXISTS rag_chunks (
+            id     INTEGER PRIMARY KEY AUTOINCREMENT,
+            uid    TEXT NOT NULL,
+            pos    INTEGER,                -- порядок куска внутри юзера
+            doc    TEXT,                   -- имя документа
+            text   TEXT NOT NULL,          -- тело куска
+            vec    TEXT,                   -- JSON эмбеддинга
+            ws     TEXT,                   -- рабочее пространство
+            source TEXT                    -- пометка происхождения (напр. vision)
+        );
+        CREATE INDEX IF NOT EXISTS idx_rag_chunks_uid ON rag_chunks(uid);
         CREATE TABLE IF NOT EXISTS chats (
             uid    TEXT NOT NULL,
             cid    TEXT NOT NULL,
