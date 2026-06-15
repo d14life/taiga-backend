@@ -298,6 +298,13 @@ def _resolve_script(user_dir, uid, sid, script_rel):
     if not rec or not rec.get("folder"):
         return None, "у навыка нет загруженного фолдера со скриптами"
     sdir = (user_dir(uid) / "skills" / "_folders" / rec["folder"]).resolve()
+    # некоторые навыки (легаси-импорт / ручные фикстуры) лежат прямо в skills/<folder>, а не в
+    # skills/_folders/<folder> → раньше «скрипт не найден» при запуске листнутого навыка. Поддержим
+    # обе раскладки: если канонической _folders-папки нет, берём skills/<folder>. Анти-traversal ниже.
+    if not sdir.exists():
+        alt = (user_dir(uid) / "skills" / rec["folder"]).resolve()
+        if alt.exists():
+            sdir = alt
     target = (sdir / script_rel).resolve()
     try:
         target.relative_to(sdir)
