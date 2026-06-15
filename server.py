@@ -3791,6 +3791,38 @@ def _first_live(role: str) -> str:
     return chain[-1]
 
 
+def _prov_has_funds(prov: str) -> bool:
+    """Есть ли у провайдера деньги (по балансу, не только по runtime-здоровью — иначе после
+    рестарта Venice в минусе кажется «рабочим», пока не словит пару 402)."""
+    try:
+        b = (get_balances() or {}).get(prov) or {}
+        if b.get("no_api_balance") or b.get("usd") is None:
+            return bool(b.get("ok", True))   # баланс не отдаётся API → доступен, если ключ есть
+        return float(b.get("usd") or 0) > 0.05
+    except Exception:
+        return True
+
+
+def _funded_image_model(model: str, owner: bool) -> str:
+    """Картинка-модель, ведущая в ЖИВОЙ ОПЛАЧЕННЫЙ провайдер. Модель пуста ИЛИ её провайдер мёртв/
+    в минусе (классика: дефолт студии lustify-v8 = Venice, а Venice в 402) → подменяем: владельцу
+    бесплатная ng:hidream (NanoGPT-подписка), иначе первая живая image-модель из каталога.
+    Чинит «открыл Студию → нарисовать → 402 из коробки»."""
+    def _usable(p):
+        return bool(p) and not provider_degraded(p) and _prov_has_funds(p)
+    prov = provider_name(model) if model else ""
+    if model and _usable(prov):
+        return model
+    if owner and _usable("nanogpt"):
+        return "ng:" + NANO_FREE_IMAGE_DEFAULT
+    for r in RICH:
+        if r.get("kind") == "image":
+            p = r.get("provider") or provider_name(r.get("id", ""))
+            if _usable(p):
+                return r.get("id") or model
+    return model or ("ng:" + NANO_FREE_IMAGE_DEFAULT)
+
+
 _load_phantom()
 
 
@@ -10137,6 +10169,7 @@ class Handler(BaseHTTPRequestHandler):
             log_abuse(uid, model or "image")
             return self._json({"error": "Запрос нарушает правила."}, 400)
         owner = is_owner(uid)
+        model = _funded_image_model(model, owner)   # картинка → ЖИВОЙ оплаченный провайдер (не мёртвый Venice)
         price = image_gen_price(model)
         if not owner:
             need = round(price * (1 + load_billing().get("markup_pct", 50) / 100), 6)
