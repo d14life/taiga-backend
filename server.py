@@ -3752,13 +3752,17 @@ def _live_funded_model(role: str) -> str:
     if not RICH:
         return ""
     cheap_roles = ("cheap", "chat", "plan", "style", "memory", "compress", "improve", "craft")
+    # funded-набор провайдеров считаем ОДИН раз (по балансу, не только runtime-health — иначе после
+    # рестарта Venice в минусе кажется рабочим, пока не словит пару 402, и служебка садится на мёртвую модель)
+    funded = {p for p in ("nanogpt", "chutes", "redpill", "venice", "aimlapi")
+              if not provider_degraded(p) and _prov_has_funds(p)}
     cands = []
     for r in RICH:
         mid = r.get("id", "")
         if not mid:
             continue
         prov = r.get("provider") or provider_name(mid)
-        if provider_degraded(prov) or is_phantom(mid) or _recently_empty(mid):
+        if prov not in funded or is_phantom(mid) or _recently_empty(mid):
             continue
         if r.get("kind") in ("image", "voice"):
             continue
@@ -3766,7 +3770,9 @@ def _live_funded_model(role: str) -> str:
     if not cands:
         return ""
     if role in cheap_roles:
-        cands.sort(key=lambda r: (r.get("per1k") or 0))      # дешевле первым
+        # дешёвую ОПЛАЧЕННУЮ раньше $0-бесплатной: free-модели часто флаки/лимитированы
+        # (omni/превью зависают) — для служебки нужна НАДЁЖНАЯ дешёвая, а не «самая дешёвая».
+        cands.sort(key=lambda r: ((r.get("per1k") or 0) <= 0, r.get("per1k") or 0))
     else:
         cands.sort(key=lambda r: -(r.get("smart") or 0))     # умнее первым
     return cands[0].get("id", "")
@@ -3779,9 +3785,11 @@ def _first_live(role: str) -> str:
     не повесит стрим (это и был баг дизайн-канваса: «движок думает…» вечно)."""
     chain = _MODEL_FALLBACK.get(role) or [DEFAULTS.get(role, CHEAP_MODEL)]
     for mid in chain:
-        if not is_phantom(mid) and not _recently_empty(mid) and not provider_degraded(provider_name(mid)):
+        _p = provider_name(mid)
+        if (not is_phantom(mid) and not _recently_empty(mid)
+                and not provider_degraded(_p) and _prov_has_funds(_p)):
             return mid
-    # вся цепочка роли — на мёртвом/просевшем провайдере → живая модель у оплаченного провайдера
+    # вся цепочка роли — на мёртвом/безденежном провайдере → живая модель у оплаченного провайдера
     alt = _live_funded_model(role)
     if alt:
         return alt
@@ -12449,7 +12457,7 @@ class Handler(BaseHTTPRequestHandler):
             body = self._body()
         except Exception:
             return self._json({"error": {"message": "bad json"}}, 400)
-        model = str(body.get("model") or DEFAULTS["chat"])
+        model = str(body.get("model") or _first_live("chat"))
         stream = bool(body.get("stream"))
         messages = body.get("messages") or []
         _ok, _emsg = _sec_messages_ok(messages)
@@ -12577,7 +12585,9 @@ class Handler(BaseHTTPRequestHandler):
         uid = req.get("user", "default")
         raw_messages = list(req.get("messages") or [])
         crafter = str(req.get("crafter") or aux_model("craft"))
-        responder = str(req.get("responder") or DEFAULTS["smart"])
+        # не DEFAULTS["smart"] (=мёртвый venice opus) и не _first_live("smart") (= самый «умный»
+        # каталога = иногда фантом claude-fable-5, что падает) — берём НАДЁЖНУЮ сильную funded.
+        responder = str(req.get("responder") or _first_live("chat"))
         max_tokens = int(req.get("max_tokens") or 2048)
         system = taiga_identity() + "\n\n" + str(req.get("system") or DEFAULT_SYSTEM)
 
@@ -12690,7 +12700,7 @@ class Handler(BaseHTTPRequestHandler):
     def chat_research(self, req):
         uid = req.get("user", "default")
         raw_messages = list(req.get("messages") or [])
-        model = str(req.get("model") or DEFAULTS["chat"])
+        model = str(req.get("model") or _first_live("chat"))
         if model in ("__auto__", ""):
             model = DEFAULTS["chat"]              # ресёрчу нужна вменяемая текстовая модель
         max_tokens = max(int(req.get("max_tokens") or 2048), 2500)
