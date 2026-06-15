@@ -499,13 +499,34 @@ def run_skill_script(user_dir, uid, sid, script_rel, *, is_owner, run_code_lang,
 
     if is_owner(uid):
         # ── owner-нативный путь: запуск ИЗ ПАПКИ НАВЫКА с argv/cwd/stdin (фиделити-шим) ──
+        meta = {}
         if run_code_file is not None:
             out = run_code_file(str(target), lang, cwd=str(sdir),
-                                argv=argv_list, stdin_text=stdin_text)
+                                argv=argv_list, stdin_text=stdin_text, meta=meta)
         else:
             # фолбэк (file-раннер не пробросили): старый -c путь, без argv/cwd, но рабочий
             out = run_code_lang(code, "python" if lang == "python" else lang,
                                 stdin_text=stdin_text)
+        # НЕ-нулевой код выхода = скрипт упал (usage-ошибка argparse / краш). Раньше это уходило как
+        # ok:True с сырым [stderr]-дампом в «успешном» блоке (юзер видел «usage: …»). Теперь — чистый
+        # отказ: ok:False + понятное сообщение (UI покажет «нужны аргументы/ввод», а не результат).
+        rc = meta.get("rc", 0)
+        if rc not in (0, None):
+            err_text = (meta.get("stderr") or out or "").strip()
+            low = err_text.lower()
+            needs_args = ("usage:" in low or "the following arguments are required" in low
+                          or "error: argument" in low or "unrecognized arguments" in low)
+            if needs_args:
+                msg = ("Этот навык требует аргументы командной строки или ввод (STDIN) — без них "
+                       "его скрипт не запускается. Передайте argv/STDIN и повторите.\n\nДетали:\n" + err_text[:3000])
+            else:
+                msg = ("Скрипт навыка завершился с ошибкой (код выхода " + str(rc) + ").\n\nДетали:\n"
+                       + (err_text[:3000] or "(без вывода)"))
+            res = {"ok": False, "runtime": "server", "lang": lang, "script": script_rel,
+                   "error": msg, "exit_code": rc, "needs_input": bool(needs_args), "badge": badge}
+            if argv_list:
+                res["argv"] = argv_list
+            return res
         res = {"ok": True, "runtime": "server", "lang": lang, "script": script_rel,
                "output": out, "badge": badge}
         if argv_list:

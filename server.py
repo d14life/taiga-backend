@@ -5503,7 +5503,7 @@ def run_code_lang(code: str, lang: str = "python", timeout: int = 12, stdin_text
 
 
 def run_code_file(script_path: str, lang: str = "python", *, cwd: str = None,
-                  argv=None, stdin_text=None, timeout: int = 12) -> str:
+                  argv=None, stdin_text=None, timeout: int = 12, meta: dict = None) -> str:
     """OWNER-фиделити-раннер для НАВЫК-СКРИПТОВ: запускает СУЩЕСТВУЮЩИЙ файл скрипта
     `python <script_path> <argv...>` с cwd=<папка навыка> и РЕАЛЬНЫМ env (а НЕ `-c <code>`
     в пустой temp-папке, как run_code_lang). Это чинит:
@@ -5512,7 +5512,10 @@ def run_code_file(script_path: str, lang: str = "python", *, cwd: str = None,
       • __file__ указывает на реальный файл → __file__-относительные чтения РАБОТАЮТ.
     Безопасность как у run_code_lang: rlimits (CPU/RAM/форк-бомба/размер файла) + timeout +
     кап вывода. Owner-only путь (вызывается ТОЛЬКО из owner-ветки run_skill_script). STDIN —
-    как input (и дублируется в env SKILL_INPUT). Возврат: stdout(+stderr), подрезанный."""
+    как input (и дублируется в env SKILL_INPUT). Возврат: stdout(+stderr), подрезанный.
+    meta (опц., dict) — out-параметр: если передан, заполняется {rc, stdout, stderr}, чтобы
+    вызывающий мог отличить НЕ-нулевой код выхода (usage-ошибка argparse / краш скрипта) от
+    успеха и показать чистое сообщение вместо сырого [stderr]-дампа в «успешном» блоке."""
     lang = (lang or "python").lower()
     sp = str(script_path)
     if lang in ("py", "python"):
@@ -5520,11 +5523,15 @@ def run_code_file(script_path: str, lang: str = "python", *, cwd: str = None,
     elif lang in ("js", "javascript", "node", "mjs"):
         node = shutil.which("node")
         if not node:
+            if meta is not None:
+                meta.update(rc=-1, stdout="", stderr="Node.js не установлен")
             return "error: Node.js не установлен — JS запустить нельзя"
         cmd = [node, sp]
     elif lang in ("sh", "bash"):
         cmd = ["/bin/bash", sp]
     else:
+        if meta is not None:
+            meta.update(rc=-1, stdout="", stderr=f"язык «{lang}» не поддерживается")
         return f"error: язык «{lang}» не поддерживается (python / js / bash)"
     # аргументы командной строки скрипта (станут sys.argv[1:])
     if argv:
@@ -5539,11 +5546,17 @@ def run_code_file(script_path: str, lang: str = "python", *, cwd: str = None,
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
                            cwd=run_cwd, input=_stdin, env=env,
                            preexec_fn=_rlimit_preexec if sys.platform != "win32" else None)
+        if meta is not None:
+            meta.update(rc=r.returncode, stdout=(r.stdout or ""), stderr=(r.stderr or ""))
         out = (r.stdout or "") + (("\n[stderr]\n" + r.stderr) if r.stderr else "")
         return out.strip()[:6000] or "(нет вывода)"
     except subprocess.TimeoutExpired:
+        if meta is not None:
+            meta.update(rc=-1, stdout="", stderr=f"timeout {timeout}s")
         return f"error: превышено время выполнения ({timeout}s)"
     except Exception as e:
+        if meta is not None:
+            meta.update(rc=-1, stdout="", stderr=str(e))
         return f"error: {e}"
 
 
