@@ -9516,10 +9516,30 @@ def aiml_music_status(gid: str) -> dict:
 
 
 # ---- AIMLAPI 3D (sync: image → glb-меш) ----
+def _shrink_data_url(image: str, max_px: int = 384) -> str:
+    """Ужимает картинку-data-url до max_px (3D-шлюз AIMLAPI отдаёт 502 на большом base64 —
+    проверено: ~300к симв → 502, ~15к → 200). URL не трогаем. PIL нет → как есть."""
+    if not isinstance(image, str) or not image.startswith("data:image"):
+        return image
+    try:
+        import io as _io, base64 as _b64
+        from PIL import Image as _Img
+        b64 = image.split(",", 1)[1]
+        im = _Img.open(_io.BytesIO(_b64.b64decode(b64))).convert("RGB")
+        if max(im.size) <= max_px:
+            return image
+        im.thumbnail((max_px, max_px))
+        buf = _io.BytesIO(); im.save(buf, "JPEG", quality=72)
+        return "data:image/jpeg;base64," + _b64.b64encode(buf.getvalue()).decode()
+    except Exception:
+        return image
+
+
 def aiml_3d(model: str, image: str, prompt: str = None, timeout: int = 75) -> dict:
     key = _aiml_key()
     if not key:
         raise RuntimeError("нет ключа AIMLAPI")
+    image = _shrink_data_url(image)   # большой base64 → 502; ужимаем до ~384px
     mid = model[5:] if model.startswith("aiml:") else model
     # имя поля картинки разнится по моделям: magic=front_image_url, остальные=image_url
     body = {"model": mid, "output_format": "glb"}
@@ -10145,7 +10165,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             # тайт-таймаут: 3D-провайдер сейчас на обслуживании и может висеть.
             # Лучше быстро упасть с понятным сообщением, чем держать соединение 30-75с.
-            res = aiml_3d(model, image, req.get("prompt"), timeout=13)
+            res = aiml_3d(model, image, req.get("prompt"), timeout=90)   # 3D-ген ~30-60с, не 13с
         except urllib.error.HTTPError as e:
             return self._json({"error": f"3D API {e.code}: {e.read().decode('utf-8','ignore')[:200]}"}, 502)
         except Exception as e:
