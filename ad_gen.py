@@ -124,16 +124,23 @@ def ad_scripts(server, brief: str, n: int = 3, url: str = "",
 # подскажет загрузить фото и выбрать модель вручную.
 
 def ad_avatar_models(server) -> dict:
-    models = []
+    def _pick(lst):
+        # только ФОТО→говорит аватары: lip-sync (latentsync/kling-lipsync) хотят ВХОДНОЕ ВИДЕО,
+        # а UGC даёт ФОТО → их выкидываем (иначе 400 «LatentSync requires a video»).
+        out = []
+        for m in (lst or []):
+            if not (isinstance(m, dict) and m.get("kind") == "avatar"):
+                continue
+            nm = (str(m.get("id") or "") + " " + str(m.get("name") or "")).lower()
+            if "lipsync" in nm or "lip-sync" in nm or "latentsync" in nm:
+                continue
+            out.append({"id": m.get("id"), "name": m.get("name") or m.get("id"),
+                        "usd": m.get("usd"), "featured": bool(m.get("featured"))})
+        return out
     try:
-        for m in getattr(server, "VIDEO_MODELS", []) or []:
-            if isinstance(m, dict) and m.get("kind") == "avatar":
-                models.append({
-                    "id": m.get("id"),
-                    "name": m.get("name") or m.get("id"),
-                    "usd": m.get("usd"),
-                    "featured": bool(m.get("featured")),
-                })
+        # живой каталог; если в нём НЕТ фото-аватаров (только lip-sync или пусто) — запасной
+        # VIDEO_FALLBACK, чтобы UGC ВСЕГДА имел фото→говорит модели, а не «нет моделей».
+        models = _pick(getattr(server, "VIDEO_MODELS", None)) or _pick(getattr(server, "VIDEO_FALLBACK", None))
     except Exception:
         models = []
     # Рекомендуем самую дешёвую featured (или просто самую дешёвую) — чтобы первый
