@@ -3857,6 +3857,63 @@ def _live_funded_model(role: str) -> str:
     return lst[0] if lst else ""
 
 
+# Дизайн-канвас (бриф→полный HTML-документ) гонит 8000 токенов вёрстки ОДНИМ потоком. Тут нужна
+# не «самая умная», а БЫСТРАЯ модель — иначе медленный топ-бенч (напр. deepseek-v3.2 ~140 симв/мин)
+# не успевает дойти до </html> за разумные ~30-60с, и канвас показывает пустой/обрезанный скелет.
+# Имя — слабый сигнал скорости (эндпоинт «*-flash» бывает медленным у конкретного провайдера),
+# поэтому идём по ПРИОРИТЕТНОМУ списку проверенно-быстрых семейств (замерено: gemini-*-flash ~18с
+# до </html>, qwen-coder-flash ~65с), а тяжёлые/думающие отсеиваем явно.
+_DESIGN_FAST_RANK = (  # чем выше в списке — тем приоритетнее (быстрее и хорошо верстает)
+    "gemini-3-flash", "gemini-2.5-flash", "gemini-flash", "gemini-3.1-flash", "gemini-3.5-flash",
+    "gpt-5.4-nano", "gpt-4o-mini", "gpt-5.1-mini", "haiku",
+    "qwen3-coder-flash", "qwen-coder-flash", "qwen-turbo", "qwen3.5-flash",
+    "flash-lite", "flash", "lite", "mini", "turbo",
+)
+# Явно медленные/тяжёлые: думающие, очень крупные (235B/405B/480B/671B), и известные-медленные семьи.
+_DESIGN_SLOW = re.compile(
+    r"(thinking|reason(er|ing)?|-r1\b|-r2\b|qwq|deep-?research|:thinking|-high\b|"
+    r"235b|405b|480b|671b|\b70b\b|kimi|minimax-?m|\bglm-5|deepseek-v3\.2|opus|gpt-4-turbo)", re.I)
+
+
+def _design_model() -> str:
+    """Быстрая funds-aware модель под генерацию полного HTML-документа (дизайн-канвас/слайды).
+    Сканируем ВЕСЬ живой оплаченный каталог (не _live_funded_models — он режет ≤2 модели/провайдер
+    и выкидывает быстрые gemini-flash, т.к. все они у одного провайдера) с тем же funds-гейтом, и
+    выбираем по приоритету проверенно-быстрых семейств; тяжёлые/думающие отсеиваем. Нет подходящих —
+    обычный живой дефолт (лучше работающая модель, чем мёртвая/обрезанный канвас)."""
+    if not RICH:
+        return _first_live("chat")
+    funded = {p for p in ("nanogpt", "chutes", "redpill", "venice", "aimlapi")
+              if not provider_degraded(p) and _prov_has_funds(p)}
+    cands = []
+    for r in RICH:
+        mid = r.get("id", "")
+        if not mid:
+            continue
+        prov = r.get("provider") or provider_name(mid)
+        if prov not in funded or is_phantom(mid) or _recently_empty(mid):
+            continue
+        if r.get("kind") in ("image", "voice") or _DESIGN_SLOW.search(mid):
+            continue
+        cands.append(mid)
+    if not cands:
+        return _first_live("chat")
+
+    def rank(mid: str) -> int:
+        low = mid.lower()
+        for i, fam in enumerate(_DESIGN_FAST_RANK):
+            if fam in low:
+                return i
+        return len(_DESIGN_FAST_RANK)  # не из быстрого списка — в самый хвост
+
+    # лучший по «скоростному рангу»; при равном ранге — дешевле (меньше → обычно быстрее).
+    best = min(cands, key=lambda m: (rank(m), model_per1k(m) or 9))
+    if rank(best) < len(_DESIGN_FAST_RANK):
+        return best
+    # ни одного быстрого семейства в каталоге → не угадываем медленную, отдаём надёжный живой дефолт
+    return _first_live("chat")
+
+
 def _first_live(role: str) -> str:
     """Первая НЕ-фантомная, НЕ-недавно-пустая модель У ЖИВОГО провайдера из цепочки роли.
     Вся цепочка на просевшем провайдере (напр. весь дефолт на Venice 402) → берём живую модель
@@ -13440,7 +13497,11 @@ class Handler(BaseHTTPRequestHandler):
         # gap 5 (Damir 2026-06-14): юзер может ОТКЛЮЧИТЬ молчаливый авто-Мозг (req.auto_brain=false) —
         # тогда на трудном вопросе отвечает одна выбранная/авто модель, без тихой эскалации в Мозг.
         # Поле отсутствует/не false → прежнее поведение (авто-Мозг разрешён). Явный режим/картинки — как было.
-        _allow_auto_brain = req.get("auto_brain") is not False
+        # mode="design" (дизайн-канвас) ВСЕГДА один быстрый поток вёрстки — молчаливый Мозг тут не нужен
+        # (триаж→эксперт занимал 1-2 мин без стрима → канвас «думает…» вечно). Это страхует и от того, что
+        # прокси может не пробросить auto_brain:false: длинный бриф иначе случайно поднял бы Мозг.
+        _is_design = str(req.get("mode") or "").lower() == "design"
+        _allow_auto_brain = req.get("auto_brain") is not False and not _is_design
         if _allow_auto_brain and not explicit_model and not _in_special_mode and not has_images:
             try:
                 auto_brain = query_is_hard(raw_messages)
@@ -13467,6 +13528,16 @@ class Handler(BaseHTTPRequestHandler):
             # Топ (opus) — ТОЛЬКО если юзер явно выбрал цена=топ. Раньше владельцу хардкодился opus
             # на любой «трудный» запрос (дорого). (Damir: «убери, только когда реально надо + прайс-кап».)
             model = best_for_task(_bt, tier=req_tier or "mid")
+        # ДИЗАЙН-КАНВАС (бриф→полный HTML за один поток): mode="design" → БЫСТРАЯ funds-aware модель.
+        # Без этого авто-роут/тир выбирал самый умный, но МЕДЛЕННЫЙ funded-вариант (deepseek-v3.2 и т.п.),
+        # который не доходил до </html> за разумное время → пустой/обрезанный канвас. Только когда юзер
+        # НЕ выбрал модель руками и не в спец-режиме (картинки/Мозг и пр. имеют приоритет). Перебивает и
+        # owner-nano-шорткат, и тир-выбор — это последняя точка решения по модели для дизайна.
+        if (_is_design and not explicit_model and not _in_special_mode
+                and not auto_brain and not has_images):
+            _dm = _design_model()
+            if _dm:
+                model = _dm
         # картинки есть, а модель их не понимает — переключаем на зрячую (не-фантомную)
         if has_images and not vision_ok(model):
             model = _first_live("cheap")
