@@ -3084,10 +3084,24 @@ def friendly_api_error(code, detail="", has_images=False):
 def _next_fallback_model(current, tried, uid, has_images=False):
     """Следующая РАБОЧАЯ funded-модель из цепочки чата (не из tried, с ключом, зрячая если надо).
     Для «провайдер лёг → молча подменяем», правило Damir: только рабочие модели, без сырых ошибок."""
-    for fb in _MODEL_FALLBACK.get("chat", []):
+    chain = list(_MODEL_FALLBACK.get("chat", []))
+    # цепочка роли бывает целиком на ОДНОМ провайдере (chat = весь Venice). Если он лёг (402/в минусе) —
+    # перебор по ней снова даст 402 → сырая ошибка юзеру. Добавляем гарантированно ЖИВУЮ funded-модель
+    # у ДРУГОГО провайдера (cross-provider): сбой провайдера реально выталкивает на рабочую модель.
+    try:
+        lf = _live_funded_model("chat")
+        if lf and lf not in chain:
+            chain.append(lf)
+    except Exception:
+        pass
+    for fb in chain:
         if fb in tried or fb == current:
             continue
         if has_images and not vision_ok(fb):
+            continue
+        # пропускаем модель мёртвого/безденежного провайдера — это и есть весь смысл фолбэка
+        _p = provider_name(fb)
+        if provider_degraded(_p) or not _prov_has_funds(_p):
             continue
         fk, _byok, _err = resolve_key(uid, fb)
         if not fk:
@@ -13913,7 +13927,10 @@ class Handler(BaseHTTPRequestHandler):
                     # Мозг: даже на «не-ретраебельных» кодах (400/404/…) сбой ВЕДУЩЕГО НЕ должен
                     # ронять пайплайн сырой ошибкой — пробуем дефолтного ведущего/цепочку (если ничего
                     # видимого ещё не ушло). Вне Мозга — прежний строгий список ретраебельных кодов.
-                    _retriable = e.code in (408, 409, 425, 429, 500, 502, 503, 504)
+                    # 401/402/403/404 = провайдер не может обслужить запрос (нет денег/доступа/модели у него);
+                    # уход на ЖИВУЮ funded-модель лучше сырой ошибки (правило Damir «без сырых ошибок»).
+                    # _next_fallback_model пропускает мёртвых/безденежных → не зациклится на том же провайдере.
+                    _retriable = e.code in (401, 402, 403, 404, 408, 409, 425, 429, 500, 502, 503, 504)
                     _brain_driver_down = (brain and stream_model != expert_model)
                     if emitted_chars == 0 and (_retriable or _brain_driver_down):
                         nxt = _pick_fallback()
