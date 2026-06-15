@@ -28,6 +28,7 @@ WORKER_BUDGET = 110
 # Чат-в-Агент: потолок контекста из исходного чата (seed), который подмешиваем в план/воркеров.
 # Обрезаем, чтобы один длинный диалог не раздул каждый промпт и стоимость прогона.
 SEED_MAX_CHARS = 8000
+VERIFY_RETRY_CAP = 2   # сколько раз пере-запустить сабтаску, не прошедшую проверку приёмки (verified=False)
 
 # Скиллы-персоны воркеров (вдохновлено ECC — 64 агента / 262 скилла, MIT).
 SKILLS = {
@@ -156,8 +157,9 @@ def run_orchestration(task: str, workers: list = None, emit=None, mode: str = "p
         emit("step", {"node": "plan", "status": "done", "plan": plan})
         return {"plan": plan}
 
-    def _worker(i, sub, prior=""):
+    def _worker(i, sub, prior="", _retry=0, _orig_sub=None):
         w = workers[i % len(workers)]
+        _orig_sub = sub if _orig_sub is None else _orig_sub   # витрина: показываем исходную задачу, не «retry-версию»
         model = w.get("model") or DEFAULT_WORKER_MODEL    # per-subtask override; иначе общий дефолт
         provider = w.get("provider")                       # необязательный провайдер (аддитивно)
         accept = (w.get("accept") or "").strip()           # критерий приёмки (envelope); пусто → без verify
@@ -209,7 +211,7 @@ def run_orchestration(task: str, workers: list = None, emit=None, mode: str = "p
             except Exception as e:
                 res = f"[ошибка воркера: {e}]"
         emit("agent", {"worker": i, "status": "done", "result": res[:160]})
-        out = {"worker": i, "skill": skill, "model": model, "task": sub, "result": res}
+        out = {"worker": i, "skill": skill, "model": model, "task": _orig_sub, "result": res}
         if provider:
             out["provider"] = provider
         # Envelope приёмки: только если задан accept И есть колбэк verify (иначе — как раньше).
@@ -225,6 +227,17 @@ def run_orchestration(task: str, workers: list = None, emit=None, mode: str = "p
                 out["verify_reason"] = f"[проверка недоступна: {str(e)[:120]}]"
             emit("agent", {"worker": i, "status": "verified",
                            "verified": out["verified"], "verify_reason": out["verify_reason"]})
+            # ВЕРИФИКАЦИЯ ТЕПЕРЬ УПРАВЛЯЕТ ПОТОКОМ (раньше была декоративной): verified==False →
+            # пере-запускаем сабтаску с причиной провала в задаче (кап VERIFY_RETRY_CAP), чтобы агент
+            # реально ДОВЁЛ подзадачу до приёмки, а не показал «не прошло» и пошёл дальше.
+            if out["verified"] is False and _retry < VERIFY_RETRY_CAP:
+                emit("agent", {"worker": i, "status": "retrying",
+                               "attempt": _retry + 1, "reason": out["verify_reason"]})
+                retry_sub = (_orig_sub + f"\n\n⚠ Прошлая попытка НЕ прошла проверку приёмки «{accept}». "
+                             f"Причина: {out['verify_reason']}. Исправь именно это и верни корректный результат.")
+                return _worker(i, retry_sub, prior, _retry + 1, _orig_sub)
+        if _retry:
+            out["retries"] = _retry      # пометка для синтеза/таймлайна: были пере-запуски до приёмки
         return out
 
     def workers_node(state):
