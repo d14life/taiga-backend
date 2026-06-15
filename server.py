@@ -2686,6 +2686,51 @@ BEAM_FUSION_PROMPT = (
 )
 
 
+def _fusion_agreement(heads) -> str:
+    """ПРОГРАММНЫЙ сигнал консенсуса для фьюжна (не «промпт над склейкой»): бьём каждый ответ на
+    утверждения-предложения и считаем, у СКОЛЬКИХ моделей встречается похожее (token-Jaccard ≥ 0.5).
+    Возвращает аннотацию «≥N/M моделей подтверждают …» + «лишь 1 модель утверждает … (возможна
+    галлюцинация)» — реальный сигнал согласия/расхождения синтезатору, а не просто текст. Закрывает
+    GAP-AUDIT: «fusion = concatenation, нет clustering/voting». heads = [(model, text), …]."""
+    import re
+    heads = [(m, t) for (m, t) in (heads or []) if isinstance(t, str) and t.strip()]
+    n = len(heads)
+    if n < 2:
+        return ""
+    def _sents(t):
+        return [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", t) if len(s.strip()) > 25][:14]
+    def _toks(s):
+        # 6-символьный префикс = грубый стемминг: «столица»/«столицей»/«столицу» → «столиц»
+        # (русская морфология иначе ломает совпадение перефраз). Стоп-короткие (<4) выкидываем.
+        return {w[:6] for w in re.findall(r"\w{4,}", s.lower())}
+    seen = []   # [репрезентативное предложение, токены, {индексы моделей}]
+    for mi, (_m, t) in enumerate(heads):
+        for s in _sents(t):
+            tk = _toks(s)
+            if len(tk) < 3:
+                continue
+            hit = None
+            for rec in seen:
+                # overlap-коэффициент (inter/min) — устойчив к перефразам и разной длине предложений,
+                # в отличие от Жаккара (который штрафует за лишние слова в одном из вариантов).
+                inter = len(tk & rec[1]); mn = min(len(tk), len(rec[1])) or 1
+                if inter / mn >= 0.5:
+                    rec[2].add(mi); hit = rec; break
+            if hit is None:
+                seen.append([s, tk, {mi}])
+    thr = max(2, (n + 1) // 2)
+    consensus = [rec[0] for rec in seen if len(rec[2]) >= thr]
+    minority = [rec[0] for rec in seen if len(rec[2]) == 1]
+    if not consensus and not minority:
+        return ""
+    out = ["СИГНАЛ СОГЛАСИЯ (программный анализ пересечений ответов — опирайся на него как на уверенность):"]
+    for c in consensus[:6]:
+        out.append(f"  • ≥{thr}/{n} моделей сходятся: {c[:170]}")
+    for mc in minority[:5]:
+        out.append(f"  • лишь 1/{n} модель утверждает (проверь — вероятная галлюцинация, не бери без оснований): {mc[:170]}")
+    return "\n".join(out)
+
+
 # ---------------------------------------------------------------- ключи и безопасность
 
 RESALE_FORBIDDEN = set()   # в системе только комиссия-провайдеры; BYOK остаётся опцией для любого
@@ -6741,11 +6786,13 @@ def _orchestrate_worker_runner(uid, seed="", req=None):
             if len(heads) == 1:
                 return heads[0][1]
             joined = "\n\n".join(f"### мнение {i + 1}\n{t}" for i, (m, t) in enumerate(heads))
+            _agree = _fusion_agreement(heads)   # программный консенсус-сигнал (не только текст)
             try:
                 fused = venice_complete(base_model, [
                     {"role": "system", "content": BEAM_FUSION_PROMPT},
                     {"role": "user", "content": f"Подзадача: {sub}\n\nМнения голов:\n{joined}\n\n"
-                                                "Сплавь в один выверенный ответ: бери согласованное, "
+                                                + (_agree + "\n\n" if _agree else "")
+                                                + "Сплавь в один выверенный ответ: бери согласованное, "
                                                 "отбрось то, что выдумала лишь одна голова."}],
                     max_tokens=900) or ""
                 return fused.strip() or heads[0][1]
@@ -13110,8 +13157,10 @@ class Handler(BaseHTTPRequestHandler):
         if cfg_system_prefix:
             synth_sys = cfg_system_prefix + "\n\n" + synth_sys
         panel = "\n\n".join(f"[Ответ {i+1}]\n{t}" for i, (r, t, ti, to) in enumerate(good))[:16000]
+        _agree = _fusion_agreement([(r, t) for (r, t, ti, to) in good])   # программный консенсус-сигнал
         synth_msgs = [{"role": "system", "content": synth_sys},
-                      {"role": "user", "content": f"Вопрос: {question}\n\n{panel}\n\n{synth_ask}"}]
+                      {"role": "user", "content": f"Вопрос: {question}\n\n{panel}\n\n"
+                                                  + (_agree + "\n\n" if _agree else "") + synth_ask}]
         self._sse({"type": "meta", "model": synth_model})
         ru, out_total = {}, ""
         try:
@@ -14105,9 +14154,12 @@ class Handler(BaseHTTPRequestHandler):
                                 if _fk:
                                     expert_model, expert_key = _fm, _fk   # биллинг — синтезатор
                                     _panel = "\n\n".join(f"[Ответ {i+1}]\n{t}" for i, (m, t) in enumerate(_answers))[:16000]
+                                    _agree = _fusion_agreement(_answers)   # программный консенсус-сигнал
                                     _q = (call[1].get("question") if isinstance(call[1], dict) else None) or last_user
                                     _fmsgs = [{"role": "system", "content": taiga_identity() + "\n\n" + BEAM_FUSION_PROMPT},
-                                              {"role": "user", "content": f"Вопрос: {_q}\n\n{_panel}\n\nДай один сплавленный, выверенный ответ."}]
+                                              {"role": "user", "content": f"Вопрос: {_q}\n\n{_panel}\n\n"
+                                                                          + (_agree + "\n\n" if _agree else "")
+                                                                          + "Дай один сплавленный, выверенный ответ."}]
                                     try:
                                         for d in venice_stream(expert_model, _fmsgs, max(max_tokens, 3000), eu, expert_key,
                                                                temperature=temperature,
@@ -14289,6 +14341,19 @@ class Handler(BaseHTTPRequestHandler):
             if agent_events:
                 self._sse({"type": "run_done", "run_id": run_id})
             _agent_permit_cleanup(run_id)
+            # ПРОДЮСЕР СОБЫТИЙНЫХ РУТИН (раньше отсутствовал — on_run_done/on_chat_match НИКОГДА не
+            # стреляли, фича была мёртвой). Теперь: завершён агент-прогон → событие run_done; любой
+            # чат-ход → chat_match по тексту юзера. _routine_fire_event сам owner-гейтит, фильтрует по
+            # триггеру/паттерну и держит лимит/час (дёшев без совпадений); обёрнут в try — НИКОГДА не роняет ответ.
+            try:
+                _lu = next((str(m.get("content") or "") for m in reversed(raw_messages or [])
+                            if isinstance(m, dict) and m.get("role") == "user"), "")
+                if agent and str(locals().get("out_total") or "").strip():
+                    _routine_fire_event(uid, "run_done", str(out_total)[:2000])
+                if _lu.strip():
+                    _routine_fire_event(uid, "chat_match", _lu[:2000])
+            except Exception:
+                pass
 
 
 # ═══════════════════════════════════════════════════════════ РУТИНЫ (планировщик)
