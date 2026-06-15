@@ -1666,7 +1666,9 @@ def _verify_response(query: str, response: str, context: str = "") -> dict:
     """Пост-проверка ответа на ГАЛЛЮЦИНАЦИИ и ДЕГРАДАЦИЮ (один дешёвый вызов + эвристика).
     Возвращает {ok, hallucination, degraded, issues[], confidence}. Тихо ok при сбое — чат не блокируем."""
     resp = (response or "").strip()
-    if len(resp) < 40:
+    # порог 15 (не 40): короткая ФАКТОШИБКА («столица Австралии — Сидней») теперь тоже
+    # проверяется, а тривиальное («ок»/«да»/«привет») всё ещё пропускается (экономия).
+    if len(resp) < 15:
         return {"ok": True, "hallucination": False, "degraded": False, "issues": [], "confidence": 1.0}
     degraded_heur = _looks_degraded(resp)
     try:
