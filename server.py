@@ -3086,12 +3086,13 @@ def _next_fallback_model(current, tried, uid, has_images=False):
     Для «провайдер лёг → молча подменяем», правило Damir: только рабочие модели, без сырых ошибок."""
     chain = list(_MODEL_FALLBACK.get("chat", []))
     # цепочка роли бывает целиком на ОДНОМ провайдере (chat = весь Venice). Если он лёг (402/в минусе) —
-    # перебор по ней снова даст 402 → сырая ошибка юзеру. Добавляем гарантированно ЖИВУЮ funded-модель
-    # у ДРУГОГО провайдера (cross-provider): сбой провайдера реально выталкивает на рабочую модель.
+    # перебор по ней снова даст 402 → сырая ошибка юзеру. Добавляем НЕСКОЛЬКО живых funded-моделей у
+    # ДРУГИХ провайдеров (cross-provider): сбой провайдера выталкивает на рабочую модель, а если КОНКРЕТНАЯ
+    # дешёвая модель флакает пустым ответом — следующий вызов (растущий tried) возьмёт другую/провайдера.
     try:
-        lf = _live_funded_model("chat")
-        if lf and lf not in chain:
-            chain.append(lf)
+        for lf in _live_funded_models("chat", 6):
+            if lf and lf not in chain:
+                chain.append(lf)
     except Exception:
         pass
     for fb in chain:
@@ -3760,13 +3761,14 @@ def _recently_empty(model_id: str) -> bool:
     return _AUX_EMPTY.get(strip_model_prefix(model_id), 0) > time.time() - _AUX_EMPTY_TTL
 
 
-def _live_funded_model(role: str) -> str:
-    """Живая модель у НЕ-просевшего провайдера из живого каталога — когда ВСЯ цепочка роли
-    мертва (классика: весь дефолт на Venice, а Venice в 402 → раньше авто-выбор садился на
-    мёртвую модель и стрим висел без ошибки). Для дешёвых/чат-ролей берём самую дешёвую живую,
-    иначе — самую умную живую. Картинки/голос пропускаем."""
+def _live_funded_models(role: str, n: int = 8) -> list:
+    """Список живых моделей у НЕ-просевших ОПЛАЧЕННЫХ провайдеров (живой каталог). Несколько
+    кандидатов — чтобы фолбэк не утыкался в ОДНУ модель: если самая дешёвая флакает (пустой
+    ответ у конкретной модели бывает разовым), следующий вызов берёт другую/другого провайдера.
+    Порядок: для дешёвых/чат-ролей — дешёвые-оплаченные первыми, иначе — самые умные. С
+    РАЗНООБРАЗИЕМ провайдеров (≤2 модели на провайдера в первых позициях). Картинки/голос — мимо."""
     if not RICH:
-        return ""
+        return []
     cheap_roles = ("cheap", "chat", "plan", "style", "memory", "compress", "improve", "craft")
     # funded-набор провайдеров считаем ОДИН раз (по балансу, не только runtime-health — иначе после
     # рестарта Venice в минусе кажется рабочим, пока не словит пару 402, и служебка садится на мёртвую модель)
@@ -3784,14 +3786,30 @@ def _live_funded_model(role: str) -> str:
             continue
         cands.append(r)
     if not cands:
-        return ""
+        return []
     if role in cheap_roles:
         # дешёвую ОПЛАЧЕННУЮ раньше $0-бесплатной: free-модели часто флаки/лимитированы
         # (omni/превью зависают) — для служебки нужна НАДЁЖНАЯ дешёвая, а не «самая дешёвая».
         cands.sort(key=lambda r: ((r.get("per1k") or 0) <= 0, r.get("per1k") or 0))
     else:
         cands.sort(key=lambda r: -(r.get("smart") or 0))     # умнее первым
-    return cands[0].get("id", "")
+    out, per_prov = [], {}
+    for r in cands:
+        mid = r.get("id", "")
+        prov = r.get("provider") or provider_name(mid)
+        if per_prov.get(prov, 0) >= 2:        # ≤2 модели одного провайдера → разнообразие в фолбэке
+            continue
+        out.append(mid)
+        per_prov[prov] = per_prov.get(prov, 0) + 1
+        if len(out) >= n:
+            break
+    return out
+
+
+def _live_funded_model(role: str) -> str:
+    """Одна живая модель у оплаченного провайдера (тонкая обёртка над _live_funded_models)."""
+    lst = _live_funded_models(role, 1)
+    return lst[0] if lst else ""
 
 
 def _first_live(role: str) -> str:
@@ -13576,6 +13594,18 @@ class Handler(BaseHTTPRequestHandler):
         billing = load_billing()
         owner = is_owner(uid)
         key, byok, kerr = resolve_key(uid, model)        # ключ выбранной модели (в брейне — эксперт)
+        # «run models better»: явно выбранная модель, которой НЕТ НИ У ОДНОГО провайдера (ключ не
+        # резолвится — напр. устаревший пин на удалённую из каталога модель), не должна давать «пустой
+        # ответ». Сразу ремапим на живую funded-модель (как _funded_image_model для картинок). Модель НА
+        # мёртвом-по-балансу провайдере ключ ИМЕЕТ → её НЕ трогаем (пробуем + фолбэк в стрим-цикле).
+        # BYOK (свой ключ юзера) и медиа — не трогаем.
+        if (explicit_model and not key and not byok
+                and model_kind(model) not in ("image", "voice")):
+            _alt = _first_live("chat")
+            if _alt and _alt != model:
+                _ak, _ab, _ake = resolve_key(uid, _alt)
+                if _ak:
+                    model, key, byok, kerr = _alt, _ak, _ab, _ake
 
         # 💸 GRACEFUL COST DEGRADATION (L23b): дорогой запрос НЕ режем и НЕ блокируем. ЛЕСТНИЦА
         # МИНИМАЛЬНОГО УЩЕРБА — выбор юзера затираем как можно меньше:
@@ -13927,10 +13957,12 @@ class Handler(BaseHTTPRequestHandler):
                     # Мозг: даже на «не-ретраебельных» кодах (400/404/…) сбой ВЕДУЩЕГО НЕ должен
                     # ронять пайплайн сырой ошибкой — пробуем дефолтного ведущего/цепочку (если ничего
                     # видимого ещё не ушло). Вне Мозга — прежний строгий список ретраебельных кодов.
-                    # 401/402/403/404 = провайдер не может обслужить запрос (нет денег/доступа/модели у него);
-                    # уход на ЖИВУЮ funded-модель лучше сырой ошибки (правило Damir «без сырых ошибок»).
+                    # 402 = у провайдера кончились деньги, 404 = у него НЕТ этой модели → он не обслужит
+                    # запрос; уход на ЖИВУЮ funded-модель лучше сырой ошибки (правило Damir «без сырых ошибок»).
+                    # 401/403 НЕ добавляем намеренно: это реальная проблема доступа/ключа (в т.ч. BYOK) —
+                    # её надо показать юзеру, а не молча тратить наши деньги на запасной модели.
                     # _next_fallback_model пропускает мёртвых/безденежных → не зациклится на том же провайдере.
-                    _retriable = e.code in (401, 402, 403, 404, 408, 409, 425, 429, 500, 502, 503, 504)
+                    _retriable = e.code in (402, 404, 408, 409, 425, 429, 500, 502, 503, 504)
                     _brain_driver_down = (brain and stream_model != expert_model)
                     if emitted_chars == 0 and (_retriable or _brain_driver_down):
                         nxt = _pick_fallback()
