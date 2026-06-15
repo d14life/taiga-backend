@@ -3865,6 +3865,25 @@ def _funded_image_model(model: str, owner: bool) -> str:
     return model or ("ng:" + NANO_FREE_IMAGE_DEFAULT)
 
 
+def _funded_video_model(model: str) -> str:
+    """Видео-модель, ведущая в НАДЁЖНЫЙ оплаченный провайдер. NanoGPT-видео (non-aiml) ДАЖЕ при
+    положительном балансе не отдаёт клип в срок (дефолт wan-video-22-turbo висит ~10 мин на опросе →
+    юзер думает «сломано»). Подменяем на самую дешёвую funded AIMLAPI-модель ТОГО ЖЕ вида
+    (t2v→t2v · i2v→i2v · avatar→avatar — возможность не теряем). aiml:-модели уже funded/надёжны —
+    не трогаем. Нет AIMLAPI-альтернативы того вида → оставляем как есть (best-effort). Зеркало
+    _funded_image_model: «не сади юзера на провайдера, который не отдаёт результат»."""
+    if model.startswith("aiml:"):
+        return model
+    vids = [m for m in (VIDEO_MODELS or []) if isinstance(m, dict)]
+    src = next((m for m in vids if m.get("id") == model), None) if model else None
+    kind = (src.get("kind") if src else None) or "t2v"   # пусто/неизвестно → текст-в-видео
+    cands = [m for m in vids if str(m.get("id", "")).startswith("aiml:") and m.get("kind") == kind]
+    cands.sort(key=lambda m: (m.get("usd") or 999))
+    if cands:
+        return cands[0].get("id") or model
+    return model or "aiml:ltxv-2/text-to-video/fast"
+
+
 _load_phantom()
 
 
@@ -9899,7 +9918,9 @@ class Handler(BaseHTTPRequestHandler):
     def api_video(self):
         req = self._body()
         uid = req.get("user", "default")
-        model = str(req.get("model") or "wan-video-22-turbo")
+        # funds-aware: NanoGPT-видео (вкл. дефолт wan-video-22-turbo) висит ~10 мин даже с балансом →
+        # уводим на надёжную funded AIMLAPI-модель того же вида (t2v/i2v/avatar). aiml: не трогаем.
+        model = _funded_video_model(str(req.get("model") or ""))
         prompt = str(req.get("prompt") or "")
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
