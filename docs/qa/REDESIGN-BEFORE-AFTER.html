@@ -1,0 +1,91 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Тайга — редизайн: было → стало</title>
+<style>
+ :root{--bg:#08090b;--card:#0e0f13;--line:#1c1f26;--ink:#ECECF1;--mut:#878d99;--am:#FF9E64;--ok:#34d399;--bad:#fb7185}
+ *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 -apple-system,Segoe UI,Roboto,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+ .wrap{max-width:1280px;margin:0 auto;padding:48px 22px 90px}
+ h1{font-size:32px;letter-spacing:-.022em;margin:0 0 6px;font-weight:680}
+ .sub{color:var(--mut);margin:0 0 30px;max-width:80ch}
+ h2{font-size:17px;margin:40px 0 14px;border-left:3px solid var(--am);padding-left:10px}
+ .pair{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:14px 0 8px}
+ @media(max-width:820px){.pair{grid-template-columns:1fr}}
+ figure{margin:0;background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+ figure img{width:100%;display:block;border-bottom:1px solid var(--line);background:#000}
+ figcaption{padding:9px 13px;font-size:13px;color:var(--mut)}
+ figcaption b.bad{color:var(--bad)} figcaption b.ok{color:var(--ok)}
+ .changes{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px;margin-top:8px}
+ .c{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px 15px}
+ .c h3{margin:0 0 5px;font-size:13.5px;color:var(--am)} .c p{margin:0;color:#c4c9d1;font-size:13px}
+ .meta{color:var(--mut);font-size:12.5px;margin-top:5px}
+ .links{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+ .links a{color:var(--am);text-decoration:none;border:1px solid var(--line);border-radius:9px;padding:8px 13px;font-size:14px;background:var(--card)}
+ code{background:#15171c;border:1px solid var(--line);border-radius:5px;padding:1px 6px;font:12px ui-monospace,Menlo,monospace;color:#cdd3db}
+</style></head><body><div class="wrap">
+<h1>Тайга — редизайн: было → стало</h1>
+<p class="sub">Автономный проход по аудиту (4 ревью) + редизайн. 8 коммитов, всё проверено (<code>tsc=0</code> + загрузка + смоук + глазами), <b>ни одной фичи не вырезано</b> — всё доступно как раньше, просто чище.</p>
+
+<h2 style="border-left-color:#34d399">★ НОВОЕ: левый рельс — то, что реально ВИДНО</h2>
+<p class="sub" style="margin-bottom:14px">Главная просьба: «что в UI изменилось, я не вижу». Вот видимый ответ — постоянный левый рельс из 7 групп-задач вместо «+»-меню на 40 пунктов. Клик группы → выезжает панель только с её поверхностями. Это структурный сдвиг, который делает апп похожим на новый. <b>Ничего не выкинуто</b> — полный доступ остаётся в ⌘K и Каталоге.</p>
+<div class="pair">
+  <figure><img src="cap/redesign/rail-home.png"><figcaption>СТАЛО — тонкий <b class="ok">рельс из 7 иконок</b> у левого края (Разговор · Студия · Дизайн · Агенты · Навыки · Память · Настройки), чат-список встал справа от него. Всегда виден.</figcaption></figure>
+  <figure><img src="cap/redesign/rail-flyout.png"><figcaption>Клик «Агенты» → <b class="ok">выезжает группа</b> с её поверхностями (Сделать агента · Команда · Оркестратор · Конвейер · Расписание · Доска задач…). Клик строки = открыть. Esc/клик-вне закрывает.</figcaption></figure>
+</div>
+
+<h2 style="border-left-color:#34d399">★ НОВОЕ: спокойный центр — как у frontier-аппов</h2>
+<p class="sub" style="margin-bottom:14px">Вторая просьба: «нужна другая раскладка, чище, как у frontier-компаний». Центр был кокпитом (11 контролов в ряду + стена карточек). Стал спокойной поверхностью как ChatGPT/Claude: один input-остров, тихий пустой экран, вся мощь — за «Ещё». <b>Ничего не вырезано</b> — 5 нишевых кнопок просто скрыты по умолчанию и доступны в один клик.</p>
+<div class="pair">
+  <figure><img src="cap/redesign/frontier-empty.png"><figcaption>Пустой экран — <b class="ok">герой + модель-стрип + один остров</b>. Карточки Чат/Студия/Дизайн/Агент убраны с десктопа (их заменил рельс). Дышит.</figcaption></figure>
+  <figure><img src="cap/redesign/frontier-convo.png"><figcaption>Разговор — <b class="ok">спокойная лента</b>, слим-композер (6 контролов вместо 11), чипы-продолжения. Как frontier-чат.</figcaption></figure>
+</div>
+<div class="pair">
+  <figure><img src="cap/full/modes/chat.png"><figcaption>БЫЛО — <b class="bad">стена из ~20 пилюль</b> под вводом, 11 контролов в ряду, карточки-энциклопедия снизу.</figcaption></figure>
+  <figure><img src="cap/redesign/composer-collapsed.png"><figcaption>СТАЛО — <b class="ok">слим-ряд</b>: +/микрофон/глубина/модель/Ещё/отправить. Скриншот·камера·разговор·авто-проверка·улучшить — в «Ещё».</figcaption></figure>
+</div>
+
+<h2>Главный экран</h2>
+<div class="pair">
+  <figure><img src="cap/full/modes/chat.png"><figcaption>БЫЛО — <b class="bad">радужный слизь-логотип</b>, стена из ~20 разноцветных пилюль под вводом, 7 акцентов сразу.</figcaption></figure>
+  <figure><img src="cap/redesign/afterG-1-home.png"><figcaption>СТАЛО — <b class="ok">сплошной янтарь</b>, спокойный композер (вторичные кнопки спрятаны под «Ещё»), один акцент.</figcaption></figure>
+</div>
+
+<h2>Панель «Команда» (акцент)</h2>
+<div class="pair">
+  <figure><img src="cap/full/panels/team.png"><figcaption>БЫЛО — золото/разнобой.</figcaption></figure>
+  <figure><img src="cap/redesign/after-panel-team.png"><figcaption>СТАЛО — единый янтарь, чисто, все роли/бюджет/движок на месте.</figcaption></figure>
+</div>
+<div class="pair">
+  <figure><img src="cap/full/panels/mcp.png"><figcaption>MCP БЫЛО — голубой (cyan) акцент.</figcaption></figure>
+  <figure><img src="cap/redesign/after-panel-mcp.png"><figcaption>MCP СТАЛО — янтарь, консистентно.</figcaption></figure>
+</div>
+
+<h2>⌘K — теперь находит ЛЮБУЮ из 79 фич</h2>
+<div class="pair">
+  <figure><img src="cap/redesign/cmdk-2-komanda.png"><figcaption>Печатаешь «команда» → и слэш-команды, И реальные панели (Оркестратор, Команда), сгруппировано. Раньше ⌘K искал только команды, а фичи — в отдельном Каталоге.</figcaption></figure>
+  <figure style="display:flex;align-items:center;justify-content:center;padding:20px"><figcaption style="border:0">Печатай «озвучка», «дебаты», «память», «реклама» — мгновенный прыжок к любой поверхности. Один поиск на всё.</figcaption></figure>
+</div>
+
+<h2>Что сделано (7 коммитов, все зелёные)</h2>
+<div class="changes">
+  <div class="c"><h3>Убрал радужный логотип</h3><p>7-цветный скролл-градиент + «слизь»-фильтр (тель №1 ИИ-слопа, рендерился в нечитаемые кляксы) → сплошной янтарь + чистый кроссфейд.</p><p class="meta">a14da4e</p></div>
+  <div class="c"><h3>Единый акцент</h3><p>Было 7 цветов (cyan 745, violet 306, …). Свёл все декоративные к янтарю; статусы (успех-зелёный, ошибка-красный) сохранил. 1505 замен / 84 файла.</p><p class="meta">74f34e5</p></div>
+  <div class="c"><h3>Контраст (WCAG AA)</h3><p>~1000 мест с тусклым текстом проваливали контраст → подтянул до читаемого. 1015 фиксов / 106 файлов. Доступность.</p><p class="meta">ffe631b</p></div>
+  <div class="c"><h3>⌘K — единый поиск</h3><p>Теперь индексирует все 79 поверхностей + команды, сгруппировано, с a11y-ролями. Находишь что угодно по названию.</p><p class="meta">5306144</p></div>
+  <div class="c"><h3>Спокойный композер</h3><p>~20 пилюль-стена → первичная строка + «Ещё ▾» (вторичные спрятаны, но в один клик). Главная причина «неудобно» — закрыта. Поведение 1-в-1.</p><p class="meta">c02dde7</p></div>
+  <div class="c"><h3>Доступность + скорость</h3><p>Esc + роль-диалог на 39 панелях (раньше не закрыть с клавиатуры). Reduced-motion на весь апп одной строкой. 17 тяжёлых панелей — lazy-load.</p><p class="meta">7545799</p></div>
+  <div class="c"><h3>Токены + чистка</h3><p>Единая токен-система (фон/поверхность/рамка/текст/акцент/радиусы/тени) под Tailwind v4. Снёс 150 строк мёртвого кода.</p><p class="meta">a14da4e</p></div>
+  <div class="c"><h3>★ 7-групп рельс (IA) — СДЕЛАНО</h3><p>Левый рельс из 7 групп вместо «+»-меню. Построен, проверен, скомпонован с чат-сайдбаром. Самое видимое изменение. Аддитивно — фичи не тронуты.</p><p class="meta">d72bb9b</p></div>
+  <div class="c"><h3>+ ранее в сессии</h3><p>Редактируемый канвас (двигать/править элементы), все окна ресайзятся, фьюжн до уровня OpenRouter, запуск GitHub-навыков, фикс пустого канваса, краш-фикс.</p><p class="meta">резайз, канвас, фьюжн</p></div>
+</div>
+
+<h2>Что осталось (большое/структурное — под твой глаз)</h2>
+<div class="changes">
+  <div class="c"><h3>chat.tsx разбор</h3><p>7700 строк → openPanel-enum + вынести PanelHost/Composer. Большой <b>невидимый</b> рефактор (здоровье кода, не UI) — делаю аккуратно отдельной сессией, чтобы не сломать живой апп.</p></div>
+  <div class="c"><h3>Радиусы/тени</h3><p>28 радиусов → 5, унифицировать тени. Механический свип, но риск визуальных регрессий — лучше с проверкой при тебе.</p></div>
+</div>
+
+<div class="links">
+  <a href="NAV-IA.html">Карта IA (7 групп)</a>
+  <a href="TEST-MATRIX.html">79 поверхностей</a>
+  <a href="FIX-REPORT.html">Отчёт о багфиксах</a>
+</div>
+</div></body></html>

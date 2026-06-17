@@ -1,0 +1,119 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Тайга — новая навигация (IA)</title>
+<style>
+ :root{--bg:#070708;--card:#0e0f13;--card2:#121419;--ink:#ECECF1;--mut:#868d99;--line:#1c1f26;--cy:#22d3ee;--vi:#a78bfa;--em:#34d399;--am:#fbbf24;--ro:#fb7185}
+ *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 -apple-system,Segoe UI,Roboto,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+ .wrap{max-width:1240px;margin:0 auto;padding:54px 24px 100px}
+ h1{font-size:34px;letter-spacing:-.022em;margin:0 0 6px;font-weight:680}
+ .sub{color:var(--mut);font-size:15.5px;margin:0 0 34px;max-width:80ch}
+ h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);margin:40px 0 14px;font-weight:600}
+ .ba{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:14px 0}
+ @media(max-width:780px){.ba{grid-template-columns:1fr}}
+ .box{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px 20px}
+ .box.bad{border-color:rgba(251,113,133,.20)} .box.good{border-color:rgba(52,211,153,.22)}
+ .box h3{margin:0 0 10px;font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--mut);font-weight:600}
+ .box.bad h3{color:var(--ro)} .box.good h3{color:var(--em)}
+ .box p{margin:0;color:#c3c8d0;font-size:14px}
+ .groups{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px;margin-top:8px}
+ .g{background:linear-gradient(180deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:18px;padding:18px 18px 16px;position:relative;overflow:hidden}
+ .g::before{content:"";position:absolute;inset:0 0 auto 0;height:3px;background:var(--accent,var(--cy))}
+ .g .hd{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+ .g .ico{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-size:18px;background:color-mix(in oklab,var(--accent,var(--cy)) 16%, transparent);border:1px solid color-mix(in oklab,var(--accent,var(--cy)) 30%, transparent)}
+ .g .nm{font-size:17px;font-weight:640;letter-spacing:-.01em}
+ .g .jb{color:var(--mut);font-size:12.5px;margin:0 0 12px 44px}
+ .g .row{font-size:13px;color:#cfd4dc;margin:7px 0;padding-left:2px}
+ .g .row b{color:var(--mut);font-weight:600;font-size:11px;letter-spacing:.04em;text-transform:uppercase;display:block;margin-bottom:3px}
+ .chip{display:inline-block;background:#171a20;border:1px solid var(--line);border-radius:7px;padding:2px 8px;margin:2px 3px 2px 0;font-size:12.5px;color:#d7dbe2}
+ .nav{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:6px}
+ @media(max-width:780px){.nav{grid-template-columns:1fr}}
+ .nav .box li{margin:6px 0;color:#cfd4dc;font-size:14px}
+ .nav .box b{color:var(--ink)}
+ .k{font:12px ui-monospace,Menlo,monospace;background:#15171c;border:1px solid var(--line);border-radius:6px;padding:1px 6px;color:#cdd3db}
+ .count{color:var(--mut);font-weight:400;font-size:13px}
+ .foot{margin-top:34px;color:var(--mut);font-size:13.5px;border-top:1px solid var(--line);padding-top:18px}
+</style></head><body><div class="wrap">
+
+<h1>Тайга — новая навигация</h1>
+<p class="sub">79 поверхностей разложены по 7 группам-задачам. Принцип: «разобрать по шестерёнкам и собрать чисто, ничего не потеряв». Ниже — карта, что куда, и как юзер по ней ходит.</p>
+
+<h2>Проблема → решение</h2>
+<div class="ba">
+  <div class="box bad"><h3>Сейчас</h3><p>4 больших таба + «+»-меню на ~40 пунктов + тумблеры + студия + агент-под-вкладки — всё свалено рядом. Юзер видит 80 кнопок и теряется: «где озвучка? где команда? где мои файлы?»</p></div>
+  <div class="box good"><h3>Стало</h3><p>7 понятных групп по ЗАДАЧЕ юзера. Левый рельс из 7 иконок всегда виден; клик → только нужные поверхности. Прыжок к чему угодно — <span class="k">⌘K</span>. Чат всегда в центре. Ничего не выкинуто — всё нашло свою полку.</p></div>
+</div>
+
+<h2>7 групп — по задаче, что хочет юзер</h2>
+<div class="groups">
+
+  <div class="g" style="--accent:var(--cy)">
+    <div class="hd"><div class="ico">💬</div><div class="nm">1 · Разговор</div></div>
+    <p class="jb">спросить ИИ и получить надёжный ответ</p>
+    <div class="row"><b>Режимы</b><span class="chip">Чат</span><span class="chip">Код</span><span class="chip">Без цензуры</span><span class="chip">Ультра</span></div>
+    <div class="row"><b>Усиление ответа</b><span class="chip">Мозг (эксперты)</span><span class="chip">Совет (веер+фьюжн)</span><span class="chip">Сравнить модели</span><span class="chip">Relay</span><span class="chip">Дебаты</span></div>
+    <div class="row"><b>Поиск-флаги</b><span class="chip">Веб</span><span class="chip">Супер-поиск</span><span class="chip">Глубоко</span><span class="chip">Ресёрч</span><span class="chip">Умный-RAG</span></div>
+    <div class="row"><b>Доверие</b><span class="chip">Проверка реальности</span><span class="chip">Источники правды</span><span class="chip">Подсказки-продолжения</span></div>
+    <div class="row"><b>Выбор</b><span class="chip">Модель / каталог</span><span class="chip">Персонажи (мастер-промпт)</span></div>
+  </div>
+
+  <div class="g" style="--accent:var(--vi)">
+    <div class="hd"><div class="ico">🎨</div><div class="nm">2 · Студия</div></div>
+    <p class="jb">создать медиа</p>
+    <div class="row"><b>Генераторы</b><span class="chip">Картинки</span><span class="chip">Видео</span><span class="chip">Аватар</span><span class="chip">Кино</span><span class="chip">Реклама (UGC)</span><span class="chip">Музыка</span><span class="chip">Озвучка (TTS)</span><span class="chip">3D</span><span class="chip">Медиа-инструменты</span></div>
+  </div>
+
+  <div class="g" style="--accent:var(--em)">
+    <div class="hd"><div class="ico">🖌️</div><div class="nm">3 · Дизайн</div></div>
+    <p class="jb">сверстать страницу / макет</p>
+    <div class="row"><b>Канвас</b><span class="chip">Прототип</span><span class="chip">Слайды</span><span class="chip">Лайв-артефакт</span><span class="chip">✦ Правка (двигать/менять)</span></div>
+    <div class="row"><b>Система</b><span class="chip">Дизайн-система</span><span class="chip">Веб-артефакты</span><span class="chip">Рисовалка (PNG)</span></div>
+  </div>
+
+  <div class="g" style="--accent:var(--am)">
+    <div class="hd"><div class="ico">🤖</div><div class="nm">4 · Агенты</div></div>
+    <p class="jb">делегировать и автоматизировать</p>
+    <div class="row"><b>Запустить</b><span class="chip">Сделать агента</span><span class="chip">Мои агенты + маркет</span><span class="chip">Команда</span><span class="chip">Оркестратор</span><span class="chip">Агент-ОС</span><span class="chip">Конвейер</span><span class="chip">Ralph (авто-цикл)</span></div>
+    <div class="row"><b>Автоматизация</b><span class="chip">Студия лупов</span><span class="chip">Рутины</span><span class="chip">Доска задач</span><span class="chip">Расписание</span><span class="chip">Прогоны</span><span class="chip">Оценки</span><span class="chip">Песочница агента</span></div>
+  </div>
+
+  <div class="g" style="--accent:#60a5fa">
+    <div class="hd"><div class="ico">🧩</div><div class="nm">5 · Навыки и код</div></div>
+    <p class="jb">расширить и запустить код</p>
+    <div class="row"><b>Навыки</b><span class="chip">Библиотека навыков</span><span class="chip">Маркет</span><span class="chip">Полные навыки (GitHub)</span><span class="chip">Создать навык</span></div>
+    <div class="row"><b>Запуск/код</b><span class="chip">Терминал</span><span class="chip">Двойной терминал</span><span class="chip">Запуск кода</span><span class="chip">Песочница (769 моделей)</span><span class="chip">Браузер</span><span class="chip">Со-пилот экрана</span><span class="chip">Хуки</span><span class="chip">Конструктор функций</span><span class="chip">MCP-серверы</span></div>
+  </div>
+
+  <div class="g" style="--accent:#f472b6">
+    <div class="hd"><div class="ico">🧠</div><div class="nm">6 · Память и данные</div></div>
+    <p class="jb">что ИИ знает о тебе и твои файлы</p>
+    <div class="row"><b>Знания</b><span class="chip">Память (факты)</span><span class="chip">База знаний (RAG)</span><span class="chip">Проекты (папки)</span><span class="chip">Экспорт памяти</span></div>
+    <div class="row"><b>Файлы</b><span class="chip">Рабочая память</span><span class="chip">Файлы на сервере (шифр)</span></div>
+  </div>
+
+  <div class="g" style="--accent:#94a3b8">
+    <div class="hd"><div class="ico">⚙️</div><div class="nm">7 · Настройки и система</div></div>
+    <p class="jb">настроить под себя</p>
+    <div class="row"><b>Настройки (8 разделов)</b><span class="chip">Профиль</span><span class="chip">Модели</span><span class="chip">Память</span><span class="chip">Студия</span><span class="chip">Использование/биллинг</span><span class="chip">Интеграции</span><span class="chip">Оформление</span><span class="chip">Разное</span></div>
+    <div class="row"><b>Прочее</b><span class="chip">Каталог фич (закрепить)</span><span class="chip">Гайд по режимам</span></div>
+  </div>
+
+</div>
+
+<h2>Как юзер по этому ходит — модель навигации</h2>
+<div class="nav">
+  <div class="box"><h3>Структура экрана</h3><ul>
+    <li><b>Левый рельс</b> — 7 иконок-групп, всегда видны. Наведение → название.</li>
+    <li><b>Клик группы</b> → выезжает её панель только с нужными поверхностями (не 40 в кучу).</li>
+    <li><b>Чат — всегда в центре.</b> Группы — слой поверх / док справа, не уводят с разговора.</li>
+    <li><b>Кастом-бар</b> — закрепи 5-7 любимых поверхностей на главный экран (быстрый доступ).</li>
+  </ul></div>
+  <div class="box"><h3>Скорость для прокачанных</h3><ul>
+    <li><span class="k">⌘K</span> <b>командная палитра</b> — печатаешь «озвучка» / «команда» / «дебаты» → прыжок к любой из 79 поверхностей мгновенно.</li>
+    <li>Слэш-команды в чате остаются (<span class="k">/image</span>, <span class="k">/team</span> …).</li>
+    <li>Поиск по всему: фичи, навыки, модели — один инпут.</li>
+    <li><b>Ничего не потеряно:</b> каждая из 79 поверхностей нашла ровно одну полку.</li>
+  </ul></div>
+</div>
+
+<p class="foot">Это карта-предложение (слой 1: информационная архитектура). Утвердишь группировку — я переношу навигацию на неё (левый рельс + ⌘K + группы), не ломая ни одной фичи; потом слой 2 — расхламление главного, слой 3 — премиум-эстетика. Скажи: <b>«ок, строй»</b> — или поправь группы (что переставить).</p>
+
+</div></body></html>
