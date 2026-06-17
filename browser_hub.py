@@ -195,6 +195,22 @@ class _BrowserHub:
                 pass
         if not url.startswith(("http://", "https://")):
             url = "https://" + url
+        # SSRF-страж: резолвим хост, блокируем loopback/private/link-local(169.254 metadata)/reserved
+        try:
+            import ipaddress as _ip, socket as _sock
+            from urllib.parse import urlparse as _up
+            _h = _up(url).hostname or ""
+            _bad = not _h
+            for _inf in (_sock.getaddrinfo(_h, None) if _h else []):
+                _a = _ip.ip_address(_inf[4][0])
+                if (_a.is_loopback or _a.is_private or _a.is_link_local or _a.is_reserved
+                        or _a.is_multicast or _a.is_unspecified):
+                    _bad = True
+                    break
+            if _bad:
+                return {"error": "URL заблокирован (приватный/loopback/metadata — SSRF-защита)", "url": url}
+        except Exception:
+            return {"error": "URL не разрешён (SSRF-защита)", "url": url}
         page.goto(url, timeout=30000, wait_until="domcontentloaded")
         page.wait_for_timeout(500)
         return self._snapshot(page)

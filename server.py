@@ -53,6 +53,20 @@ BASE = Path("~/.mostik-ai").expanduser()
 USERS_FILE = BASE / "users.json"
 BASE.mkdir(parents=True, exist_ok=True)
 PORT = int(os.environ.get("MOSTIK_PORT") or 8777)   # env-override для параллельного тест-инстанса
+# Публичный режим (мина #0): при выставлении наружу (TAIGA_PUBLIC=1 или bind != localhost)
+# владелец/биллинг/RCE гейтятся ТОЛЬКО проверенным session-токеном (auth.uid_from_token),
+# а НЕ полем `user` из тела. Локально (default) поведение не меняется.
+HOST = os.environ.get("MOSTIK_HOST") or "127.0.0.1"
+PUBLIC_MODE = os.environ.get("TAIGA_PUBLIC") == "1" or HOST not in ("127.0.0.1", "localhost", "::1")
+def _cors_allowlist() -> set:
+    """Разрешённые origin'ы для CORS в публичном режиме (env TAIGA_ALLOWED_ORIGINS, через запятую) +
+    локальный фронт. Локально (не PUBLIC_MODE) CORS не ограничиваем — личный бэкенд."""
+    base = {"http://localhost:3000", "http://127.0.0.1:3000"}
+    for o in (os.environ.get("TAIGA_ALLOWED_ORIGINS", "") or "").split(","):
+        o = o.strip()
+        if o:
+            base.add(o)
+    return base
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 
 PROVIDERS = {
@@ -7221,11 +7235,16 @@ def ensure_default_user() -> list:
 
 
 def is_owner(uid: str) -> bool:
-    """Владелец (ты) не тарифицируется и управляет балансами. По умолчанию — default."""
+    """Владелец (ты) не тарифицируется и управляет балансами.
+    Локально (PUBLIC_MODE=False) default = владелец — поведение как раньше.
+    В ПУБЛИЧНОМ режиме авто-владелец 'default' СНЯТ: владельцем считается только аккаунт
+    с явным owner:True (мина #0 — подделываемый owner='default' → RCE/кража денег)."""
     for u in load_users():
         if u.get("id") == uid:
-            return bool(u.get("owner")) or uid == "default"
-    return uid == "default"
+            if u.get("owner"):
+                return True
+            return uid == "default" and not PUBLIC_MODE
+    return uid == "default" and not PUBLIC_MODE
 
 
 def user_dir(uid: str) -> Path:
@@ -9956,11 +9975,21 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _cors_headers(self):
-        """CORS для cobrowse-расширения (Chrome MV3 шлёт запросы с origin
-        chrome-extension://...). Additive: только заголовки, тело/логика ответов
-        не меняются. Разрешаем любой origin — это локальный личный бэкенд Тайги."""
+        """CORS. Локально (не PUBLIC_MODE) — не ограничиваем (личный бэкенд + cobrowse-расширение).
+        Публично — ТОЛЬКО allowlist origin'ов (env TAIGA_ALLOWED_ORIGINS) + chrome-extension (cobrowse);
+        без '*' в паре с токен-флоу (мина #0). Additive: только заголовки."""
         try:
-            self.send_header("Access-Control-Allow-Origin", "*")
+            origin = self.headers.get("Origin", "") or ""
+            if not PUBLIC_MODE:
+                allow = origin or "*"          # локально — как было
+            else:
+                allowed = _cors_allowlist()
+                allow = origin if (origin in allowed or origin.startswith("chrome-extension://")) else ""
+            if not allow:
+                return                          # публично + чужой origin → без CORS-заголовков
+            self.send_header("Access-Control-Allow-Origin", allow)
+            if allow != "*":
+                self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
             self.send_header("Access-Control-Max-Age", "86400")
@@ -9980,6 +10009,41 @@ class Handler(BaseHTTPRequestHandler):
     def _body(self):
         n = int(self.headers.get("Content-Length") or 0)
         return json.loads(self.rfile.read(n) or b"{}")
+
+    def resolve_caller(self, c=None):
+        """Достоверный uid вызывающего — ТОЛЬКО из проверенного session-токена
+        (auth.uid_from_token): Authorization: Bearer <t>, заголовок X-Taiga-Token,
+        cookie taiga_token, либо поле token тела. Поле `user` из тела доверять НЕЛЬЗЯ (мина #0).
+        Возвращает uid или None. В локальном режиме без токена → 'default' (как раньше)."""
+        tok = ""
+        a = self.headers.get("Authorization", "") or ""
+        if a.startswith("Bearer "):
+            tok = a[7:].strip()
+        if not tok:
+            tok = (self.headers.get("X-Taiga-Token") or "").strip()
+        if not tok:
+            for part in (self.headers.get("Cookie", "") or "").split(";"):
+                p = part.strip()
+                if p.startswith("taiga_token="):
+                    tok = p[len("taiga_token="):]
+                    break
+        if not tok and isinstance(c, dict):
+            tok = str(c.get("token") or "")
+        if tok:
+            try:
+                import auth as _auth
+                uid = _auth.uid_from_token(tok)
+                if uid:
+                    return uid
+            except Exception:
+                pass
+        # без валидного токена: локально — владелец по умолчанию; публично — аноним (None)
+        return None if PUBLIC_MODE else "default"
+
+    def caller_is_owner(self, c=None):
+        """True только если достоверный (токен-резолвнутый) вызывающий — владелец.
+        Использовать на owner/billing/RCE-гейтах вместо is_owner(c.get('user'))."""
+        return is_owner(self.resolve_caller(c))
 
     def _sse(self, obj) -> bool:
         try:
@@ -12182,7 +12246,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"summary": compact_messages(c.get("messages") or [])})
         elif path == "/api/run":              # код-интерпретатор: запуск из Canvas (владелец)
             c = self._body()
-            if not is_owner(c.get("user", "default")):
+            if not self.caller_is_owner(c):   # мина #0: владелец по токену, не по полю user
                 return self._json({"error": "Запуск кода — только владелец."}, 403)
             self._json({"output": run_code_lang(c.get("code", ""), c.get("lang", "python"))})
         elif path == "/api/terminal":         # ВИЗУАЛЬНЫЙ ТЕРМИНАЛ → ОБЩАЯ ПЕРСИСТЕНТНАЯ E2B-СЕССИЯ ЧАТА
@@ -12190,11 +12254,12 @@ class Handler(BaseHTTPRequestHandler):
             uid = c.get("user", "default")
             cmd = str(c.get("cmd") or c.get("command") or "")
             chat_id = str(c.get("chat_id") or c.get("chat") or "default")
+            owner = self.caller_is_owner(c)   # мина #0: владелец по токену, не по полю user
             if not cmd.strip():
                 return self._json({"output": ""})
             if abuse_check(cmd):
                 return self._json({"output": "[заблокировано правилами]"}, 400)
-            if not is_owner(uid) and user_balance(uid).get("balance", 0) <= 0:
+            if not owner and user_balance(uid).get("balance", 0) <= 0:
                 return self._json({"output": "", "error": "Баланс исчерпан."}, 402)
             # ПЕРСИСТЕНТНАЯ сессия чата: cd/env/файлы живут между командами; ИИ (run_code) и юзер делят ОДНУ.
             import skills_run
@@ -12207,14 +12272,14 @@ class Handler(BaseHTTPRequestHandler):
                     _MEM_SYNCED_CHATS.add(chat_id)
             except Exception:
                 pass
-            res = skills_run.sandbox_session_run(chat_id, cmd)
+            res = skills_run.sandbox_session_run(chat_id, cmd, uid=self.resolve_caller(c) or "default")
             if res.get("ok"):
-                if not is_owner(uid):
+                if not owner:
                     charge_media(uid, 0.002, kind="terminal")
-                return self._json({"output": res.get("output", ""), "owner": is_owner(uid),
+                return self._json({"output": res.get("output", ""), "owner": owner,
                                    "sandbox_id": res.get("sandbox_id"), "persistent": True})
             # E2B недоступен → владельцу фолбэк на локальный shell (терминал работает и без E2B)
-            if is_owner(uid):
+            if owner:
                 out = run_code_lang(cmd, "bash", timeout=20)
                 return self._json({"output": out, "owner": True, "local": True})
             self._json({"output": "", "error": res.get("error", "песочница недоступна")}, 502)
@@ -12226,17 +12291,20 @@ class Handler(BaseHTTPRequestHandler):
             fpath = str(c.get("path") or "")
             import skills_run
             if action == "read" and fpath:
-                safe = fpath.replace("'", "")
-                r = skills_run.sandbox_session_run(chat_id, "cat '" + safe + "' 2>&1 | head -c 50000")
+                import re as _re, shlex as _shlex
+                if ".." in fpath or fpath.startswith("/") or not _re.match(r"^[\w./ +\-]{1,300}$", fpath):
+                    return self._json({"content": "[недопустимый путь]"}, 400)   # анти-инъекция/трэверсал
+                r = skills_run.sandbox_session_run(chat_id, "cat " + _shlex.quote(fpath) + " 2>&1 | head -c 50000", uid=self.resolve_caller(c) or "default")
                 return self._json({"content": r.get("output", "") if r.get("ok") else (r.get("error") or "")})
             r = skills_run.sandbox_session_run(
-                chat_id, "find . -maxdepth 3 -not -path '*/.*' -type f 2>/dev/null | sed 's|^\\./||' | head -200")
+                chat_id, "find . -maxdepth 3 -not -path '*/.*' -type f 2>/dev/null | sed 's|^\\./||' | head -200",
+                uid=self.resolve_caller(c) or "default")
             files = [f for f in (r.get("output") or "").splitlines() if f.strip()] if r.get("ok") else []
             self._json({"files": files, "ok": bool(r.get("ok"))})
         elif path == "/api/identity":
             c = self._body()
             uid = c.get("user", "default")
-            if not is_owner(uid):
+            if not self.caller_is_owner(c):
                 return self._json({"error": "Менять личность Тайги может только владелец."}, 403)
             persona = str(c.get("persona") or "").strip()
             if not persona or persona == DEFAULT_IDENTITY.strip():
@@ -12247,7 +12315,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/mcp":
             c = self._body()
             uid = c.get("user", "default")
-            if not is_owner(uid):
+            if not self.caller_is_owner(c):
                 return self._json({"error": "Управлять MCP может только владелец."}, 403)
             action = c.get("action")
             servers = load_mcp_servers()
@@ -12569,7 +12637,7 @@ class Handler(BaseHTTPRequestHandler):
         usd = round(rub / rate, 6)
 
         test_mode = bl.get("test_topup", False)
-        if not (test_mode or is_owner(uid)):
+        if not (test_mode or self.caller_is_owner()):
             # реальный режим без подключённого процессинга — не даём наливать баланс
             return self._json({"error": "Оплата временно недоступна — подключаем платёжную систему."}, 503)
 
@@ -12585,7 +12653,7 @@ class Handler(BaseHTTPRequestHandler):
     def api_billing(self):
         c = self._body()
         actor = c.get("user", "default")
-        if not is_owner(actor):
+        if not self.caller_is_owner(c):
             return self._json({"error": "только владелец"}, 403)
         action = c.get("action")
         if action == "topup":                       # пополнить баланс юзера (ручное)
@@ -13468,7 +13536,7 @@ class Handler(BaseHTTPRequestHandler):
         raw_messages = list(req.get("messages") or [])
         raw_messages = auto_compact(raw_messages, uid=uid)  # длинный диалог → старое в сводку; свежие protected_recent — дословно
         agent = bool(req.get("agent"))
-        dev = bool(req.get("dev")) and is_owner(uid)   # shell/run_code/файлы — ТОЛЬКО владелец (анти-RCE)
+        dev = bool(req.get("dev")) and self.caller_is_owner(req)   # мина #0: shell/run_code/файлы — ТОЛЬКО владелец по токену (анти-RCE)
         # ── Опт-ин типизированной агент-таймлайны (100% обратно-совместимо) ──
         # agent_events=false (дефолт) → НИ ОДНОГО нового SSE-события, поведение байт-в-байт как было.
         # interactive_perms работает только ПОВЕРХ agent_events; без обоих гейт не активируется.
@@ -13686,7 +13754,7 @@ class Handler(BaseHTTPRequestHandler):
                     enc = _b64.b64encode(code.encode()).decode()
                     cmd = ("echo " + enc + " | base64 -d > /tmp/_taiga_run." + ext
                            + " && " + runner + " /tmp/_taiga_run." + ext)
-                r = _sr.sandbox_session_run(_chat_sid, cmd)
+                r = _sr.sandbox_session_run(_chat_sid, cmd, uid=uid)
                 if r.get("ok"):
                     return r.get("output", "")
                 if is_owner(uid):
@@ -13694,7 +13762,7 @@ class Handler(BaseHTTPRequestHandler):
                 return "[песочница] " + (r.get("error") or "недоступна")
             def _sess_shell(args):
                 cmd = str(args.get("cmd") or args.get("command") or "")
-                r = _sr.sandbox_session_run(_chat_sid, cmd)
+                r = _sr.sandbox_session_run(_chat_sid, cmd, uid=uid)
                 if r.get("ok"):
                     return r.get("output", "")
                 if is_owner(uid):
@@ -15039,8 +15107,11 @@ def main():
     threading.Thread(target=_phantom_cron, daemon=True).start()
     _start_wal_checkpoint_daemon()        # housekeeping: сворачиваем WAL раз в ~30 мин (не пухнет -wal)
 
-    srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
-    print(f"── Mostik AI · http://127.0.0.1:{PORT}")
+    srv = ThreadingHTTPServer((HOST, PORT), Handler)
+    print(f"── Mostik AI · http://{HOST}:{PORT}")
+    if PUBLIC_MODE:
+        print("── ПУБЛИЧНЫЙ режим: владелец/биллинг/RCE требуют session-токена (мина #0 закрыта). "
+              "Заведи аккаунт с owner:True; 'default' больше НЕ владелец.")
     for name, p in PROVIDERS.items():
         print(f"── ключ {name}: {p['key']} {'✓' if p['key'].exists() else '✗ нет'}")
     print(f"── моделей в каталоге: {len(CATALOG)} · данные: {BASE}")

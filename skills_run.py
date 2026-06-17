@@ -406,13 +406,14 @@ def run_in_cloud_sandbox(code, lang, stdin_text=None):
 
 # ── ПЕРСИСТЕНТНАЯ E2B-СЕССИЯ НА ЧАТ ── ОБЩАЯ ПЕСОЧНИЦА: терминал юзера + run_code ИИ → ОДНА сессия,
 # cd/env/файлы живут между командами, ИИ и юзер делят одну ФС. E2B сам гасит по таймауту (1ч).
-_E2B_SESSIONS = {}                       # chat_id -> {"id": sandbox_id, "ts": float}
+_E2B_SESSIONS = {}                       # "uid:chat_id" -> {"id": sandbox_id, "ts": float}
 _E2B_SESS_LOCK = threading.Lock()
 
 
-def sandbox_session_run(chat_id, cmd):
+def sandbox_session_run(chat_id, cmd, uid=None):
     """Команда в ПЕРСИСТЕНТНОЙ E2B-сессии чата (reconnect к той же песочнице по id → состояние сохранено).
     cd/env/файлы живут между вызовами; ИИ (run_code) и юзер (терминал) делят ОДНУ сессию.
+    Сессия НЕЙМСПЕЙСИТСЯ по uid (анти cross-user: одинаковый chat_id у разных юзеров ≠ одна песочница).
     Возврат: {ok, output|error, sandbox_id}."""
     key = _e2b_api_key()
     if not key:
@@ -422,7 +423,7 @@ def sandbox_session_run(chat_id, cmd):
     except Exception:
         return {"ok": False, "error": "E2B SDK не установлен"}
     os.environ.setdefault("E2B_API_KEY", key)
-    cid = str(chat_id or "default")
+    cid = str(uid or "default") + ":" + str(chat_id or "default")   # неймспейс по ЮЗЕРУ
     with _E2B_SESS_LOCK:
         prev = _E2B_SESSIONS.get(cid)
     sbx = None
