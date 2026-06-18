@@ -1,20 +1,27 @@
 #!/usr/bin/env python3
 """
-external-critique.py — ВНЕШНИЙ критик: живой веб + НЕ-Claude модель.
-Даёт «другой взгляд на шестерёнки системы» + сверку с вебом (best-practices/реальность),
-чтобы Claude не судил сам себя. Работает из РФ.
+external-critique.py — СОВЕТ внешних моделей + СИНТЕЗ (как «Совет» в Тайге).
+Несколько НЕ-Claude моделей независимо критикуют кусок кода / док требований, сверяясь с живым
+вебом, потом chairman синтезирует в один вердикт. «Другой взгляд на шестерёнки» + анти-само-суд Claude.
 
-Источники (по убыванию приоритета, авто-фолбэк):
-  1) Gemini 2.5 + Google-grounding (живой цитируемый веб) — если поднят туннель :1080
-  2) Serper (Google-веб напрямую из РФ, без туннеля) + NVIDIA-модель (deepseek/llama) — основной путь
-Ключи берутся из ~/.reel-intelligence.env (NVIDIA + SERPER + GEMINI).
+Работает из РФ напрямую:
+  • Совет: NVIDIA deepseek-r1 + NVIDIA llama-3.3-70b (разные семейства = разный взгляд)
+  • Веб: Serper (живой Google, из РФ напрямую)
+  • Gemini 2.5 + Google-grounding — добавляется в совет КОГДА есть маршрут (немецкий туннель :1080
+    или ssh mostik); если нет — совет идёт без него, не падает.
+  • Синтез: chairman (NVIDIA) сводит критики: согласие = высокая уверенность, расхождения = флаг.
+Ключи — ~/.reel-intelligence.env (NVIDIA + SERPER + GEMINI).
 
 Usage:
-  python3 tools/external-critique.py "Критикуй: <фича/решение/claim>" [--context "<доп.контекст>"]
+  python3 tools/external-critique.py "Критикуй: <claim/решение>"
+  python3 tools/external-critique.py --file path/to/chunk.tsx "Эта реализация фичи X корректна/идеальна?"
+  python3 tools/external-critique.py --file docs/TAIGA-REQUIREMENTS.md "Эти требования полны и непротиворечивы?"
 """
-import os, sys, json, urllib.request, urllib.error, argparse, socket
+import os, sys, json, urllib.request, argparse, socket
+from concurrent.futures import ThreadPoolExecutor
 
 ENV = os.path.expanduser("~/.reel-intelligence.env")
+NV_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 
 def load_env():
     d = {}
@@ -22,106 +29,108 @@ def load_env():
         for line in open(ENV):
             line = line.strip()
             if line and not line.startswith("#") and "=" in line:
-                k, v = line.split("=", 1)
-                d[k.strip()] = v.strip()
-    except FileNotFoundError:
-        pass
+                k, v = line.split("=", 1); d[k.strip()] = v.strip()
+    except FileNotFoundError: pass
     return d
 
 def tunnel_up(port=1080):
     try:
-        with socket.create_connection(("127.0.0.1", port), timeout=1):
-            return True
-    except OSError:
-        return False
+        with socket.create_connection(("127.0.0.1", port), timeout=1): return True
+    except OSError: return False
 
 def serper_web(query, key, n=6):
-    """Живой Google-веб напрямую (работает из РФ)."""
+    if not key: return "(нет Serper-ключа)"
     try:
-        req = urllib.request.Request(
-            "https://google.serper.dev/search",
+        req = urllib.request.Request("https://google.serper.dev/search",
             data=json.dumps({"q": query, "num": n}).encode(),
-            headers={"X-API-KEY": key, "Content-Type": "application/json"},
-        )
+            headers={"X-API-KEY": key, "Content-Type": "application/json"})
         r = json.load(urllib.request.urlopen(req, timeout=20))
-        out = []
-        for o in r.get("organic", [])[:n]:
-            out.append(f"- {o.get('title','')}: {o.get('snippet','')} ({o.get('link','')})")
-        return "\n".join(out) or "(веб ничего не вернул)"
-    except Exception as e:
-        return f"(serper-ошибка: {e})"
+        return "\n".join(f"- {o.get('title','')}: {o.get('snippet','')} ({o.get('link','')})"
+                         for o in r.get("organic", [])[:n]) or "(веб пусто)"
+    except Exception as e: return f"(serper-ошибка: {e})"
 
-def nvidia_critique(prompt, web, key, model="deepseek-ai/deepseek-r1"):
-    """Независимая НЕ-Claude модель на NVIDIA (работает из РФ)."""
-    sys_p = ("Ты независимый внешний критик-инженер. Твоя задача — НАЙТИ слабые места, риски, "
-             "несоответствия best-practices и лучшие альтернативы. Будь конкретным и честным, "
-             "не льсти. Опирайся на веб-факты ниже, где уместно.")
-    body = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": sys_p},
-            {"role": "user", "content": f"{prompt}\n\nЖИВОЙ ВЕБ (для сверки):\n{web}\n\n"
-                                        f"Дай критику: 1) что не так/рискованно, 2) что говорит веб/индустрия, "
-                                        f"3) лучшие альтернативы, 4) вердикт."},
-        ],
-        "temperature": 0.3, "max_tokens": 1200,
-    }
+def nvidia(messages, key, model, max_tokens=1200, temp=0.3):
+    body = {"model": model, "messages": messages, "temperature": temp, "max_tokens": max_tokens}
+    req = urllib.request.Request(NV_URL, data=json.dumps(body).encode(),
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+    r = json.load(urllib.request.urlopen(req, timeout=120))
+    return r["choices"][0]["message"]["content"]
+
+CRITIC_SYS = ("Ты независимый внешний критик-инженер в совете моделей. Найди слабые места, риски, "
+              "несоответствия best-practices, баги, что упущено — и лучшие альтернативы. Будь конкретным "
+              "и честным, НЕ льсти. Опирайся на веб-факты где уместно. Заверши явным вердиктом: ИДЕАЛЬНО / "
+              "НУЖНЫ ПРАВКИ (список).")
+
+def member_nvidia(subject, web, key, model):
     try:
-        req = urllib.request.Request(
-            "https://integrate.api.nvidia.com/v1/chat/completions",
-            data=json.dumps(body).encode(),
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-        )
-        r = json.load(urllib.request.urlopen(req, timeout=90))
-        return r["choices"][0]["message"]["content"]
+        return nvidia([{"role": "system", "content": CRITIC_SYS},
+                       {"role": "user", "content": f"{subject}\n\nЖИВОЙ ВЕБ:\n{web}"}], key, model)
     except Exception as e:
-        # фолбэк на llama если deepseek недоступен
-        if "deepseek" in model:
-            return nvidia_critique(prompt, web, key, model="meta/llama-3.3-70b-instruct")
-        return f"(nvidia-ошибка: {e})"
+        if "deepseek" in model:  # фолбэк
+            return member_nvidia(subject, web, key, "meta/llama-3.3-70b-instruct")
+        return f"(модель {model} недоступна: {e})"
 
-def gemini_grounded(prompt, gkey):
-    """Gemini 2.5 + Google-grounding через немецкий туннель (живой цитируемый веб + другой LLM)."""
+def member_gemini(subject, gkey):
+    """Gemini + grounding, если есть маршрут (туннель :1080). Иначе None — совет идёт без него."""
+    if not gkey or not tunnel_up(): return None
     try:
         from google import genai
         from google.genai import types
         client = genai.Client(api_key=gkey, http_options=types.HttpOptions(
             client_args={"proxy": "socks5://127.0.0.1:1080"}))
         cfg = types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())])
-        r = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=f"Ты независимый внешний критик. Найди слабые места, риски, что говорит индустрия, "
-                     f"лучшие альтернативы. Сверься с живым вебом.\n\n{prompt}",
-            config=cfg)
+        r = client.models.generate_content(model="gemini-2.5-flash",
+            contents=f"{CRITIC_SYS}\n\n{subject}", config=cfg)
         return r.text
-    except Exception as e:
+    except Exception:
         return None
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("prompt")
-    ap.add_argument("--context", default="")
+    ap.add_argument("--file", default="")
     args = ap.parse_args()
     env = load_env()
-    full = args.prompt + (f"\n\nКонтекст:\n{args.context}" if args.context else "")
+    nv = env.get("NVIDIA_API_KEY", ""); serper = env.get("SERPER_API_KEY", ""); gkey = env.get("GEMINI_API_KEY", "")
+    if not nv:
+        print("Нет NVIDIA_API_KEY в ~/.reel-intelligence.env — совет не запустить."); sys.exit(1)
 
-    # 1) Gemini + grounding если туннель жив (лучший: другой LLM + цитируемый веб)
-    gkey = env.get("GEMINI_API_KEY")
-    if gkey and tunnel_up():
-        g = gemini_grounded(full, gkey)
-        if g:
-            print("=== ВНЕШНИЙ КРИТИК (Gemini 2.5 + Google-grounding) ===\n")
-            print(g); return
+    subject = args.prompt
+    if args.file:
+        try:
+            body = open(args.file).read()
+            subject += f"\n\n=== ФАЙЛ {args.file} ===\n{body[:14000]}"
+        except Exception as e:
+            print(f"Не прочитать {args.file}: {e}"); sys.exit(1)
 
-    # 2) Serper веб + NVIDIA независимая модель (надёжно из РФ)
-    serper = env.get("SERPER_API_KEY", "")
-    nv = env.get("NVIDIA_API_KEY", "")
-    web = serper_web(args.prompt[:120], serper) if serper else "(нет Serper-ключа)"
-    if nv:
-        print("=== ВНЕШНИЙ КРИТИК (NVIDIA deepseek + Serper-веб) ===\n")
-        print(nvidia_critique(full, web, nv))
-    else:
-        print("ЖИВОЙ ВЕБ:\n" + web + "\n\n(нет NVIDIA-ключа для модели-критика)")
+    web = serper_web(args.prompt[:120], serper)
+
+    # СОВЕТ — параллельно: deepseek + llama (+ gemini если маршрут)
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        f_ds = ex.submit(member_nvidia, subject, web, nv, "deepseek-ai/deepseek-r1")
+        f_ll = ex.submit(member_nvidia, subject, web, nv, "meta/llama-3.3-70b-instruct")
+        f_gm = ex.submit(member_gemini, subject, gkey)
+        ds, ll, gm = f_ds.result(), f_ll.result(), f_gm.result()
+
+    panel = [("deepseek-r1", ds), ("llama-3.3-70b", ll)]
+    if gm: panel.append(("gemini-2.5-grounded", gm))
+
+    for name, txt in panel:
+        print(f"\n===== СОВЕТНИК: {name} =====\n{txt}")
+
+    # СИНТЕЗ — chairman сводит совет
+    joined = "\n\n".join(f"[{n}]\n{t}" for n, t in panel)
+    try:
+        synth = nvidia([
+            {"role": "system", "content": "Ты chairman совета критиков. Сведи мнения советников в ОДИН "
+             "вердикт: что ВСЕ согласны (высокая уверенность) · где расходятся (флаг, осторожно) · "
+             "итоговый список правок по приоритету · финал ИДЕАЛЬНО / НУЖНЫ ПРАВКИ."},
+            {"role": "user", "content": f"Тема: {args.prompt}\n\nМНЕНИЯ СОВЕТА:\n{joined}"}],
+            nv, "meta/llama-3.3-70b-instruct", max_tokens=1000)
+        print(f"\n\n##### СИНТЕЗ (chairman) #####\n{synth}")
+    except Exception as e:
+        print(f"\n(синтез недоступен: {e})")
+    print(f"\n[совет: {len(panel)} модели{'+gemini' if gm else ', gemini вне маршрута'} · веб: serper]")
 
 if __name__ == "__main__":
     main()
