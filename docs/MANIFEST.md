@@ -15,8 +15,12 @@
 3. **Каждый факт — с источником.** Утверждение про код/фичу/дизайн → цитата файла/узла графа.
    Нет источника → честно сказать «не знаю / это пробел», как делает `gbrain think`.
 4. **Пруфы перед «готово».** Никогда не заявлять «сделано» без верификации (скрин/tsc/смоук).
-5. **Лучшие методы всегда:** `pick-skills` на каждую задачу, dynamic workflows + параллельные
-   агенты на масштаб, `verification-before-completion` на финал.
+5. **Лучшие методы всегда:** `pick-skills` на каждую задачу → process-скилл (`brainstorming` для
+   нового / `systematic-debugging` для багов / `test-driven-development`) → implementation-скиллы →
+   `verification-before-completion`. Dynamic workflows + до 20 параллельных агентов на масштаб.
+   **ponytail включён** (`/ponytail full`) — минимальный код, −22% токенов, без урезания
+   валидации/безопасности. Использовать superpowers, MCP (gbrain MCP + другие), скачивание тулз
+   и reference-репо (docs/REFERENCE-REPOS.md) — всё разрешено и нужно.
 
 Эти законы встроены в систему И являются правилом для самой сессии.
 
@@ -67,6 +71,9 @@ pip install 'raganything[all]'
 6. `FEATURE-INVENTORY.md` — чек-лист фич (поведение байт-в-байт)
 7. `ARCHITECTURE-MAP.md` + `BACKEND-API.md` — что где + эндпоинты
 8. `docs/design/README.md` — какой дизайн канон, какие доноры
+9. `docs/REFERENCE-REPOS.md` — все внешние репо (память, ponytail, opendesign) + как использовать
+10. `docs/PARKED-FEATURES.md` — отложенные фичи (голос-режим, sandbox-файлы, skill-transform, MCP) — НЕ потерять
+11. `docs/MEMORY-SETUP.md` — статус стека памяти + NVIDIA-разблок эмбеддингов
 
 ## ШАГ 2 — ГАРДРЕЙЛЫ «НЕ ПУТАТЬСЯ» (локнутые истины — НИКОГДА не нарушать)
 - **Дизайн-канон = `design-v3-current-shell-jun17.html`.** НЕ пересобирать с v0/v1/v2 — они ДОНОРЫ.
