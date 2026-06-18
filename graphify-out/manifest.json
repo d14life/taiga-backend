@@ -2129,49 +2129,19 @@
     "ast_hash": "df306c7739bd806763d8bbda50e1852e",
     "semantic_hash": ""
   },
-  "ADDON-FINAL.md": {
-    "mtime": 1781279728.0533786,
-    "ast_hash": "68c9935f7a610f80a0438e91c95d6883",
-    "semantic_hash": ""
-  },
-  "AGENTIC-OS-UNBLOCK.md": {
-    "mtime": 1781376668.4444218,
-    "ast_hash": "fce9e64efd3eb2ca14114aaebc72dab9",
-    "semantic_hash": ""
-  },
-  "AGENTS-BOARD.md": {
-    "mtime": 1781277738.828396,
-    "ast_hash": "ba2388d139fdad4fc1b4d4c632c1391d",
-    "semantic_hash": ""
-  },
   "ARCH-DECISIONS.md": {
     "mtime": 1781374350.2157617,
     "ast_hash": "cb359e5b6b40f5d31942c4f6e848bc49",
     "semantic_hash": ""
   },
   "ARCHITECTURE-MAP.md": {
-    "mtime": 1781475325.1237788,
-    "ast_hash": "a19d9b0ae97dc21ce2272a5b454dbd05",
-    "semantic_hash": ""
-  },
-  "AUDIT.md": {
-    "mtime": 1781475882.4594178,
-    "ast_hash": "d5ee9344070679837ac02500f7782d1b",
+    "mtime": 1781809006.746612,
+    "ast_hash": "dbed9b9e48f248c0e300031d43ee9de6",
     "semantic_hash": ""
   },
   "BACKEND-API.md": {
     "mtime": 1781268926.7813892,
     "ast_hash": "3109a3b8db3c53f7a4353e0e4be760c9",
-    "semantic_hash": ""
-  },
-  "BIG-AUDIT.md": {
-    "mtime": 1781482995.0126743,
-    "ast_hash": "aeb5e0bba11f831d2ba1331847a4b74c",
-    "semantic_hash": ""
-  },
-  "BUGS-FOUND.md": {
-    "mtime": 1781671709.8193064,
-    "ast_hash": "48f44a76b19ab7994902d88088436e97",
     "semantic_hash": ""
   },
   "CHAT-AGENT-MORPH.md": {
@@ -2180,13 +2150,8 @@
     "semantic_hash": ""
   },
   "CLAUDE.md": {
-    "mtime": 1781475325.1240892,
-    "ast_hash": "978d9ab61ac2d488f0ffb13f3b59dbd6",
-    "semantic_hash": ""
-  },
-  "COORDINATOR-NOTES.md": {
-    "mtime": 1781237843.4213178,
-    "ast_hash": "e2ace1f615f5653e9fcf58f22884d6a5",
+    "mtime": 1781808912.7359757,
+    "ast_hash": "df3703a94124b0d3a1877214f4a021f2",
     "semantic_hash": ""
   },
   "DAMIR-REQUESTS.md": {
@@ -2194,49 +2159,14 @@
     "ast_hash": "6fccac72d4d30af468fb5c04cbf6bcda",
     "semantic_hash": ""
   },
-  "DESIGN-APPLY-QUEUE.md": {
-    "mtime": 1781670015.902842,
-    "ast_hash": "28e947cbf8d116a5d572b66c0e264026",
-    "semantic_hash": ""
-  },
   "DESIGN-REQUESTS-RECOVERED.md": {
     "mtime": 1781664592.2643797,
     "ast_hash": "c49062bb0e3fdb73dbae2bcb2bf6a590",
     "semantic_hash": ""
   },
-  "DEV-TOOLING.md": {
-    "mtime": 1781281834.5868032,
-    "ast_hash": "f6f3992b453b57d067a85bb23f7d95a0",
-    "semantic_hash": ""
-  },
-  "DISPATCH.md": {
-    "mtime": 1781277159.0765502,
-    "ast_hash": "9e6eaa98fe3bf5562c62510239be4d71",
-    "semantic_hash": ""
-  },
   "FEATURE-INVENTORY.md": {
     "mtime": 1781475325.1239064,
     "ast_hash": "2c7e5f4d2106de7a5e4bd7c87d74fdda",
-    "semantic_hash": ""
-  },
-  "FINISH-ALL.md": {
-    "mtime": 1781450041.8904166,
-    "ast_hash": "8c82241b88dca772c0cbce3130a8f642",
-    "semantic_hash": ""
-  },
-  "FINISH-PLAN.md": {
-    "mtime": 1781281420.2069185,
-    "ast_hash": "1d42ccbd68b16f9f1f5326884900dfb8",
-    "semantic_hash": ""
-  },
-  "FRONT-GAP-ural.md": {
-    "mtime": 1781274860.4810548,
-    "ast_hash": "879ed385b13e8c8aa4b5764a9ca6262c",
-    "semantic_hash": ""
-  },
-  "FUTURE-TAIGA-CODER.md": {
-    "mtime": 1781291491.0937288,
-    "ast_hash": "dfa4a250f00bae2ebde56e29f6f56dac",
     "semantic_hash": ""
   },
   "FUTURE-TASKS.md": {
@@ -2249,99 +2179,9 @@
     "ast_hash": "40787492d02f1ab91571e54dfaa3a824",
     "semantic_hash": ""
   },
-  "GAP-MAP.md": {
-    "mtime": 1781284033.6909661,
-    "ast_hash": "e43ca7bb225478df45652aa894f8ef41",
-    "semantic_hash": ""
-  },
-  "GRAND-PLAN-CUSTOMIZABILITY.md": {
-    "mtime": 1781286330.126528,
-    "ast_hash": "77046cf66040627a7ee0b721c05e32ee",
-    "semantic_hash": ""
-  },
-  "GRAND-PLAN-V2.md": {
-    "mtime": 1781337463.5781846,
-    "ast_hash": "7d66ebf2b47f5d6261685756163113dc",
-    "semantic_hash": ""
-  },
   "GRAND-PLAN-V3.md": {
     "mtime": 1781351687.1654797,
     "ast_hash": "a6d80dcb507b109508ef1e9b213e6379",
-    "semantic_hash": ""
-  },
-  "GRAND-PLAN.md": {
-    "mtime": 1781400770.137335,
-    "ast_hash": "cd00b15cbc6d6e9e3bb87881efbd6264",
-    "semantic_hash": ""
-  },
-  "HOOK-FOR-SOSNA.md": {
-    "mtime": 1781280980.4827497,
-    "ast_hash": "e39a34026ac93faf4be310a962d648a8",
-    "semantic_hash": ""
-  },
-  "INTEGRATION-NOTES.md": {
-    "mtime": 1781288446.053272,
-    "ast_hash": "47c1ce71e876d58b99c1c716ef3f96e1",
-    "semantic_hash": ""
-  },
-  "LANES.md": {
-    "mtime": 1781379827.2568052,
-    "ast_hash": "ebb0c13bd9d2ca9b8ed4b580e7ccc52a",
-    "semantic_hash": ""
-  },
-  "LAUNCH-WORKER.md": {
-    "mtime": 1781661367.4104307,
-    "ast_hash": "a0849b1440630d355bf59cb88164f98f",
-    "semantic_hash": ""
-  },
-  "LIFT-MAP-2.md": {
-    "mtime": 1781280128.9306612,
-    "ast_hash": "c36df177ce7441b76dabff7053568df8",
-    "semantic_hash": ""
-  },
-  "LIFT-MAP-3.md": {
-    "mtime": 1781280894.333009,
-    "ast_hash": "8849ba6caedf16ea7067f352162f4c74",
-    "semantic_hash": ""
-  },
-  "MASTER-AUDIT-PLAN.md": {
-    "mtime": 1781293285.4823625,
-    "ast_hash": "a89e5fd89796248a6560d51ac05c9bb4",
-    "semantic_hash": ""
-  },
-  "MASTER-LANES.md": {
-    "mtime": 1781297524.9172843,
-    "ast_hash": "2004e90b5467541d5aaee340103d6891",
-    "semantic_hash": ""
-  },
-  "MASTER-PLAN.md": {
-    "mtime": 1781281119.9218075,
-    "ast_hash": "3002b82fe0b55626d61be6b2e682fcc2",
-    "semantic_hash": ""
-  },
-  "MORNING-REPORT.md": {
-    "mtime": 1781489660.9057481,
-    "ast_hash": "467029d393309cd88d8a7727fbdaa37b",
-    "semantic_hash": ""
-  },
-  "MORNING-SUMMARY.md": {
-    "mtime": 1781236137.007116,
-    "ast_hash": "768b964d248c18987ef947e9df892a39",
-    "semantic_hash": ""
-  },
-  "NEXT-3-PROMPTS.md": {
-    "mtime": 1781521470.3166993,
-    "ast_hash": "b964033bd19b0cb3911d3d5e16eae64a",
-    "semantic_hash": ""
-  },
-  "NEXT-PLAN.md": {
-    "mtime": 1781274652.1086476,
-    "ast_hash": "4c8f1fcfdad67c146a76ca9728b9b776",
-    "semantic_hash": ""
-  },
-  "OVERNIGHT-BUILD-QUEUE.md": {
-    "mtime": 1781409564.3020926,
-    "ast_hash": "3f81a15a65e676cbd8b05097f7311893",
     "semantic_hash": ""
   },
   "PARAMETERS-AUDIT.md": {
@@ -2349,39 +2189,9 @@
     "ast_hash": "5004b43bca63e09431a6d39fd289ba9d",
     "semantic_hash": ""
   },
-  "PARITY-MATRIX.md": {
-    "mtime": 1781275954.599007,
-    "ast_hash": "942b054b4482b1d489a14cc50e518d1b",
-    "semantic_hash": ""
-  },
   "PHASE-A-C-HARDENING.md": {
     "mtime": 1781478152.3635736,
     "ast_hash": "497f38a0b85520e09282ae5dfe805d39",
-    "semantic_hash": ""
-  },
-  "PLAN-WAVE2-3.md": {
-    "mtime": 1781268345.4406226,
-    "ast_hash": "a1714486696bef33975b2ec12abd878b",
-    "semantic_hash": ""
-  },
-  "PLAN-amur.md": {
-    "mtime": 1781235336.7708256,
-    "ast_hash": "a9d5dbf29abc1ddce4327b2ef48d2f9e",
-    "semantic_hash": ""
-  },
-  "PLAN-kedr.md": {
-    "mtime": 1781235199.7576501,
-    "ast_hash": "e5db719f23a7ed20c81b0b3a24d58f2c",
-    "semantic_hash": ""
-  },
-  "PLAN-ural.md": {
-    "mtime": 1781235250.1369863,
-    "ast_hash": "5e4066236b624226622e7a02c65cf965",
-    "semantic_hash": ""
-  },
-  "PLAN.md": {
-    "mtime": 1781400066.5495718,
-    "ast_hash": "a90e8285ce6f929894a9f70e8ddfc15b",
     "semantic_hash": ""
   },
   "PROJECT-STATE.md": {
@@ -2394,24 +2204,9 @@
     "ast_hash": "d2d80660421e08467193797e74e07f51",
     "semantic_hash": ""
   },
-  "QUESTIONS-amur.md": {
-    "mtime": 1781265989.9485843,
-    "ast_hash": "6802c917f987c2a0a7a9f8d3fcf64946",
-    "semantic_hash": ""
-  },
-  "QUESTIONS-ural.md": {
-    "mtime": 1781266657.4111574,
-    "ast_hash": "17a3a81f8958cbab2949898d858b8ae1",
-    "semantic_hash": ""
-  },
   "REBUILD-BRIEF.md": {
-    "mtime": 1781475325.1240115,
-    "ast_hash": "fc99bfe72841c6b2ab559a6a5e076706",
-    "semantic_hash": ""
-  },
-  "REMAINING-V1.md": {
-    "mtime": 1781282373.918146,
-    "ast_hash": "564837493e196385d61baf9985b935f4",
+    "mtime": 1781808995.7861881,
+    "ast_hash": "6a9ec8bbe99de4848f0b2f6e21e82f2e",
     "semantic_hash": ""
   },
   "ROADMAP-AGENT-OS.md": {
@@ -2419,29 +2214,9 @@
     "ast_hash": "fbc380e311c0f35bf7ffbd8d5598f556",
     "semantic_hash": ""
   },
-  "SCALE-PLAN.md": {
-    "mtime": 1781470653.7109847,
-    "ast_hash": "e3af098a5bbd7d3d96fc284e0c36a231",
-    "semantic_hash": ""
-  },
   "SECURITY-AUDIT-ural.md": {
     "mtime": 1781272522.8410735,
     "ast_hash": "9a59be14c0ec5736b9d21976a54dc943",
-    "semantic_hash": ""
-  },
-  "SESSION-B-TASKS.md": {
-    "mtime": 1781375665.6102097,
-    "ast_hash": "6ff6b927bf8f28c5ca4f08ae0bc91713",
-    "semantic_hash": ""
-  },
-  "SESSION-C-PROGRESS.md": {
-    "mtime": 1781381032.7563322,
-    "ast_hash": "9d80dd405dbce0d7a1e0b87677ff9827",
-    "semantic_hash": ""
-  },
-  "SESSION-D-PROGRESS.md": {
-    "mtime": 1781381032.7565925,
-    "ast_hash": "5f470619a21060c0aeb4a11b3e7a7115",
     "semantic_hash": ""
   },
   "SKILL-TRANSFORMER-PLAN.md": {
@@ -2450,63 +2225,8 @@
     "semantic_hash": ""
   },
   "START-HERE.md": {
-    "mtime": 1781478138.4765723,
-    "ast_hash": "0a3fe89ec48585b90f09c9214b63bd9e",
-    "semantic_hash": ""
-  },
-  "STATUS-amur.md": {
-    "mtime": 1781281389.883656,
-    "ast_hash": "1986ae7879c5389c2d6be8a6369721b0",
-    "semantic_hash": ""
-  },
-  "STATUS-atlas.md": {
-    "mtime": 1781235147.36968,
-    "ast_hash": "7b7f080054b1e705c59a073a4ea446db",
-    "semantic_hash": ""
-  },
-  "STATUS-claude-overnight.md": {
-    "mtime": 1781436073.1006188,
-    "ast_hash": "921b349bb5597b05232e56dd8d7fdb36",
-    "semantic_hash": ""
-  },
-  "STATUS-kedr.md": {
-    "mtime": 1781281022.2263765,
-    "ast_hash": "333efe8b7dfa038657ea9de0c78e0b60",
-    "semantic_hash": ""
-  },
-  "STATUS-sosna.md": {
-    "mtime": 1781280404.942177,
-    "ast_hash": "f18dbb095c97e2eb7b6ee37769d036b7",
-    "semantic_hash": ""
-  },
-  "STATUS-ural.md": {
-    "mtime": 1781280196.7116647,
-    "ast_hash": "051821e09360dc5bbce7ebdeb20e48a2",
-    "semantic_hash": ""
-  },
-  "STUDIO-SESSION-PROMPT.md": {
-    "mtime": 1781271798.571303,
-    "ast_hash": "fe04cd8da0806b38f5566b238973463c",
-    "semantic_hash": ""
-  },
-  "TAIGA-FOCUS.md": {
-    "mtime": 1781235461.9506233,
-    "ast_hash": "cf8f5b6fd301558ab4a5f87eb9b726b4",
-    "semantic_hash": ""
-  },
-  "TAIGA-GAP-ANALYSIS.md": {
-    "mtime": 1781271623.2530463,
-    "ast_hash": "db2c08f8e9c05ac77f1f6dd3ca1b31ed",
-    "semantic_hash": ""
-  },
-  "TAIGA-LIFT-MAP.md": {
-    "mtime": 1781230068.1513793,
-    "ast_hash": "315e696b3d302cdac4e1a7f7d2ce9768",
-    "semantic_hash": ""
-  },
-  "TAIGA-PLAN.md": {
-    "mtime": 1781200907.9383721,
-    "ast_hash": "c36fa084ceb25f41dbb255712d03c006",
+    "mtime": 1781808963.8185658,
+    "ast_hash": "1690380bf180440f79159bf51859a2b8",
     "semantic_hash": ""
   },
   "TAIGA-REQUIREMENTS.md": {
@@ -2514,49 +2234,14 @@
     "ast_hash": "5d77a18ce8322850bc84dcc1d0a22a43",
     "semantic_hash": ""
   },
-  "TAIGA-RESEARCH-BRIEF.md": {
-    "mtime": 1781225905.2834697,
-    "ast_hash": "314b19baff85551724ffc3ca619792e5",
-    "semantic_hash": ""
-  },
-  "TAIGA-SESSION-DIRECTIVES.md": {
-    "mtime": 1781227052.5073369,
-    "ast_hash": "9d2c95dc494d4c7570843fb55e24c8f6",
-    "semantic_hash": ""
-  },
   "TEST-CHECKLIST.md": {
     "mtime": 1781349243.8713722,
     "ast_hash": "8e38772fd0ec749b3f677da6531de40c",
     "semantic_hash": ""
   },
-  "TESTING.md": {
-    "mtime": 1781351053.908486,
-    "ast_hash": "d9f3e87bf0ab6102dd9fabfcee9af353",
-    "semantic_hash": ""
-  },
-  "USER-CASES-RESULTS.md": {
-    "mtime": 1781291781.9001892,
-    "ast_hash": "b2c2acf7e4d6b017089d558411d26cac",
-    "semantic_hash": ""
-  },
   "USER-CASES.md": {
     "mtime": 1781284443.8899057,
     "ast_hash": "634b3d98d22955f88cf3b7b7fe689afa",
-    "semantic_hash": ""
-  },
-  "USER-TEST-GUIDE.md": {
-    "mtime": 1781470879.292958,
-    "ast_hash": "11d9b70f4135ab1ae95c0d3d2c4640e1",
-    "semantic_hash": ""
-  },
-  "WHATS-NEW.md": {
-    "mtime": 1781381032.7569714,
-    "ast_hash": "e397b77f593f6cb78737cbf69ee77806",
-    "semantic_hash": ""
-  },
-  "WIRING-PLAN.md": {
-    "mtime": 1781663988.9411101,
-    "ast_hash": "3fe047c7a80f3a04ca47fdd67552f310",
     "semantic_hash": ""
   },
   "docs/LOVABLE-HANDOFF.md": {
@@ -2565,13 +2250,13 @@
     "semantic_hash": ""
   },
   "docs/MANIFEST.md": {
-    "mtime": 1781803763.7596016,
-    "ast_hash": "03945680201d3617a153bca4f7302e19",
+    "mtime": 1781810679.3274686,
+    "ast_hash": "2eb7f5b5cca9cc2f622347fb6d575be2",
     "semantic_hash": ""
   },
   "docs/NEW-SESSION-START.md": {
-    "mtime": 1781803776.1111193,
-    "ast_hash": "16f5f7765bb8955ba42def9f22e8cb4c",
+    "mtime": 1781808433.2815413,
+    "ast_hash": "a3f75c41a2e4c9f25af89bc3bc0e27e3",
     "semantic_hash": ""
   },
   "docs/PROJECT-BIBLE.md": {
@@ -2605,8 +2290,8 @@
     "semantic_hash": ""
   },
   "docs/design/README.md": {
-    "mtime": 1781796151.8346615,
-    "ast_hash": "e83a36c28b7bbaf178c3e3cf7084b657",
+    "mtime": 1781808230.98085,
+    "ast_hash": "5af23abfa2e1845474c2e10d088b5f34",
     "semantic_hash": ""
   },
   "docs/design/STATE-MODEL.md": {
@@ -2619,29 +2304,9 @@
     "ast_hash": "ce7f8262739f5faabd854bfe3cfb921d",
     "semantic_hash": ""
   },
-  "docs/design/design-v0-original-react-chat-jun12.tsx.txt": {
-    "mtime": 1781796151.8153815,
-    "ast_hash": "619e50c6add44199f64ea6835ee25058",
-    "semantic_hash": ""
-  },
-  "docs/design/design-v1-539kb-jun13-resize-windows.html": {
-    "mtime": 1781796111.3643057,
-    "ast_hash": "ec1a0bba5e7c8dbd789aaf57e6decdab",
-    "semantic_hash": ""
-  },
-  "docs/design/design-v2-redesign-jun16.html": {
-    "mtime": 1781796111.367986,
-    "ast_hash": "666cea3b3caef69502c7cdeea87c89c7",
-    "semantic_hash": ""
-  },
   "docs/design/design-v3-current-shell-jun17.html": {
     "mtime": 1781796111.370792,
     "ast_hash": "172f165c57b04af65975ffac5495cc0f",
-    "semantic_hash": ""
-  },
-  "docs/design/reference-mockup.html": {
-    "mtime": 1781722256.3068848,
-    "ast_hash": "666cea3b3caef69502c7cdeea87c89c7",
     "semantic_hash": ""
   },
   "docs/design/usertest-jun15/EVIDENCE-GALLERY.html": {
@@ -3782,6 +3447,391 @@
   "taiga2.jpg": {
     "mtime": 1781189345.4454036,
     "ast_hash": "9f6b8df12b32ded9d38af4730980d089",
+    "semantic_hash": ""
+  },
+  "tools/external-critique.py": {
+    "mtime": 1781810607.9150395,
+    "ast_hash": "c12022f326f85996a035d1e019e14534",
+    "semantic_hash": ""
+  },
+  "_archive/ADDON-FINAL.md": {
+    "mtime": 1781279728.0533786,
+    "ast_hash": "68c9935f7a610f80a0438e91c95d6883",
+    "semantic_hash": ""
+  },
+  "_archive/AGENTIC-OS-UNBLOCK.md": {
+    "mtime": 1781376668.4444218,
+    "ast_hash": "fce9e64efd3eb2ca14114aaebc72dab9",
+    "semantic_hash": ""
+  },
+  "_archive/AGENTS-BOARD.md": {
+    "mtime": 1781277738.828396,
+    "ast_hash": "ba2388d139fdad4fc1b4d4c632c1391d",
+    "semantic_hash": ""
+  },
+  "_archive/AUDIT.md": {
+    "mtime": 1781475882.4594178,
+    "ast_hash": "d5ee9344070679837ac02500f7782d1b",
+    "semantic_hash": ""
+  },
+  "_archive/BIG-AUDIT.md": {
+    "mtime": 1781482995.0126743,
+    "ast_hash": "aeb5e0bba11f831d2ba1331847a4b74c",
+    "semantic_hash": ""
+  },
+  "_archive/BUGS-FOUND.md": {
+    "mtime": 1781671709.8193064,
+    "ast_hash": "48f44a76b19ab7994902d88088436e97",
+    "semantic_hash": ""
+  },
+  "_archive/COORDINATOR-NOTES.md": {
+    "mtime": 1781237843.4213178,
+    "ast_hash": "e2ace1f615f5653e9fcf58f22884d6a5",
+    "semantic_hash": ""
+  },
+  "_archive/DESIGN-APPLY-QUEUE.md": {
+    "mtime": 1781670015.902842,
+    "ast_hash": "28e947cbf8d116a5d572b66c0e264026",
+    "semantic_hash": ""
+  },
+  "_archive/DEV-TOOLING.md": {
+    "mtime": 1781281834.5868032,
+    "ast_hash": "f6f3992b453b57d067a85bb23f7d95a0",
+    "semantic_hash": ""
+  },
+  "_archive/DISPATCH.md": {
+    "mtime": 1781277159.0765502,
+    "ast_hash": "9e6eaa98fe3bf5562c62510239be4d71",
+    "semantic_hash": ""
+  },
+  "_archive/FINISH-ALL.md": {
+    "mtime": 1781450041.8904166,
+    "ast_hash": "8c82241b88dca772c0cbce3130a8f642",
+    "semantic_hash": ""
+  },
+  "_archive/FINISH-PLAN.md": {
+    "mtime": 1781281420.2069185,
+    "ast_hash": "1d42ccbd68b16f9f1f5326884900dfb8",
+    "semantic_hash": ""
+  },
+  "_archive/FRONT-GAP-ural.md": {
+    "mtime": 1781274860.4810548,
+    "ast_hash": "879ed385b13e8c8aa4b5764a9ca6262c",
+    "semantic_hash": ""
+  },
+  "_archive/FUTURE-TAIGA-CODER.md": {
+    "mtime": 1781291491.0937288,
+    "ast_hash": "dfa4a250f00bae2ebde56e29f6f56dac",
+    "semantic_hash": ""
+  },
+  "_archive/GAP-MAP.md": {
+    "mtime": 1781284033.6909661,
+    "ast_hash": "e43ca7bb225478df45652aa894f8ef41",
+    "semantic_hash": ""
+  },
+  "_archive/GRAND-PLAN-CUSTOMIZABILITY.md": {
+    "mtime": 1781286330.126528,
+    "ast_hash": "77046cf66040627a7ee0b721c05e32ee",
+    "semantic_hash": ""
+  },
+  "_archive/GRAND-PLAN-V2.md": {
+    "mtime": 1781337463.5781846,
+    "ast_hash": "7d66ebf2b47f5d6261685756163113dc",
+    "semantic_hash": ""
+  },
+  "_archive/GRAND-PLAN.md": {
+    "mtime": 1781400770.137335,
+    "ast_hash": "cd00b15cbc6d6e9e3bb87881efbd6264",
+    "semantic_hash": ""
+  },
+  "_archive/HOOK-FOR-SOSNA.md": {
+    "mtime": 1781280980.4827497,
+    "ast_hash": "e39a34026ac93faf4be310a962d648a8",
+    "semantic_hash": ""
+  },
+  "_archive/INTEGRATION-NOTES.md": {
+    "mtime": 1781288446.053272,
+    "ast_hash": "47c1ce71e876d58b99c1c716ef3f96e1",
+    "semantic_hash": ""
+  },
+  "_archive/LANES.md": {
+    "mtime": 1781379827.2568052,
+    "ast_hash": "ebb0c13bd9d2ca9b8ed4b580e7ccc52a",
+    "semantic_hash": ""
+  },
+  "_archive/LAUNCH-WORKER.md": {
+    "mtime": 1781661367.4104307,
+    "ast_hash": "a0849b1440630d355bf59cb88164f98f",
+    "semantic_hash": ""
+  },
+  "_archive/LIFT-MAP-2.md": {
+    "mtime": 1781280128.9306612,
+    "ast_hash": "c36df177ce7441b76dabff7053568df8",
+    "semantic_hash": ""
+  },
+  "_archive/LIFT-MAP-3.md": {
+    "mtime": 1781280894.333009,
+    "ast_hash": "8849ba6caedf16ea7067f352162f4c74",
+    "semantic_hash": ""
+  },
+  "_archive/MASTER-AUDIT-PLAN.md": {
+    "mtime": 1781293285.4823625,
+    "ast_hash": "a89e5fd89796248a6560d51ac05c9bb4",
+    "semantic_hash": ""
+  },
+  "_archive/MASTER-LANES.md": {
+    "mtime": 1781297524.9172843,
+    "ast_hash": "2004e90b5467541d5aaee340103d6891",
+    "semantic_hash": ""
+  },
+  "_archive/MASTER-PLAN.md": {
+    "mtime": 1781281119.9218075,
+    "ast_hash": "3002b82fe0b55626d61be6b2e682fcc2",
+    "semantic_hash": ""
+  },
+  "_archive/MORNING-REPORT.md": {
+    "mtime": 1781489660.9057481,
+    "ast_hash": "467029d393309cd88d8a7727fbdaa37b",
+    "semantic_hash": ""
+  },
+  "_archive/MORNING-SUMMARY.md": {
+    "mtime": 1781236137.007116,
+    "ast_hash": "768b964d248c18987ef947e9df892a39",
+    "semantic_hash": ""
+  },
+  "_archive/NEXT-3-PROMPTS.md": {
+    "mtime": 1781521470.3166993,
+    "ast_hash": "b964033bd19b0cb3911d3d5e16eae64a",
+    "semantic_hash": ""
+  },
+  "_archive/NEXT-PLAN.md": {
+    "mtime": 1781274652.1086476,
+    "ast_hash": "4c8f1fcfdad67c146a76ca9728b9b776",
+    "semantic_hash": ""
+  },
+  "_archive/OVERNIGHT-BUILD-QUEUE.md": {
+    "mtime": 1781409564.3020926,
+    "ast_hash": "3f81a15a65e676cbd8b05097f7311893",
+    "semantic_hash": ""
+  },
+  "_archive/PARITY-MATRIX.md": {
+    "mtime": 1781275954.599007,
+    "ast_hash": "942b054b4482b1d489a14cc50e518d1b",
+    "semantic_hash": ""
+  },
+  "_archive/PLAN-WAVE2-3.md": {
+    "mtime": 1781268345.4406226,
+    "ast_hash": "a1714486696bef33975b2ec12abd878b",
+    "semantic_hash": ""
+  },
+  "_archive/PLAN-amur.md": {
+    "mtime": 1781235336.7708256,
+    "ast_hash": "a9d5dbf29abc1ddce4327b2ef48d2f9e",
+    "semantic_hash": ""
+  },
+  "_archive/PLAN-kedr.md": {
+    "mtime": 1781235199.7576501,
+    "ast_hash": "e5db719f23a7ed20c81b0b3a24d58f2c",
+    "semantic_hash": ""
+  },
+  "_archive/PLAN-ural.md": {
+    "mtime": 1781235250.1369863,
+    "ast_hash": "5e4066236b624226622e7a02c65cf965",
+    "semantic_hash": ""
+  },
+  "_archive/PLAN.md": {
+    "mtime": 1781400066.5495718,
+    "ast_hash": "a90e8285ce6f929894a9f70e8ddfc15b",
+    "semantic_hash": ""
+  },
+  "_archive/QUESTIONS-amur.md": {
+    "mtime": 1781265989.9485843,
+    "ast_hash": "6802c917f987c2a0a7a9f8d3fcf64946",
+    "semantic_hash": ""
+  },
+  "_archive/QUESTIONS-ural.md": {
+    "mtime": 1781266657.4111574,
+    "ast_hash": "17a3a81f8958cbab2949898d858b8ae1",
+    "semantic_hash": ""
+  },
+  "_archive/README.md": {
+    "mtime": 1781807545.4134161,
+    "ast_hash": "51a6a533a548f98e3ef0587a000a24ee",
+    "semantic_hash": ""
+  },
+  "_archive/REMAINING-V1.md": {
+    "mtime": 1781282373.918146,
+    "ast_hash": "564837493e196385d61baf9985b935f4",
+    "semantic_hash": ""
+  },
+  "_archive/SCALE-PLAN.md": {
+    "mtime": 1781470653.7109847,
+    "ast_hash": "e3af098a5bbd7d3d96fc284e0c36a231",
+    "semantic_hash": ""
+  },
+  "_archive/SESSION-B-TASKS.md": {
+    "mtime": 1781375665.6102097,
+    "ast_hash": "6ff6b927bf8f28c5ca4f08ae0bc91713",
+    "semantic_hash": ""
+  },
+  "_archive/SESSION-C-PROGRESS.md": {
+    "mtime": 1781381032.7563322,
+    "ast_hash": "9d80dd405dbce0d7a1e0b87677ff9827",
+    "semantic_hash": ""
+  },
+  "_archive/SESSION-D-PROGRESS.md": {
+    "mtime": 1781381032.7565925,
+    "ast_hash": "5f470619a21060c0aeb4a11b3e7a7115",
+    "semantic_hash": ""
+  },
+  "_archive/STATUS-amur.md": {
+    "mtime": 1781281389.883656,
+    "ast_hash": "1986ae7879c5389c2d6be8a6369721b0",
+    "semantic_hash": ""
+  },
+  "_archive/STATUS-atlas.md": {
+    "mtime": 1781235147.36968,
+    "ast_hash": "7b7f080054b1e705c59a073a4ea446db",
+    "semantic_hash": ""
+  },
+  "_archive/STATUS-claude-overnight.md": {
+    "mtime": 1781436073.1006188,
+    "ast_hash": "921b349bb5597b05232e56dd8d7fdb36",
+    "semantic_hash": ""
+  },
+  "_archive/STATUS-kedr.md": {
+    "mtime": 1781281022.2263765,
+    "ast_hash": "333efe8b7dfa038657ea9de0c78e0b60",
+    "semantic_hash": ""
+  },
+  "_archive/STATUS-sosna.md": {
+    "mtime": 1781280404.942177,
+    "ast_hash": "f18dbb095c97e2eb7b6ee37769d036b7",
+    "semantic_hash": ""
+  },
+  "_archive/STATUS-ural.md": {
+    "mtime": 1781280196.7116647,
+    "ast_hash": "051821e09360dc5bbce7ebdeb20e48a2",
+    "semantic_hash": ""
+  },
+  "_archive/STUDIO-SESSION-PROMPT.md": {
+    "mtime": 1781271798.571303,
+    "ast_hash": "fe04cd8da0806b38f5566b238973463c",
+    "semantic_hash": ""
+  },
+  "_archive/TAIGA-FOCUS.md": {
+    "mtime": 1781235461.9506233,
+    "ast_hash": "cf8f5b6fd301558ab4a5f87eb9b726b4",
+    "semantic_hash": ""
+  },
+  "_archive/TAIGA-GAP-ANALYSIS.md": {
+    "mtime": 1781271623.2530463,
+    "ast_hash": "db2c08f8e9c05ac77f1f6dd3ca1b31ed",
+    "semantic_hash": ""
+  },
+  "_archive/TAIGA-LIFT-MAP.md": {
+    "mtime": 1781230068.1513793,
+    "ast_hash": "315e696b3d302cdac4e1a7f7d2ce9768",
+    "semantic_hash": ""
+  },
+  "_archive/TAIGA-PLAN.md": {
+    "mtime": 1781200907.9383721,
+    "ast_hash": "c36fa084ceb25f41dbb255712d03c006",
+    "semantic_hash": ""
+  },
+  "_archive/TAIGA-RESEARCH-BRIEF.md": {
+    "mtime": 1781225905.2834697,
+    "ast_hash": "314b19baff85551724ffc3ca619792e5",
+    "semantic_hash": ""
+  },
+  "_archive/TAIGA-SESSION-DIRECTIVES.md": {
+    "mtime": 1781227052.5073369,
+    "ast_hash": "9d2c95dc494d4c7570843fb55e24c8f6",
+    "semantic_hash": ""
+  },
+  "_archive/TESTING.md": {
+    "mtime": 1781351053.908486,
+    "ast_hash": "d9f3e87bf0ab6102dd9fabfcee9af353",
+    "semantic_hash": ""
+  },
+  "_archive/USER-CASES-RESULTS.md": {
+    "mtime": 1781291781.9001892,
+    "ast_hash": "b2c2acf7e4d6b017089d558411d26cac",
+    "semantic_hash": ""
+  },
+  "_archive/USER-TEST-GUIDE.md": {
+    "mtime": 1781470879.292958,
+    "ast_hash": "11d9b70f4135ab1ae95c0d3d2c4640e1",
+    "semantic_hash": ""
+  },
+  "_archive/WHATS-NEW.md": {
+    "mtime": 1781381032.7569714,
+    "ast_hash": "e397b77f593f6cb78737cbf69ee77806",
+    "semantic_hash": ""
+  },
+  "_archive/WIRING-PLAN.md": {
+    "mtime": 1781663988.9411101,
+    "ast_hash": "3fe047c7a80f3a04ca47fdd67552f310",
+    "semantic_hash": ""
+  },
+  "docs/DECISIONS-LOG.md": {
+    "mtime": 1781809969.9855506,
+    "ast_hash": "04c96ef812cb4431589b43d1502b05e7",
+    "semantic_hash": ""
+  },
+  "docs/EFFICIENT-MEMORY.md": {
+    "mtime": 1781810671.8581274,
+    "ast_hash": "a5b19e18f36fbe7bcdcda184025142e6",
+    "semantic_hash": ""
+  },
+  "docs/MEMORY-PLAYBOOK.md": {
+    "mtime": 1781810647.1328857,
+    "ast_hash": "3b633ea7db4e8cfcf4cf9fa3813d52c5",
+    "semantic_hash": ""
+  },
+  "docs/MEMORY-SETUP.md": {
+    "mtime": 1781805144.3454392,
+    "ast_hash": "34cbdd94b18d0cc64fb264a2f77f63e8",
+    "semantic_hash": ""
+  },
+  "docs/PARKED-FEATURES.md": {
+    "mtime": 1781807573.1394272,
+    "ast_hash": "d39111ba236061f17ee15558c621b99e",
+    "semantic_hash": ""
+  },
+  "docs/REFERENCE-REPOS.md": {
+    "mtime": 1781804591.5477111,
+    "ast_hash": "1a3b73eec703b62b1b41fc9dfe0e9d0a",
+    "semantic_hash": ""
+  },
+  "docs/TEST-WORKFLOW.md": {
+    "mtime": 1781809127.175549,
+    "ast_hash": "2af793341d3e4972262fe295321efd19",
+    "semantic_hash": ""
+  },
+  "docs/UNDERSTANDING-MAP.md": {
+    "mtime": 1781810214.4307408,
+    "ast_hash": "a3468a71a7c49a6961153ea7fa7284c9",
+    "semantic_hash": ""
+  },
+  "docs/UNIFIED-FEATURE-CHECKLIST.md": {
+    "mtime": 1781810440.8364804,
+    "ast_hash": "ba38c92361103a1f448d734b833fba4e",
+    "semantic_hash": ""
+  },
+  "docs/design/_donors/design-v0-original-react-chat-jun12.tsx.txt": {
+    "mtime": 1781796151.8153815,
+    "ast_hash": "619e50c6add44199f64ea6835ee25058",
+    "semantic_hash": ""
+  },
+  "docs/design/_donors/design-v1-539kb-jun13-resize-windows.html": {
+    "mtime": 1781796111.3643057,
+    "ast_hash": "ec1a0bba5e7c8dbd789aaf57e6decdab",
+    "semantic_hash": ""
+  },
+  "docs/design/_donors/design-v2-redesign-jun16.html": {
+    "mtime": 1781796111.367986,
+    "ast_hash": "666cea3b3caef69502c7cdeea87c89c7",
     "semantic_hash": ""
   }
 }
