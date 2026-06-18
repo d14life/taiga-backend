@@ -1,7 +1,10 @@
 # ARCHITECTURE-MAP.md — Тайга: карта текущей системы
 
+> ⚠️ СТАТУС-ПОПРАВКА (docs/MANIFEST.md перевешивает): номера строк — со старого снапшота, код вырос →
+> реально `server.py`=**15125** строк (`def chat(self)` ~L13501), `chat.tsx`=**8157** (`export function Chat()` ~L466).
+> Ищи по ИМЕНИ функции, не по номеру строки. Мина #0 (owner-spoof/RCE/SSRF) — УЖЕ закрыта ✅ (sec-коммиты 1-6).
 > Авто-сгенерировано архитектурным аудитом (14 агентов). Карта ТЕКУЩЕГО кода — вход для strangler-рефактора.
-> Монолиты: `server.py` (14 729 строк, 541 функция, 47 API) + `taiga-web/src/components/chat.tsx` (~7 800 строк).
+> Монолиты: `server.py` (~15 125 строк) + `taiga-web/src/components/chat.tsx` (~8 157 строк).
 
 ## Карта (синтез)
 
@@ -10,7 +13,7 @@
 Taiga ("Тайга") is a multi-provider uncensored-chat product. It is effectively **two monoliths plus a ring of half-extracted satellite modules**:
 
 - **Backend monolith** — `mostik-ai/server.py`, ~14,729 lines, stdlib-only Python `ThreadingHTTPServer` (binds `127.0.0.1:8777`). One file holds the HTTP router, every `/api/*` handler, model routing, billing, storage, security, MCP, memory/RAG, media studios, routines, and the chat engine.
-- **Frontend monolith** — `taiga-web/components/chat.tsx`, ~7,800 lines, whose `Chat()` god-component spans lines 451–6977 (165–189 `useState`, 27–28 `useEffect`). It is the composition root that mounts ~50 panels and prop-drills all state. Its transport engine `lib/use-taiga-chat.ts` (~1,327 lines) is the one *clean* layer on this side.
+- **Frontend monolith** — `taiga-web/src/components/chat.tsx`, ~7,800 lines, whose `Chat()` god-component spans lines 451–6977 (165–189 `useState`, 27–28 `useEffect`). It is the composition root that mounts ~50 panels and prop-drills all state. Its transport engine `lib/use-taiga-chat.ts` (~1,327 lines) is the one *clean* layer on this side.
 
 ### Clean module decomposition the rebuild should target (backend)
 

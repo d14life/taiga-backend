@@ -48,7 +48,7 @@ uv tool install graphifyy && graphify install && /graphify .
 и честно помечает пробелы; Dream Cycle фоном ищет противоречия). MCP прямо в Claude Code.
 ```bash
 gbrain init --pglite
-gbrain import .                        # проиндексировать все 115 доков + дизайн
+gbrain import .                        # проиндексировать все 122 дока + дизайн
 claude mcp add gbrain -- gbrain serve  # память как MCP в сессии
 gbrain think "какой дизайн канон и почему?"   # ответ С ЦИТАТАМИ + пометки о пробелах
 ```
@@ -82,7 +82,6 @@ pip install 'raganything[all]'
 10. `docs/PARKED-FEATURES.md` — отложенные фичи (голос-режим, sandbox-файлы, skill-transform, MCP) — НЕ потерять
 11. `docs/MEMORY-SETUP.md` — статус стека памяти + NVIDIA-разблок эмбеддингов
 12. `docs/TEST-WORKFLOW.md` — A-to-Z поток: слой за слоем, авто-петля строй→тест→фикс→скрин→сверка, strangler-fig
-13. `docs/REFERENCE-REPOS.md` — ~95 внешних репо-источников по категориям
 
 ## ШАГ 2 — ГАРДРЕЙЛЫ «НЕ ПУТАТЬСЯ» (локнутые истины — НИКОГДА не нарушать)
 - **ДВА дизайна (см. docs/design/README.md):** НОВЫЙ (строить как) = `design-v3-current-shell-jun17.html`
@@ -103,9 +102,14 @@ pip install 'raganything[all]'
 - **Не ломать shell.html** (macOS-окна + convo-dock) — он зафиксирован.
 - **Стек:** фронт `taiga-web` (Next.js 16/React 19/Tailwind 4/@ai-sdk), бэк `server.py` (stdlib http.server, БЕЗ фреймворка).
 - **Данные:** `~/.mostik-ai/` (db/taiga.db SQLite). Бэк :8777, фронт :3000, маршрут `/app`.
-- **Security мины (перед публичным выкатом — обязательны):**
-  - #0 `resolve_caller()` — НЕ доверять полю `user` из тела (подделка owner → RCE).
-  - #1 RU-платёж не подключён → PaymentProvider (YooKassa/CloudPayments) + вебхук + идемпотентность.
+- **ТЕКУЩИЙ СКОУП + СТАТУС МИН (этот блок перевешивает старые доки):**
+  - СТАРТ = строить полное приложение A-to-Z, СЛОЙ ЗА СЛОЕМ (с оценкой+чисткой кода ШАГ 0 каждого слоя).
+    Это единственный старт. START-HERE «только Фаза B / чистая структура» — поглощено в ШАГ 0 слоёв.
+  - Мина #0 (resolve_caller / owner-spoof RCE / SSRF / анти-инъекция) — **УЖЕ СДЕЛАНА** ✅ (sec-коммиты
+    1-6, см. FEATURE-LEDGER ✅). Осталось только довынести в `authz.py`. НЕ переделывать — проверить и идти.
+  - Мина #1 (RU-платёж YooKassa/CloudPayments + вебхук + идемпотентность) + Фаза D (масштаб 10k:
+    ASGI/Postgres/pgvector/бэкапы) — **ГЕЙТ перед ПУБЛИЧНЫМ выкатом, можно в конце**, сейчас НЕ блокер
+    сборки (Damir отложил, см. START-HERE). Строим всё остальное, платёж/масштаб — позже.
 - **Импорт скилла НЕ исполняет код**; запуск гейтится owner + песочница + денилист.
 - **Планка:** без emoji (line/SVG иконки), без заглушек (`full-output-enforcement`), пруфы перед «готово».
 - **Скиллы:** каждую задачу через `pick-skills` → process→implementation→verify. Не строить с нуля если скилл есть.

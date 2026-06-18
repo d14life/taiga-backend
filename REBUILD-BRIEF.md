@@ -1,6 +1,12 @@
 # REBUILD-BRIEF.md — чистая пересборка Тайги (strangler-fig)
 
-> Это бриф для НОВОЙ чистой Claude-Code сессии. Читай вместе с: ARCHITECTURE-MAP.md, FEATURE-INVENTORY.md, CLAUDE.md.
+> ⚠️ СТАТУС-ПОПРАВКА (читай docs/MANIFEST.md — он перевешивает): (1) Мина #0 (resolve_caller/owner-spoof
+> RCE/SSRF/инъекции) — **УЖЕ СДЕЛАНА** ✅ (sec-коммиты 1-6), не переделывать, осталось довынести в authz.py.
+> (2) Мина #1 платёж + Фаза D масштаб — ОТЛОЖЕНЫ (гейт перед публичным выкатом, не сейчас).
+> (3) Номера строк ниже — со СТАРОГО снапшота; реально server.py=15125, chat.tsx=8157. Ищи по ИМЕНИ
+> (`def chat(self)`, `export function Chat()`, `def api_topup`), не по номеру строки.
+>
+> Это бриф для НОВОЙ чистой Claude-Code сессии. Читай вместе с: ARCHITECTURE-MAP.md, docs/design/FEATURE-LEDGER.md, CLAUDE.md.
 
 ## ⚠️ ДВЕ МИНЫ — РЕШИТЬ ДО ЛЮБОГО РЕФАКТОРА
 
@@ -65,7 +71,7 @@ chat.tsx (7.8k) → <MessageItem> + <Composer> + commandHandlers + <PanelHost> +
     - Extract _subchat_* first (self-contained), then chat_research (already a method), then unify council/compare member-selection + the duplicated BEAM fusion. Cannot fully land Brain until the chat() streaming loop is decomposed (Brain is welded via nonlocals). No tests, SSE+billing-sensitive, and Damir's 'never show raw errors' rule means any silent-fallback regression degrades UX invisibly. Build behind a characterization test of the SSE event stream.
 - [ ] **13. chat_handler.py — decompose chat() into request-parse, system-assembly, model-resolution, reusable stream-tool-loop with holdback, Brain orchestration, fallback policy, billing**  — из `server.py L13158-14119 (the ~965-line god-function)` · сложность=hard · риск=high
     - THE gravity well — extracted LAST because everything else must be lifted around it. 6-7 levels of nesting, ~10 model-variable reassignments, billing correctness on hand-tuned byte offsets, no-double-emit-on-fallback only enforced by len(buf)+len(hold) slicing, Brain nonlocals reassigned 800 lines apart. Decompose ONLY behind characterization tests of the full SSE event stream + billing because it is load-bearing money/protocol code with byte-identical-output guarantees.
-- [ ] **14. Frontend chat.tsx decomposition: extract <MessageItem> + <Composer> + commandHandlers registry + <PanelHost>; then introduce a chat store/context and migrate the 165-189 state atoms slice-by-slice (useChatSessions, useSendPipeline w/ selectFundedChain helper, useComposerState, useFeatureFlags, useMemoryProfile, useAgentsSkills, useChatVoice). Keep use-taiga-chat.ts as the transport engine.**  — из `taiga-web/components/chat.tsx (Chat() L451-6977) + lib/use-taiga-chat.ts` · сложность=hard · риск=high
+- [ ] **14. Frontend chat.tsx decomposition: extract <MessageItem> + <Composer> + commandHandlers registry + <PanelHost>; then introduce a chat store/context and migrate the 165-189 state atoms slice-by-slice (useChatSessions, useSendPipeline w/ selectFundedChain helper, useComposerState, useFeatureFlags, useMemoryProfile, useAgentsSkills, useChatVoice). Keep use-taiga-chat.ts as the transport engine.**  — из `taiga-web/src/components/chat.tsx (Chat() L451-6977) + lib/use-taiga-chat.ts` · сложность=hard · риск=high
     - Mirror of the backend god-function. DO FIRST the mechanical wins (extract MessageItem from the 365-line messages.map IIFE = biggest perf+readability win; extract Composer; convert the 358-line executeCommand switch to a handler map; introduce one createPersistedStore to kill the 35x load/save + 18x CustomEvent boilerplate AND the 117 inline localStorage ops). THEN introduce a store and migrate state in slices. 189 interdependent atoms + suppressed exhaustive-deps + submitRef stale-closure workaround mean naive splitting introduces stale-state bugs. CRITICAL SECURITY: move the JS-skill runner (full-skills.ts:171 new Function in host origin) into the sandboxed iframe used by artifacts to close the RCE-in-origin hole. AGENTS.md warns Next.js is a modified fork — verify dynamic() before touching settings-panel lazy-load hub.
 
 ## Definition of Done (на каждый вынос)
