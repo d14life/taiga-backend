@@ -1,0 +1,78 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Тайга — liquid-glass-color иконки (наш набор)</title>
+<style>
+  :root{color-scheme:dark}
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 700px at 50% -10%,#1a1c24,#0a0b0e 60%);color:#e8ebf2;
+       font:15px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Inter,system-ui,sans-serif;
+       min-height:100vh;padding:40px 28px 64px}
+  h1{font-size:21px;font-weight:650;letter-spacing:-.01em;margin:0 0 4px}
+  .sub{color:#9aa3b2;font-size:13.5px;margin:0 0 30px;max-width:680px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:22px 14px;max-width:980px}
+  .cell{display:flex;flex-direction:column;align-items:center;gap:10px}
+  .ic{width:66px;height:66px;filter:drop-shadow(0 10px 18px rgba(0,0,0,.45)) drop-shadow(0 2px 4px rgba(0,0,0,.3))}
+  .lbl{font-size:12.5px;color:#aeb6c4}
+  .sec{grid-column:1/-1;font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:#6b7280;margin:18px 2px 0}
+  .foot{color:#6b7280;font-size:12px;margin-top:34px;max-width:680px}
+  .swatch{display:flex;gap:18px;align-items:center;margin:26px 0 2px;flex-wrap:wrap}
+  .swatch .ic{width:52px;height:52px}
+</style></head><body>
+
+<h1>Liquid-glass-color — наш набор</h1>
+<p class="sub">Оригинальные SVG-иконки в стиле «жидкое стекло + цвет»: градиент-squircle, стеклянный блик сверху, тонкий световой кант, чистый белый глиф. Полностью наши, прод-безопасные, без атрибуции. Тот же вид, что ты прислал.</p>
+
+<svg width="0" height="0" style="position:absolute"><defs>
+  <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#fff" stop-opacity=".46"/>
+    <stop offset=".42" stop-color="#fff" stop-opacity=".07"/>
+    <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+  </linearGradient>
+  <radialGradient id="spec" cx="32%" cy="24%" r="40%">
+    <stop offset="0" stop-color="#fff" stop-opacity=".5"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+  </radialGradient>
+  <linearGradient id="c-chat" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5b8def"/><stop offset="1" stop-color="#7c5cfc"/></linearGradient>
+  <linearGradient id="c-design" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#b65cff"/><stop offset="1" stop-color="#ff5ca8"/></linearGradient>
+  <linearGradient id="c-studio" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff6fa3"/><stop offset="1" stop-color="#ff9d4d"/></linearGradient>
+  <linearGradient id="c-agent" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#25d0a6"/><stop offset="1" stop-color="#1f9bff"/></linearGradient>
+  <linearGradient id="c-code" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3ac9ff"/><stop offset="1" stop-color="#5b6cff"/></linearGradient>
+  <linearGradient id="c-ultra" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#a24bff"/><stop offset=".5" stop-color="#ff5ca8"/><stop offset="1" stop-color="#ffc24b"/></linearGradient>
+  <linearGradient id="c-mem" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6c7bff"/><stop offset="1" stop-color="#a24bff"/></linearGradient>
+  <linearGradient id="c-search" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3fc8ff"/><stop offset="1" stop-color="#2b7cff"/></linearGradient>
+  <linearGradient id="c-img" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff6b6b"/><stop offset="1" stop-color="#ffb13c"/></linearGradient>
+  <linearGradient id="c-term" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22c58a"/><stop offset="1" stop-color="#159e72"/></linearGradient>
+  <linearGradient id="c-music" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#c45cff"/><stop offset="1" stop-color="#7c5cfc"/></linearGradient>
+  <linearGradient id="c-mcp" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4ed0c0"/><stop offset="1" stop-color="#3a9be0"/></linearGradient>
+</defs></svg>
+
+<div class="grid">
+  <div class="sec">6 столов</div>
+
+  <div class="cell"><svg class="ic" viewBox="0 0 64 64"><rect x="4" y="3" width="56" height="56" rx="17" fill="url(#c-chat)"/><rect x="4" y="3" width="56" height="56" rx="17" fill="url(#gloss)"/><ellipse cx="24" cy="18" rx="16" ry="9" fill="url(#spec)"/><rect x="4.7" y="3.7" width="54.6" height="54.6" rx="16.3" fill="none" stroke="#fff" stroke-opacity=".4" stroke-width=".9"/><g fill="none" stroke="#fff" stroke-width="3.1" stroke-linecap="round" stroke-linejoin="round"><path d="M20 26.5c0-3.6 3-6.5 6.7-6.5h10.6c3.7 0 6.7 2.9 6.7 6.5v5c0 3.6-3 6.5-6.7 6.5H30l-7 5.4v-5.4c-1.9-1.2-3-3.2-3-5.5z"/></g></svg><div class="lbl">Чат</div></div>
+
+  <div class="cell"><svg class="ic" viewBox="0 0 64 64"><rect x="4" y="3" width="56" height="56" rx="17" fill="url(#c-design)"/><rect x="4" y="3" width="56" height="56" rx="17" fill="url(#gloss)"/><ellipse cx="24" cy="18" rx="16" ry="9" fill="url(#spec)"/><rect x="4.7" y="3.7" width="54.6" height="54.6" rx="16.3" fill="none" stroke="#fff" stroke-opacity=".4" stroke-width=".9"/><g fill="none" stroke="#fff" stroke-width="3.1" stroke-linecap="round" stroke-linejoin="round"><path d="M22 42l-1.5 4.5L25 45l16-16-3-3-16 16z"/><path d="M37 26l3 3"/></g></svg><div class="lbl">Дизайн</div></div>
+
+  <div class="cell"><svg class="ic" viewBox="0 0 64 64"><rect x="4" y="3" width="56" height="56" rx="17" fill="url(#c-studio)"/><rect x="4" y="3" width="56" height="56" rx="17" fill="url(#gloss)"/><ellipse cx="24" cy="18" rx="16" ry="9" fill="url(#spec)"/><rect x="4.7" y="3.7" width="54.6" height="54.6" rx="16.3" fill="none" stroke="#fff" stroke-opacity=".4" stroke-width=".9"/><path fill="#fff" d="M32 17l3.3 8.7 8.7 3.3-8.7 3.3L32 44l-3.3-8.7L20 32l8.7-3.3z"/><circle cx="43" cy="20" r="2.4" fill="#fff"/></svg><div class="lbl">Студия</div></div>
+
+  <div class="cell"><svg class="ic" viewBox="0 0 64 64"><rect x="4" y="3" width="56" height="56" rx="17" fill="url(#c-agent)"/><rect x="4" y="3" width="56" height="56" rx="17" fill="url(#gloss)"/><ellipse cx="24" cy="18" rx="16" ry="9" fill="url(#spec)"/><rect x="4.7" y="3.7" width="54.6" height="54.6" rx="16.3" fill="none" stroke="#fff" stroke-opacity=".4" stroke-width=".9"/><g fill="none" stroke="#fff" stroke-width="3.1" stroke-linecap="round" stroke-linejoin="round"><rect x="21" y="26" width="22" height="16" rx="4.5"/><path d="M32 20v6"/></g><circle cx="27.5" cy="34" r="2.1" fill="#fff"/><circle cx="36.5" cy="34" r="2.1" fill="#fff"/></svg><div class="lbl">Агент</div></div>
+
+  <div class="cell"><svg class="ic" viewBox="0 0 64 64"><rect x="4" y="3" width="56" height="56" rx="17" fill="url(#c-code)"/><rect x="4" y="3" width="56" height="56" rx="17" fill="url(#gloss)"/><ellipse cx="24" cy="18" rx="16" ry="9" fill="url(#spec)"/><rect x="4.7" y="3.7" width="54.6" height="54.6" rx="16.3" fill="none" stroke="#fff" stroke-opacity=".4" stroke-width=".9"/><g fill="none" stroke="#fff" stroke-width="3.1" stroke-linecap="round" stroke-linejoin="round"><path d="M26 25l-7 7 7 7"/><path d="M38 25l7 7-7 7"/><path d="M34.5 22l-5 20"/></g></svg><div class="lbl">Код</div></div>
+
+  <div class="cell"><svg class="ic" viewBox="0 0 64 64"><rect x="4" y="3" width="56" height="56" rx="17" fill="url(#c-ultra)"/><rect x="4" y="3" width="56" height="56" rx="17" fill="url(#gloss)"/><ellipse cx="24" cy="18" rx="16" ry="9" fill="url(#spec)"/><rect x="4.7" y="3.7" width="54.6" height="54.6" rx="16.3" fill="none" stroke="#fff" stroke-opacity=".4" stroke-width=".9"/><path fill="#fff" d="M30 16l3 9.5 9.5 3-9.5 3L30 41l-3-9.5L17.5 28.5 27 25.5z"/><circle cx="43.5" cy="42" r="3.1" fill="#fff"/></svg><div class="lbl">Ultra</div></div>
+
+  <div class="sec">примеры фич</div>
+
+  <div class="cell"><svg class="ic" viewBox="0 0 64 64"><rect x="4" y="3" width="56" height="56" rx="17" fill="url(#c-mem)"/><rect x="4" y="3" width="56" height="56" rx="17" fill="url(#gloss)"/><ellipse cx="24" cy="18" rx="16" ry="9" fill="url(#spec)"/><rect x="4.7" y="3.7" width="54.6" height="54.6" rx="16.3" fill="none" stroke="#fff" stroke-opacity=".4" stroke-width=".9"/><g fill="none" stroke="#fff" stroke-width="3.1" stroke-linecap="round" stroke-linejoin="round"><path d="M32 19a5 5 0 0 0-5 5 5 5 0 0 0-1.5 9 5 5 0 0 0 10 0 5 5 0 0 0-1-9 5 5 0 0 0-2.5-5z"/></g></svg><div class="lbl">Память</div></div>
+
+  <div class="cell"><svg class="ic" viewBox="0 0 64 64"><rect x="4" y="3" width="56" height="56" rx="17" fill="url(#c-search)"/><rect x="4" y="3" width="56" height="56" rx="17" fill="url(#gloss)"/><ellipse cx="24" cy="18" rx="16" ry="9" fill="url(#spec)"/><rect x="4.7" y="3.7" width="54.6" height="54.6" rx="16.3" fill="none" stroke="#fff" stroke-opacity=".4" stroke-width=".9"/><g fill="none" stroke="#fff" stroke-width="3.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="29.5" cy="29.5" r="8"/><path d="M36 36l7 7"/></g></svg><div class="lbl">Поиск</div></div>
+
+  <div class="cell"><svg class="ic" viewBox="0 0 64 64"><rect x="4" y="3" width="56" height="56" rx="17" fill="url(#c-img)"/><rect x="4" y="3" width="56" height="56" rx="17" fill="url(#gloss)"/><ellipse cx="24" cy="18" rx="16" ry="9" fill="url(#spec)"/><rect x="4.7" y="3.7" width="54.6" height="54.6" rx="16.3" fill="none" stroke="#fff" stroke-opacity=".4" stroke-width=".9"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="19" y="21" width="26" height="22" rx="4"/><path d="M19 37l7-6 5 4 6-7 8 9"/></g><circle cx="27" cy="28" r="2.3" fill="#fff"/></svg><div class="lbl">Картинки</div></div>
+
+  <div class="cell"><svg class="ic" viewBox="0 0 64 64"><rect x="4" y="3" width="56" height="56" rx="17" fill="url(#c-term)"/><rect x="4" y="3" width="56" height="56" rx="17" fill="url(#gloss)"/><ellipse cx="24" cy="18" rx="16" ry="9" fill="url(#spec)"/><rect x="4.7" y="3.7" width="54.6" height="54.6" rx="16.3" fill="none" stroke="#fff" stroke-opacity=".4" stroke-width=".9"/><g fill="none" stroke="#fff" stroke-width="3.1" stroke-linecap="round" stroke-linejoin="round"><path d="M22 26l6 6-6 6"/><path d="M33 40h9"/></g></svg><div class="lbl">Терминал</div></div>
+
+  <div class="cell"><svg class="ic" viewBox="0 0 64 64"><rect x="4" y="3" width="56" height="56" rx="17" fill="url(#c-music)"/><rect x="4" y="3" width="56" height="56" rx="17" fill="url(#gloss)"/><ellipse cx="24" cy="18" rx="16" ry="9" fill="url(#spec)"/><rect x="4.7" y="3.7" width="54.6" height="54.6" rx="16.3" fill="none" stroke="#fff" stroke-opacity=".4" stroke-width=".9"/><g fill="none" stroke="#fff" stroke-width="3.1" stroke-linecap="round" stroke-linejoin="round"><path d="M27 41V23l14-3v15"/></g><circle cx="24" cy="41" r="3.4" fill="#fff"/><circle cx="38" cy="38" r="3.4" fill="#fff"/></svg><div class="lbl">Музыка</div></div>
+
+  <div class="cell"><svg class="ic" viewBox="0 0 64 64"><rect x="4" y="3" width="56" height="56" rx="17" fill="url(#c-mcp)"/><rect x="4" y="3" width="56" height="56" rx="17" fill="url(#gloss)"/><ellipse cx="24" cy="18" rx="16" ry="9" fill="url(#spec)"/><rect x="4.7" y="3.7" width="54.6" height="54.6" rx="16.3" fill="none" stroke="#fff" stroke-opacity=".4" stroke-width=".9"/><g fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M24 24v6m16-6v6M24 30c0 6 4 8 8 8s8-2 8-8"/><path d="M32 38v6"/></g><circle cx="24" cy="22" r="2.4" fill="#fff"/><circle cx="40" cy="22" r="2.4" fill="#fff"/></svg><div class="lbl">MCP</div></div>
+</div>
+
+<p class="foot">Это наш оригинальный набор в стиле liquid-glass-color (артворк icons8 не используется). Один шаблон: градиент-squircle + общий блик #gloss + спекуляр #spec + кант + белый глиф. Под весь продукт строим так же — иконка под каждую из 95 фич. Если позже лицензируешь icons8 — подмена по id тривиальна.</p>
+</body></html>
