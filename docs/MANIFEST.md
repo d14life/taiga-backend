@@ -78,9 +78,11 @@ pip install 'raganything[all]'
 3. `docs/PROJECT-BIBLE.md` — блюпринт: решения, история (число фич = 139 по FEATURE-LEDGER, не 182)
 4. `docs/LOVABLE-HANDOFF.md` — build-spec: API + SSE + токены + 8 фаз
 5. `REBUILD-BRIEF.md` — план + 2 мины
-6. `docs/design/FEATURE-LEDGER.md` — ГЛАВНЫЙ реестр фич (17 июн, 139 фич, 13 агентов по 100ч-чату,
-   [GAP]=восстановленные) + `GAPS-RECOVERED.md` + `FEATURE-INVENTORY.md` (184 буллета) +
-   `server.py:self_manifest()` (живой список App Store). Поведение байт-в-байт. НЕ терять ни одной.
+6. **БUILD-ТРЕКЕР (авторитетный, 186 no-miss):** `docs/design/COMPLETE-FEATURE-MAP.md` (186 фич,
+   build-state, ~88-90 к постройке) + `docs/design/MASTER-FEATURE-INVENTORY.md` (сверка 196) +
+   `docs/design/AUDIT-95-CHECKLIST.md` (встроенный экран «Аудит-95» живого аппа, спека на фичу).
+   Приоритеты сборки — `docs/BUILD-PRIORITIES.md`. (FEATURE-LEDGER 139 = историческая база, НЕ счётчик.)
+   Поведение байт-в-байт. НЕ терять ни одной.
 7. `ARCHITECTURE-MAP.md` + `BACKEND-API.md` — что где + эндпоинты
 8. `docs/design/README.md` — какой дизайн канон, какие доноры
 9. `docs/REFERENCE-REPOS.md` — все внешние репо (память, ponytail, opendesign) + как использовать
