@@ -1,7 +1,11 @@
 # Тайга ИИ — Complete Handoff for Lovable Build
 
-> This document contains EVERYTHING needed to build the Тайга ИИ (Taiga AI) web app from scratch in Lovable.
-> Pull this repo, read this file, and build phase by phase.
+> ⚠️ СТАТУС-ПОПРАВКА (docs/MANIFEST.md + DECISIONS-LOG перевешивают): структура НЕ «8 фаз/Modes»,
+> а **5 СТОЛОВ + Ultra** (Разговор/Студия/Дизайн/Агенты/Код + Ultra). Моды = «УСИЛЕНИЕ ответа», не
+> отдельные экраны. Источник истины = эталон-репо стола (REFERENCE-REPOS.md) + design-v3. Порядок
+> сборки — docs/TEST-WORKFLOW.md. API-контракт/SSE/токены ниже актуальны; читай как справочник по API.
+>
+> This document contains the API/SSE/design-token reference. Build order is the 5-стол plan, not the old phases.
 
 ## What is Тайга ИИ?
 
