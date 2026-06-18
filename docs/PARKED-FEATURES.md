@@ -23,7 +23,16 @@ Damir прямо просил ПОМНИТЬ это и не забыть. Эти
 9. **Точные Figma macOS-глиф-иконки** (Monterey/Big Sur/Ventura) — когда снят лимит Figma-MCP;
    пока free icons8-глифы. Damir 2026-06-17: «finish the website, Figma later».
 
+## Текущее vs будущее (числа честно)
+- **ТЕКУЩИЙ набор = 139 фич** (docs/design/FEATURE-LEDGER.md) — это ПОЛНЫЙ обеспыленный список.
+  «688 сырых» = сырые УПОМИНАНИЯ в 100ч-чате (повторы одних фич), 148 уникальных, 139 в реестре.
+  Не «потеряли 549» — это дубли. 139 = всё, что Damir просил, без повторов.
+- **dev-mode / полная кастомизация — УЖЕ построена** (dev-mode config, brain-config, 8-примитивные
+  кастом-функции live), она в текущих 139, НЕ в будущем. (LEDGER кат.2 «redesignable-by-demand».)
+- **БУДУЩИЕ фичи (добавлять ПОТОМ)** — этот файл. Любая новая идея сверх 139 → сюда, чтоб не терять.
+  Damir может дописывать. Восстановленные пробелы — docs/design/GAPS-RECOVERED.md.
+
 ## Правило
-Сначала — ОЖИВИТЬ основной продукт на 100% (182 фичи по FEATURE-INVENTORY) + пройти тест.
+Сначала — ОЖИВИТЬ основной продукт на 100% (139 фич по FEATURE-LEDGER) + пройти тест.
 ПОТОМ — эта волна. Не строить парковочные раньше, если Damir не скажет.
-Связано: docs/MANIFEST.md, FEATURE-INVENTORY.md, SKILL-TRANSFORMER-PLAN.md, FUTURE-TASKS.md.
+Связано: docs/MANIFEST.md, docs/design/FEATURE-LEDGER.md, SKILL-TRANSFORMER-PLAN.md, FUTURE-TASKS.md.

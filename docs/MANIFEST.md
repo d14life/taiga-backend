@@ -87,11 +87,18 @@ pip install 'raganything[all]'
 ## ШАГ 2 — ГАРДРЕЙЛЫ «НЕ ПУТАТЬСЯ» (локнутые истины — НИКОГДА не нарушать)
 - **Дизайн-канон = `design-v3-current-shell-jun17.html`.** НЕ пересобирать с v0/v1/v2 — они ДОНОРЫ.
   Из доноров тянуть ТОЛЬКО когда Damir прямо укажет. usertest-jun15/ = старый вид, тоже донор.
-- **ДОК УЖЕ ЕСТЬ в v3 — НЕ пересобирать.** macOS-док (`#dock` в shell.html, строки 238-326 + JS
-  1360-1401): закреплённые апп-иконки + разделитель + открытые окна, видим по умолчанию (строка 1389
-  `dock.classList.add('show')`), джигл-удаление, drag-to-pin. Дефолт-иконки: Картинки/Команда/Терминал/
-  Модель. НЕ видно при открытии `shell.html` как file:// — рендерится ТОЛЬКО в запущенном аппе
-  (фронт :3000 + бэк :8777). Задача — не строить, а проверить что он жив в рабочем аппе и допилить вид.
+- **ДОК есть в v3 — НЕ строить с нуля, но ОЦЕНИТЬ и почистить.** macOS-док (`#dock` в shell.html,
+  строки 238-326 + JS 1360-1401): закреплённые апп-иконки + разделитель + открытые окна, видим по
+  умолчанию (1389 `dock.classList.add('show')`), джигл-удаление, drag-to-pin, дефолт Картинки/Команда/
+  Терминал/Модель. НЕ видно в file:// — рендерится ТОЛЬКО в запущенном аппе (:3000 + :8777). Действие:
+  запустить апп → проверить что док реально жив и работает → оценить код → почистить/допилить если надо.
+
+- **ОЦЕНКА КОДА (не слепо сохранять, не слепо переписывать).** Существующий код частично чищен, но
+  НЕ до конца: `chat.tsx`=8157 строк (декомпозировать), `server.py`=15125 строк (монолит), заглушки в
+  ~10 компонентах (skill-builder 18, agent-automations 6, custom-instructions 4). На КАЖДОМ слое:
+  сначала ОЦЕНИТЬ существующий код области (работает? чисто? нет stub/мёртвого/раздутого?) → сохранить
+  рабочее поведение байт-в-байт → почистить+декомпозировать где надо (strangler-fig) → проверить. Это
+  относится и к доку, и ко всему коду. Ничего «как есть» без оценки.
 - **Не ломать shell.html** (macOS-окна + convo-dock) — он зафиксирован.
 - **Стек:** фронт `taiga-web` (Next.js 16/React 19/Tailwind 4/@ai-sdk), бэк `server.py` (stdlib http.server, БЕЗ фреймворка).
 - **Данные:** `~/.mostik-ai/` (db/taiga.db SQLite). Бэк :8777, фронт :3000, маршрут `/app`.
@@ -111,7 +118,7 @@ pip install 'raganything[all]'
 |---------|------|--------|
 | Ядро чата + режимы (Мозг/Совет/Сравнение/Ресёрч/Дебаты) | PROJECT-BIBLE, FEATURE-INVENTORY | screenshots/10-14, flows brain/council/debate |
 | Студия (картинки/видео/музыка/озвучка/3D) | LOVABLE-HANDOFF (API), BACKEND-API | screenshots/13, flows image-gen/video-gen/music-gen/tts-gen |
-| Агенты / Agent-OS | ROADMAP-AGENT-OS, AGENTIC-OS-UNBLOCK | screenshots/30-39, flows agent-multitool/orchestrate/team-run |
+| Агенты / Agent-OS | ROADMAP-AGENT-OS, ARCH-DECISIONS | screenshots/30-39, flows agent-multitool/orchestrate/team-run |
 | Навыки + код + MCP + skill-transform | SKILL-TRANSFORMER-PLAN, DEV-TOOLING | screenshots/45,50-52, flows mcp-connect-use/skill-import-run |
 | Память / RAG / grounding | PROJECT-BIBLE (память) | screenshots/46, usertest panels 05-memory/06-smartrag/07-knowledge |
 | Голос / непрерывный разговор | LOVABLE-HANDOFF (audio API) | usertest panels 20-voice, flows tts-gen |
@@ -119,7 +126,7 @@ pip install 'raganything[all]'
 | Биллинг / кошелёк | REBUILD-BRIEF (мина #1) | usertest panels 11-jobs, screenshots billing |
 | Аккаунты / безопасность | REBUILD-BRIEF (мина #0) | settings screenshots |
 | Автоматизация / крон | scheduler в ARCHITECTURE-MAP | usertest panels 24-loops |
-| Настройки / кастомизация | GRAND-PLAN-CUSTOMIZABILITY | screenshots/44, usertest 17-settings/18-hooks |
+| Настройки / кастомизация (dev-mode уже live) | GRAND-PLAN-V3, PARAMETERS-AUDIT | screenshots/44, usertest 17-settings/18-hooks |
 
 Дизайн: `docs/design/` (v0-v3 + usertest-jun15 + 32 панели + 16 feature-flows + 2 PDF + 48 скринов + галереи).
 Юзер-кейсы для теста: `USER-CASES.md` + `docs/qa/`.
