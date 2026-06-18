@@ -11,7 +11,17 @@
 - Обновлять: `graphify update .` (AST, без LLM). Доки/PDF семантически — нужен LLM-бэкенд
   (`--backend gemini|openai|deepseek|ollama`, или OPENAI_BASE_URL на NVIDIA-совместимый).
 
-## gbrain — УСТАНОВЛЕН + ДОКИ ИМПОРТИРОВАНЫ, поиск ждёт эмбеддинги
+## gbrain — РАБОТАЕТ (NVIDIA-эмбеддинги, поиск с цитатами) ✓
+- Установлен (gbrain 0.42.51), init с **bge-m3/1024** на NVIDIA, 122 страницы импортировано+заэмбеждено.
+- **Векторный поиск работает из РФ:** `gbrain search "..."` → семантика со счётом + цитата файла. Проверено.
+- MCP в Claude Code зарегистрирован С NVIDIA-env (OPENAI_BASE_URL+ключ) — агент зовёт поиск памяти.
+- Модели: embedding `openai:baai/bge-m3`, chat/expansion `openai:meta/llama-3.3-70b-instruct` (всё через NVIDIA).
+- CLI-использование: `export OPENAI_BASE_URL=https://integrate.api.nvidia.com/v1` +
+  `export OPENAI_API_KEY=$(grep ^NVIDIA_API_KEY= ~/.reel-intelligence.env|cut -d= -f2-)` затем `gbrain search/import`.
+- `gbrain think` (prose-синтез) хочет ANTHROPIC_API_KEY — НЕ нужен: в Claude Code синтезирует сам агент
+  по результатам `gbrain search`. Ретрив (главное) работает.
+
+### (старое) gbrain без эмбеддингов — заменено выше
 - Установлен: `bun install -g github:garrytan/gbrain` (gbrain 0.42.51). Bun поставлен через brew.
 - Инициализирован локально: `gbrain init --pglite --no-embedding` (PGLite, без облака).
 - **Импортировано: 118 доков, 575 чанков.**
