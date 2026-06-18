@@ -37,6 +37,14 @@
 - Нужен OpenAI-совместимый LLM + vision. РАЗБЛОК тот же: NVIDIA endpoint (bge-m3 эмбеддинги +
   llama-vision для картинок) — работает из РФ.
 
+## В АППЕ (работаем в приложении, не терминале) — что авто-доступно агенту
+- **gbrain** → MCP (`claude mcp add gbrain --env … -- gbrain serve`), агент зовёт память сам.
+- **graphify** → MCP (`graphify-mcp <graph.json>`, нужен extra `graphifyy[mcp]`) + скилл `/graphify`. ✓ Connected.
+- **ponytail** → плагин аппа: `/plugin marketplace add DietrichGebert/ponytail` (разово) → `/ponytail full`.
+- **rag-anything** → НЕ app-native (Python-CLI). gbrain закрывает семантику доков в аппе; rag — для тяжёлого PDF через CLI.
+- MCP project-scoped в `.claude.json` — в НОВОЙ папке после клона поднять заново (см. NEW-SESSION-START ШАГ 0).
+- Health-check gbrain иногда «Failed» (медленный буст PGLite) — в реальной сессии подключается.
+
 ## ИТОГ для новой сессии
 - **graphify готов прямо сейчас** — спрашивай граф кода вместо грепа.
 - **gbrain**: доки уже внутри; включи NVIDIA-эмбеддинги одной командой → заработает синтез с цитатами.
