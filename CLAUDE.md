@@ -1,8 +1,13 @@
 # CLAUDE.md — правила для чистой сессии пересборки Тайги
 
 Ты в проекте **Тайга ИИ** — приватный uncensored мульти-модельный AI для RU/CIS (чат + агенты + студия + дизайн).
-Твоя задача: **чистая пересборка через strangler-fig** (см. REBUILD-BRIEF.md). Сначала прочитай 4 файла:
-`REBUILD-BRIEF.md` (план+мины) · `ARCHITECTURE-MAP.md` (что где) · `FEATURE-INVENTORY.md` (не потерять фичи) · этот файл (правила).
+
+> ⚡ ГЛАВНАЯ ТОЧКА ВХОДА: **сначала прочитай `docs/MANIFEST.md` ПОЛНОСТЬЮ** — это мастер-рельсы
+> (законы, память-MCP, источники фич = docs/design/FEATURE-LEDGER.md 139 фич, 2 дизайна, поток сборки,
+> оценка кода). MANIFEST новее и главнее этого файла. Потом docs/NEW-SESSION-START.md и доки ниже.
+
+Твоя задача: **чистая пересборка через strangler-fig** (см. REBUILD-BRIEF.md). Доп-чтение:
+`REBUILD-BRIEF.md` (план+мины) · `ARCHITECTURE-MAP.md` (что где) · `docs/design/FEATURE-LEDGER.md` (139 фич, главный реестр) · этот файл (правила).
 
 ## Стек и пути
 - Бэк: `server.py` (stdlib http.server, БЕЗ фреймворка), `orchestrator.py`, `skill_caps.py`, `skills_run.py`, `scheduler.py`.

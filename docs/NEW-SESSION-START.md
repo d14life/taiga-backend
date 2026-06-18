@@ -93,13 +93,13 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>.
 
 ## 2. ГЛАВНЫЕ ДОКИ
 - `START-HERE.md` — точка входа
-- `docs/PROJECT-BIBLE.md` — блюпринт: 182 фичи, все решения, история чатов (сжато), reference-репо
+- `docs/PROJECT-BIBLE.md` — блюпринт: все решения, история чатов (сжато), reference-репо (фичи = 139, см. FEATURE-LEDGER)
 - `docs/LOVABLE-HANDOFF.md` — build-spec: весь API-контракт, SSE-формат, дизайн-токены, 8 фаз
 - `REBUILD-BRIEF.md` — план strangler-fig + 2 мины (RCE, RU-платёж)
 - `ARCHITECTURE-MAP.md` (59 KB), `BACKEND-API.md` — что где, все эндпоинты
 - `TAIGA-REQUIREMENTS.md`, `GRAND-PLAN-V3.md` — требования и план
 
-## 3. ФИЧИ (не потерять — 182 шт)
+## 3. ФИЧИ (не потерять — 139 сверенных по FEATURE-LEDGER; INVENTORY=~184 буллета)
 - `FEATURE-INVENTORY.md` — чек-лист, поведение байт-в-байт
 - `GAP-AUDIT.md` (94 KB) — гэпы и недоделки
 

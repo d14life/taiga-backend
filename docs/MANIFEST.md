@@ -70,7 +70,7 @@ pip install 'raganything[all]'
 ## ШАГ 1 — СТРОГИЙ ПОРЯДОК ЧТЕНИЯ (не пропускать)
 1. `docs/MANIFEST.md` (этот файл) — рельсы + гардрейлы
 2. `docs/NEW-SESSION-START.md` — точка входа + готовый промпт
-3. `docs/PROJECT-BIBLE.md` — блюпринт: 182 фичи, решения, история
+3. `docs/PROJECT-BIBLE.md` — блюпринт: решения, история (число фич = 139 по FEATURE-LEDGER, не 182)
 4. `docs/LOVABLE-HANDOFF.md` — build-spec: API + SSE + токены + 8 фаз
 5. `REBUILD-BRIEF.md` — план + 2 мины
 6. `docs/design/FEATURE-LEDGER.md` — ГЛАВНЫЙ реестр фич (17 июн, 139 фич, 13 агентов по 100ч-чату,
