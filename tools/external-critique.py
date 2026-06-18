@@ -49,11 +49,11 @@ def serper_web(query, key, n=6):
                          for o in r.get("organic", [])[:n]) or "(веб пусто)"
     except Exception as e: return f"(serper-ошибка: {e})"
 
-def nvidia(messages, key, model, max_tokens=1200, temp=0.3):
+def nvidia(messages, key, model, max_tokens=1200, temp=0.3, timeout=75):
     body = {"model": model, "messages": messages, "temperature": temp, "max_tokens": max_tokens}
     req = urllib.request.Request(NV_URL, data=json.dumps(body).encode(),
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
-    r = json.load(urllib.request.urlopen(req, timeout=120))
+    r = json.load(urllib.request.urlopen(req, timeout=timeout))
     return r["choices"][0]["message"]["content"]
 
 CRITIC_SYS = ("Ты независимый внешний критик-инженер в совете моделей. Найди слабые места, риски, "
@@ -126,7 +126,7 @@ def main():
              "вердикт: что ВСЕ согласны (высокая уверенность) · где расходятся (флаг, осторожно) · "
              "итоговый список правок по приоритету · финал ИДЕАЛЬНО / НУЖНЫ ПРАВКИ."},
             {"role": "user", "content": f"Тема: {args.prompt}\n\nМНЕНИЯ СОВЕТА:\n{joined}"}],
-            nv, "meta/llama-3.3-70b-instruct", max_tokens=1000)
+            nv, "meta/llama-3.1-8b-instruct", max_tokens=1000, timeout=60)
         print(f"\n\n##### СИНТЕЗ (chairman) #####\n{synth}")
     except Exception as e:
         print(f"\n(синтез недоступен: {e})")
