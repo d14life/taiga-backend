@@ -50,12 +50,12 @@ INVENTORY + self_manifest + видимое на 32 панелях + 90 flow + 48
 REBUILD-BRIEF.md, docs/design/FEATURE-LEDGER.md (ГЛАВНЫЙ реестр фич, 17 июн) + GAPS-RECOVERED.md +
 FEATURE-INVENTORY.md, ARCHITECTURE-MAP.md, BACKEND-API.md, TAIGA-REQUIREMENTS.md, GRAND-PLAN-V3.md, USER-CASES.md.
 
-ДИЗАЙН — всё в docs/design/ (см. docs/design/README.md):
-- design-v3-current-shell-jun17.html — ТЕКУЩИЙ КАНОН (macOS-окна). Строим по нему, НЕ ломать.
-- usertest-jun15/ — старый дизайн с юзер-теста (32 экрана + PDF). Доминантный донор, Damir любит этот вид.
-- design-v2/v1/v0 — доноры. design-icons-liquid-glass.html + assets/ (лого). Скрины: docs/screenshots/ (48), docs/qa/.
-- ДОК: в v3 добавить macOS-док снизу — ряд иконок-приложений (запуск разделов/окон), как было раньше.
-  Переносить из доноров ТОЛЬКО когда я укажу.
+ДИЗАЙН — ДВА главных (docs/design/README.md):
+- НОВЫЙ (строить как) = design-v3-current-shell-jun17.html — канон, macOS-окна + ДОК (уже есть:
+  оценить+почистить, не пересобирать; рендерится в запущенном аппе).
+- СТАРЫЙ (референс, брать фичи) = usertest-jun15/ (32 экрана + 2 PDF + 90 flow). Damir любит этот вид.
+- v0/v1/v2 → docs/design/_donors/ (игнор, кроме как укажу). Иконки: design-icons-liquid-glass.html +
+  assets/ (лого). Скрины-эталоны: docs/screenshots/ (48), docs/qa/. Переносить из старого ТОЛЬКО когда укажу.
 
 СКИЛЛЫ: прогоняй КАЖДУЮ задачу через мета-скилл pick-skills (discover→route→chain
 process→implementation→verify). Дизайн = brainstorming + high-end-visual-design + impeccable +
