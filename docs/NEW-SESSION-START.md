@@ -14,10 +14,15 @@ ultracode
 Проект Тайга ИИ — приватный uncensored мульти-модельный AI-чат для RU/CIS. Модель Opus 4.8,
 dynamic workflows, до 20 агентов, бесконечная петля до идеала. Без emoji, без заглушек, всё прод-грейд.
 
-ШАГ 0: прочитай docs/MANIFEST.md (рельсы анти-путаница) и построй граф знаний:
-  uv tool install graphifyy && graphify install && /graphify .
-  Дальше вместо грепанья — спрашивай граф: /graphify query "...". Это чтобы НЕ путаться.
-Потом читай docs/NEW-SESSION-START.md — карта всего.
+ЗАКОНЫ (приоритет над всем): 1) НЕ пропускать ни одной просьбы Damir — каждую в задачу.
+2) НЕ гадать — не уверен → спроси память (gbrain/graphify/RAG), нет ответа → спроси Damir.
+3) Каждый факт с цитатой источника, иначе честно «не знаю». 4) Пруфы перед «готово».
+
+ШАГ 0: прочитай docs/MANIFEST.md (законы + рельсы) и подними ТРОЙНУЮ память:
+  A. graphify (граф кода): uv tool install graphifyy && graphify install && /graphify .
+  B. gbrain (память+цитаты, анти-галлюцинация): gbrain init --pglite && gbrain import . && claude mcp add gbrain -- gbrain serve
+  C. rag-anything (RAG по PDF/докам/скринам): pip install 'raganything[all]'
+  Дальше вместо грепанья/догадок — спрашивай память. Потом читай docs/NEW-SESSION-START.md.
 
 ЦЕЛЬ: построить рабочее веб-приложение A-to-Z по всему наработанному (100+ часов), НЕ с нуля.
 Ничего из 182 фич не потерять.
