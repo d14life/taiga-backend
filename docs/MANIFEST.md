@@ -73,6 +73,7 @@ pip install 'raganything[all]'
 
 ## ШАГ 1 — СТРОГИЙ ПОРЯДОК ЧТЕНИЯ (не пропускать)
 1. `docs/MANIFEST.md` (этот файл) — рельсы + гардрейлы
+1a. `docs/WHATS-NEW-SYSTEM.md` — шпаргалка по всем новым механизмам + команды (быстрый обзор)
 2. `docs/NEW-SESSION-START.md` — точка входа + готовый промпт
 3. `docs/PROJECT-BIBLE.md` — блюпринт: решения, история (число фич = 139 по FEATURE-LEDGER, не 182)
 4. `docs/LOVABLE-HANDOFF.md` — build-spec: API + SSE + токены + 8 фаз
