@@ -79,6 +79,8 @@ pip install 'raganything[all]'
 9. `docs/REFERENCE-REPOS.md` — все внешние репо (память, ponytail, opendesign) + как использовать
 10. `docs/PARKED-FEATURES.md` — отложенные фичи (голос-режим, sandbox-файлы, skill-transform, MCP) — НЕ потерять
 11. `docs/MEMORY-SETUP.md` — статус стека памяти + NVIDIA-разблок эмбеддингов
+12. `docs/TEST-WORKFLOW.md` — A-to-Z поток: слой за слоем, авто-петля строй→тест→фикс→скрин→сверка, strangler-fig
+13. `docs/REFERENCE-REPOS.md` — ~95 внешних репо-источников по категориям
 
 ## ШАГ 2 — ГАРДРЕЙЛЫ «НЕ ПУТАТЬСЯ» (локнутые истины — НИКОГДА не нарушать)
 - **Дизайн-канон = `design-v3-current-shell-jun17.html`.** НЕ пересобирать с v0/v1/v2 — они ДОНОРЫ.
