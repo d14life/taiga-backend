@@ -82,6 +82,7 @@ pip install 'raganything[all]'
 9. `docs/REFERENCE-REPOS.md` — все внешние репо (память, ponytail, opendesign) + как использовать
 10. `docs/PARKED-FEATURES.md` — отложенные фичи (голос-режим, sandbox-файлы, skill-transform, MCP) — НЕ потерять
 11. `docs/MEMORY-SETUP.md` — статус стека памяти + NVIDIA-разблок эмбеддингов
+11b. `docs/EFFICIENT-MEMORY.md` — токен-экономное использование памяти+скиллов (лестница дешевизны)
 12. `docs/TEST-WORKFLOW.md` — A-to-Z поток: слой за слоем, авто-петля строй→тест→фикс→скрин→сверка, strangler-fig
 
 ## ШАГ 2 — ГАРДРЕЙЛЫ «НЕ ПУТАТЬСЯ» (локнутые истины — НИКОГДА не нарушать)
