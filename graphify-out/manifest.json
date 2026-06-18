@@ -1,0 +1,3787 @@
+{
+  "ad_gen.py": {
+    "mtime": 1781485052.2428184,
+    "ast_hash": "c6a682792e34264c00a25871162b5e6e",
+    "semantic_hash": ""
+  },
+  "adapter_example.py": {
+    "mtime": 1781071782.7577024,
+    "ast_hash": "7a90d76f7e62957f5736284c840f8763",
+    "semantic_hash": ""
+  },
+  "agent_os.py": {
+    "mtime": 1781381032.757508,
+    "ast_hash": "8c0a25bb362ce2f951d678c4c92ecc14",
+    "semantic_hash": ""
+  },
+  "auth.py": {
+    "mtime": 1781272305.0586522,
+    "ast_hash": "3837c576f051a78be555ec5b14635e78",
+    "semantic_hash": ""
+  },
+  "auto_update.py": {
+    "mtime": 1781396968.6530194,
+    "ast_hash": "89b76f3ec33d9e69dd0ef970f208a9e1",
+    "semantic_hash": ""
+  },
+  "browser_hub.py": {
+    "mtime": 1781644609.4822712,
+    "ast_hash": "1095dad16bcdd68a8adc2a1e6dfb5431",
+    "semantic_hash": ""
+  },
+  "censor_test.py": {
+    "mtime": 1781075978.445433,
+    "ast_hash": "3502365862489017ac526d42d7dac94b",
+    "semantic_hash": ""
+  },
+  "debate.py": {
+    "mtime": 1781465426.1744096,
+    "ast_hash": "2d9ce8103db33dce97df2a59ae9bf054",
+    "semantic_hash": ""
+  },
+  "gen_logos.py": {
+    "mtime": 1781221490.0109673,
+    "ast_hash": "f3d7ab3e51ed9b7da340a5f63ef1e31d",
+    "semantic_hash": ""
+  },
+  "guard.py": {
+    "mtime": 1781272467.268312,
+    "ast_hash": "63e9e41fa4d1f6d700346aafa075a19b",
+    "semantic_hash": ""
+  },
+  "hello.py": {
+    "mtime": 1781402921.6596417,
+    "ast_hash": "5ce93e72c654a09d52c113a353511617",
+    "semantic_hash": ""
+  },
+  "mem_to_sandbox.py": {
+    "mtime": 1781395226.8914495,
+    "ast_hash": "a955d54233261e6043f853807050ced0",
+    "semantic_hash": ""
+  },
+  "mlx_compressor.py": {
+    "mtime": 1781397461.187318,
+    "ast_hash": "9b27b16bd69cfc95b51f5b35923b38ea",
+    "semantic_hash": ""
+  },
+  "model_test.py": {
+    "mtime": 1781071169.8720925,
+    "ast_hash": "eecb8c79acde0e82b3c90cb1b95229aa",
+    "semantic_hash": ""
+  },
+  "model_test_results.json": {
+    "mtime": 1781071500.5396454,
+    "ast_hash": "0fe583d4bce745a4cd4d51f5ddf11225",
+    "semantic_hash": ""
+  },
+  "night-smoke.sh": {
+    "mtime": 1781235317.3997648,
+    "ast_hash": "dc466c5f4ac2f7a41b054f0d91d70c6d",
+    "semantic_hash": ""
+  },
+  "orchestrator.py": {
+    "mtime": 1781522708.6605816,
+    "ast_hash": "97dd7721122c7fd6dd362f32366ec30c",
+    "semantic_hash": ""
+  },
+  "scheduler.py": {
+    "mtime": 1781343082.4118328,
+    "ast_hash": "35b46a6e5fa9fb1a21bbf56586ac7fd1",
+    "semantic_hash": ""
+  },
+  "screen_copilot.py": {
+    "mtime": 1781381032.75796,
+    "ast_hash": "2c0e44ab6fb340dc02ef352cf63939d3",
+    "semantic_hash": ""
+  },
+  "server.py": {
+    "mtime": 1781644515.3661618,
+    "ast_hash": "15aa7455e221b95b6ebbb012c06ce38f",
+    "semantic_hash": ""
+  },
+  "skill_caps.py": {
+    "mtime": 1781408692.3898773,
+    "ast_hash": "244f10262e4feec1d4fe9fc3bb87855e",
+    "semantic_hash": ""
+  },
+  "skill_pyodide_packages.json": {
+    "mtime": 1781408544.267647,
+    "ast_hash": "97ddec4be1434f9c815c678e3759609d",
+    "semantic_hash": ""
+  },
+  "skills-lock.json": {
+    "mtime": 1781195071.9856112,
+    "ast_hash": "a8322931f677b6444d913d6efe1a8587",
+    "semantic_hash": ""
+  },
+  "skills_lib.py": {
+    "mtime": 1781269921.6838398,
+    "ast_hash": "d3db863cfb91745a378ccee1cfe4d49e",
+    "semantic_hash": ""
+  },
+  "skills_run.py": {
+    "mtime": 1781644449.1643078,
+    "ast_hash": "5571f7a7885af7b6bace3319fa5bb508",
+    "semantic_hash": ""
+  },
+  "structured_adapter.py": {
+    "mtime": 1781072029.545563,
+    "ast_hash": "388b147813528331aa02b216e711c9ef",
+    "semantic_hash": ""
+  },
+  "taiga-bridge/bridge.py": {
+    "mtime": 1781409372.2699268,
+    "ast_hash": "b6f1c35e278b289eafcfa4d58732c48f",
+    "semantic_hash": ""
+  },
+  "taiga-bridge/sample-skill/scripts/deps_demo.py": {
+    "mtime": 1781409200.0677526,
+    "ast_hash": "0e4917127d3886d8e87fe04ae79be6e5",
+    "semantic_hash": ""
+  },
+  "taiga-bridge/sample-skill/scripts/transform.py": {
+    "mtime": 1781409186.6806898,
+    "ast_hash": "4f53b8f52012d0655b49e02bd6725cd5",
+    "semantic_hash": ""
+  },
+  "taiga-extension/background.js": {
+    "mtime": 1781381032.7622306,
+    "ast_hash": "828de940ec7c2bf930ac178cbfff697e",
+    "semantic_hash": ""
+  },
+  "taiga-extension/content.js": {
+    "mtime": 1781381032.7623842,
+    "ast_hash": "0069fa1f29778a4bb88879cef4c42725",
+    "semantic_hash": ""
+  },
+  "taiga-extension/manifest.json": {
+    "mtime": 1781381032.7637308,
+    "ast_hash": "fb71ee252e2c478acf02bcfad63654ae",
+    "semantic_hash": ""
+  },
+  "taiga-extension/sidepanel.js": {
+    "mtime": 1781381032.7642844,
+    "ast_hash": "bdb69d121fa3f5df9361ae265a2da459",
+    "semantic_hash": ""
+  },
+  "taiga-web/.claude/launch.json": {
+    "mtime": 1781216498.183598,
+    "ast_hash": "1c942cf3ef430781286b39384508e151",
+    "semantic_hash": ""
+  },
+  "taiga-web/cobrowse-extension/background.js": {
+    "mtime": 1781277125.10027,
+    "ast_hash": "f9082ffc46ea8393f2c8a6e0283f41b0",
+    "semantic_hash": ""
+  },
+  "taiga-web/cobrowse-extension/content.js": {
+    "mtime": 1781277092.7855635,
+    "ast_hash": "9c4e686ca49960737a0aeba3200cd34a",
+    "semantic_hash": ""
+  },
+  "taiga-web/cobrowse-extension/manifest.json": {
+    "mtime": 1781277060.472172,
+    "ast_hash": "f21dec12ba78cba8121baf8502890e99",
+    "semantic_hash": ""
+  },
+  "taiga-web/cobrowse-extension/popup.js": {
+    "mtime": 1781277149.3148627,
+    "ast_hash": "57e0cc2234f3b7855dd61ccdbecb7ddd",
+    "semantic_hash": ""
+  },
+  "taiga-web/components.json": {
+    "mtime": 1781196582.0548737,
+    "ast_hash": "fc5c9e9a7b93eeb2f7b4e1ce0959e4a6",
+    "semantic_hash": ""
+  },
+  "taiga-web/eslint.config.mjs": {
+    "mtime": 1781196491.9578362,
+    "ast_hash": "dfa1f5f6a7037bf39dc510f30b180002",
+    "semantic_hash": ""
+  },
+  "taiga-web/next-env.d.ts": {
+    "mtime": 1781382282.4411077,
+    "ast_hash": "d0f8375ae1199dc7acd3977fc33b78b8",
+    "semantic_hash": ""
+  },
+  "taiga-web/next.config.ts": {
+    "mtime": 1781196491.9579856,
+    "ast_hash": "9b77af189a21a7a64e4bd7a426f64176",
+    "semantic_hash": ""
+  },
+  "taiga-web/package.json": {
+    "mtime": 1781343519.0048504,
+    "ast_hash": "455ab8b8d65fd38b5575725c6de1502e",
+    "semantic_hash": ""
+  },
+  "taiga-web/postcss.config.mjs": {
+    "mtime": 1781196491.9580429,
+    "ast_hash": "239f3ebf717465dc636818a1a619398d",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/icons/glass/_build_glass.py": {
+    "mtime": 1781664990.1222541,
+    "ast_hash": "7e1762586abab431caecdf0a44baadf0",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/icons/glass/glass-icons.js": {
+    "mtime": 1781695878.6506877,
+    "ast_hash": "64bb82e5250e5dace4892a0de918df7b",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/icons/glass/svg_data.py": {
+    "mtime": 1781666129.9341397,
+    "ast_hash": "c7df6a46db9363537de17dafa80acc94",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/shell/account.js": {
+    "mtime": 1781665347.4438894,
+    "ast_hash": "37b47145cd41ba54dd45a65c67e939d6",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/shell/agent.js": {
+    "mtime": 1781691740.1026087,
+    "ast_hash": "a5d6f7d2d4bc41b72d9e59058215aa1e",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/shell/api.js": {
+    "mtime": 1781664302.2515879,
+    "ast_hash": "e442d60f2b5333074ae351bb76256570",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/shell/automations.js": {
+    "mtime": 1781665494.0455623,
+    "ast_hash": "f9866fdff7935b3bfad0ebd159d5ff5d",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/shell/chats.js": {
+    "mtime": 1781669847.1423166,
+    "ast_hash": "599b2cb893a1d51ee11ebdd729a0d83f",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/shell/code.js": {
+    "mtime": 1781669869.2064743,
+    "ast_hash": "2046f2b0764fb5c1f859116ddc3beffa",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/shell/design.js": {
+    "mtime": 1781669892.3932445,
+    "ast_hash": "0ffcad0021322687255623e9c077f561",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/shell/desktop.js": {
+    "mtime": 1781665424.6925893,
+    "ast_hash": "5afab3db384dcc22540fcd0dacad23a5",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/shell/memory.js": {
+    "mtime": 1781664763.6880903,
+    "ast_hash": "c456a35e1c69d42773570582ec13c424",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/shell/modes.js": {
+    "mtime": 1781664801.388128,
+    "ast_hash": "b463ad39c9f34e5caba4776460834da7",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/shell/store.js": {
+    "mtime": 1781665518.940663,
+    "ast_hash": "0398a2f8b8b2377853909ddb26e5a91c",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/shell/studio.js": {
+    "mtime": 1781670243.8280032,
+    "ast_hash": "b1ccd7231514198ab6ae823ce33b77bf",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/shell/tools.js": {
+    "mtime": 1781664929.217188,
+    "ast_hash": "93a0f27c475d81ce3900f543371f889d",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/shell/ultra.js": {
+    "mtime": 1781690649.8368678,
+    "ast_hash": "6a81b6b1218a8ed55bc94d8b8d351487",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/ad_gen/route.ts": {
+    "mtime": 1781385584.108285,
+    "ast_hash": "e84df62dc1e16f1f2ac85248add1b35c",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/agent_answer/route.ts": {
+    "mtime": 1781530521.182259,
+    "ast_hash": "cc4c6f59f0f041468b1e63375f44eb6f",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/agent_fanout/route.ts": {
+    "mtime": 1781385584.1053927,
+    "ast_hash": "86ffc33b259fbc10c56d9fe3983e8bc8",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/agent_os/route.ts": {
+    "mtime": 1781385584.1015449,
+    "ast_hash": "a23619fe504e2d7b5543ba81e1694487",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/agent_permit/route.ts": {
+    "mtime": 1781339940.7706428,
+    "ast_hash": "380b98307253e8c5f71facee9eb6310b",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/apikeys/route.ts": {
+    "mtime": 1781223614.4976876,
+    "ast_hash": "d0391f745e938576acc575e3b9592d06",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/audio/route.ts": {
+    "mtime": 1781225509.9055305,
+    "ast_hash": "7026046e6da583115ce9924433e56d4e",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/balance/route.ts": {
+    "mtime": 1781206126.8619103,
+    "ast_hash": "c9d1cb1045bcf422da64e78e23706fd8",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/balances/route.ts": {
+    "mtime": 1781297620.478817,
+    "ast_hash": "8195fca833be3cc43f28773cf80cc225",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/billing/route.ts": {
+    "mtime": 1781530521.1878498,
+    "ast_hash": "3eca3bace57e364eadd2c38802683404",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/browser/route.ts": {
+    "mtime": 1781236157.8061118,
+    "ast_hash": "46a38ca000699106e5ddc55056e0ac13",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/browser_act/route.ts": {
+    "mtime": 1781385584.1201172,
+    "ast_hash": "f2fab80ecf10ff6ddd8b62e078f805fc",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/build_function/route.ts": {
+    "mtime": 1781287194.2412524,
+    "ast_hash": "55b1852c3b3c11ebb38c4300929a5b07",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/catalog/refresh/route.ts": {
+    "mtime": 1781301527.3739054,
+    "ast_hash": "a9bb6664805ee03350cc1ac92a9bdc79",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/catalog/route.ts": {
+    "mtime": 1781301075.4504366,
+    "ast_hash": "8990f25b3b0de373d6b7c5d4006160b3",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/catalog_refresh/route.ts": {
+    "mtime": 1781530521.2319763,
+    "ast_hash": "b136f62c5ddeac3d477121745edb1ab4",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/chat/route.ts": {
+    "mtime": 1781412462.8789604,
+    "ast_hash": "d2fa163288d4f5d3f61765d0c15edde3",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/cinema-export/route.ts": {
+    "mtime": 1781234877.9938667,
+    "ast_hash": "ba2953568d7290e085d9bd665934895f",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/compact/route.ts": {
+    "mtime": 1781227824.7380672,
+    "ast_hash": "13d2817e498f68e3f0af428d6d26f31a",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/cookies/route.ts": {
+    "mtime": 1781274344.9254344,
+    "ast_hash": "7d6ad02aeadb3c99e195cce253fc9778",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/debate/route.ts": {
+    "mtime": 1781530521.2283747,
+    "ast_hash": "15ff6625934d0846801b1e3d3a9c8ddd",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/design-system-from-ref/route.ts": {
+    "mtime": 1781530521.1967738,
+    "ast_hash": "86dde54b98ac82095fecb03310678839",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/design-system/route.ts": {
+    "mtime": 1781530521.1925604,
+    "ast_hash": "1ccbf7f27bd868ddf663e363bebff12b",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/export_memory/route.ts": {
+    "mtime": 1781530521.2006886,
+    "ast_hash": "b418faf71f0ece5edae2f49a88b9e957",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/extract/route.ts": {
+    "mtime": 1781223822.1235995,
+    "ast_hash": "08138a448cc61479b5d726c0ab56f962",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/extract_style/route.ts": {
+    "mtime": 1781284431.3098366,
+    "ast_hash": "3667edf093c8d4905cb4c65915808590",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/files/route.ts": {
+    "mtime": 1781391894.8946693,
+    "ast_hash": "550480d654b32741d38c8e8c42dc2a33",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/followups/route.ts": {
+    "mtime": 1781530521.2056875,
+    "ast_hash": "d5414549e01929509d635ae68499b46b",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/free-tts/route.ts": {
+    "mtime": 1781280737.3392923,
+    "ast_hash": "135a22f850a1cfa24e5aecfb4d4ef457",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/identity/route.ts": {
+    "mtime": 1781338713.4078834,
+    "ast_hash": "87e4ed385ce2c15876a2f23afc845f89",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/image-tool/route.ts": {
+    "mtime": 1781233615.8816967,
+    "ast_hash": "cd25bf8ffbaab4c544242e4afbdd3159",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/image/route.ts": {
+    "mtime": 1781229329.5458627,
+    "ast_hash": "8b47526251e579db2ad89be9aa5e3c9e",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/image_intent/route.ts": {
+    "mtime": 1781291654.7160156,
+    "ast_hash": "d5bd13e04a5278bfecbcd8607019573d",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/import_skill_repo/route.ts": {
+    "mtime": 1781299212.8236182,
+    "ast_hash": "7db49d4c4a3a020abec3e4954757e7d4",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/improve/route.ts": {
+    "mtime": 1781307166.623317,
+    "ast_hash": "6ddcddd477f1411524567c659126d187",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/init/route.ts": {
+    "mtime": 1781264567.4985747,
+    "ast_hash": "c226f2abd1dfb9d4dd7c848ff230d802",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/install_agent/route.ts": {
+    "mtime": 1781288615.1941874,
+    "ast_hash": "eb78adcf1475aa37630525617d04ef8f",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/install_skill/route.ts": {
+    "mtime": 1781291701.6077793,
+    "ast_hash": "d7820d7f1c09b0aa0d299ba40e789664",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/jobs/route.ts": {
+    "mtime": 1781274338.9530528,
+    "ast_hash": "b7ad2e17b2b74b0cf8e3a94250b8a1f2",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/mcp/route.ts": {
+    "mtime": 1781268013.6367655,
+    "ast_hash": "0e923f29aa695f54acc5ada521801ffb",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/mem_extract/route.ts": {
+    "mtime": 1781213042.6867049,
+    "ast_hash": "7416e29e27a340183178c4048a956127",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/music-models/route.ts": {
+    "mtime": 1781277071.6089015,
+    "ast_hash": "1e99c54aca937bccccdc479648219a17",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/music/route.ts": {
+    "mtime": 1781277057.599294,
+    "ast_hash": "b8d238d61fa4e5f1a9158ff8638cb8f4",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/orchestrate/route.ts": {
+    "mtime": 1781274367.9553392,
+    "ast_hash": "21ea284c43abfb2649e8d2a0dcbc7586",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/providers/route.ts": {
+    "mtime": 1781350845.8796136,
+    "ast_hash": "bb1017ca1e09bbe2b118da12bf1993cb",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/rag_delete/route.ts": {
+    "mtime": 1781274350.1667485,
+    "ast_hash": "ef42b054ca11060b224a4be927a43758",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/rag_ingest/route.ts": {
+    "mtime": 1781232542.0303028,
+    "ast_hash": "b2d226859a0a0446df79ebbe505247cb",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/rag_query/route.ts": {
+    "mtime": 1781232536.4749687,
+    "ast_hash": "5881625f8848577c432e100b939c78f1",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/recall/route.ts": {
+    "mtime": 1781307169.943124,
+    "ast_hash": "b0e555c8bf189e2b5f43e5f83238a416",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/routines/route.ts": {
+    "mtime": 1781530521.2101364,
+    "ast_hash": "b71b5600470e0064322623a06017db5d",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/sandbox/route.ts": {
+    "mtime": 1781201227.838782,
+    "ast_hash": "ebaa6bda51fdcc26eb0ed6b53337d8a0",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/screen_copilot/route.ts": {
+    "mtime": 1781385584.111667,
+    "ast_hash": "9a21fff6f94cb897f8439b0eeabc2b94",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/search_chats/route.ts": {
+    "mtime": 1781307172.6114318,
+    "ast_hash": "574fb33f273908a151b30b71924495ee",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/selftest/route.ts": {
+    "mtime": 1781343808.570506,
+    "ast_hash": "6649f2aedbc3be7b5c65e47ecb2667f0",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/settings/route.ts": {
+    "mtime": 1781530521.213785,
+    "ast_hash": "8f1c0399ebfeb4a04c288ccee3d1de98",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/skill_folder/route.ts": {
+    "mtime": 1781385584.0974877,
+    "ast_hash": "0ad6510566475af5c363b9b909c206fa",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/skills/route.ts": {
+    "mtime": 1781297608.569235,
+    "ast_hash": "649a0a1626ef1e3adf50adc08d535486",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/sources/route.ts": {
+    "mtime": 1781530521.2173398,
+    "ast_hash": "c2fd81ae6901760b30e52bb52ff8ab1e",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/supersearch/route.ts": {
+    "mtime": 1781235307.2577474,
+    "ast_hash": "d76192db19cd327cd5a4dd7cb9d38e1f",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/td3-models/route.ts": {
+    "mtime": 1781277077.662875,
+    "ast_hash": "07a85d8eb213a0544dca74bd6a4dac79",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/td3/route.ts": {
+    "mtime": 1781277065.5925653,
+    "ast_hash": "67fd34e502da6245edbfe50b881d9d91",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/terminal/route.ts": {
+    "mtime": 1781388497.0882204,
+    "ast_hash": "c0db2457db392dc70cea72c90a55db75",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/uncensor/route.ts": {
+    "mtime": 1781279650.109444,
+    "ast_hash": "42c470697be2ad5c742e7cce21280c19",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/userconfig/route.ts": {
+    "mtime": 1781287194.268742,
+    "ast_hash": "00b55921f16aa5494258bf38448e2fe1",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/userfiles/route.ts": {
+    "mtime": 1781530521.2210562,
+    "ast_hash": "9bdba01be973d5fc247536c11e339593",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/userkeys/route.ts": {
+    "mtime": 1781286257.9654539,
+    "ast_hash": "807f44b9297eea2f6417d740e8e7406f",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/verify/route.ts": {
+    "mtime": 1781530521.2246008,
+    "ast_hash": "41fd7d425842b14858a92dc5d57a7b0d",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/video-models/route.ts": {
+    "mtime": 1781224048.4221203,
+    "ast_hash": "6103177d01cd4725fb985085e9069098",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/video/route.ts": {
+    "mtime": 1781224060.3023913,
+    "ast_hash": "567c3cff0f5d7146214cb95a1295ff39",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/video_rag/route.ts": {
+    "mtime": 1781385584.1168873,
+    "ast_hash": "9fc966d33d5a0b539f80954d5820d22c",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/api/workflow/route.ts": {
+    "mtime": 1781339122.3033435,
+    "ast_hash": "1f7ceea0de97b512a9f5a0148e278d12",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/app/page.tsx": {
+    "mtime": 1781672725.5754278,
+    "ast_hash": "0c0ed5c3fb753f96d73c9f50349fa4a7",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/dev/model-control/page.tsx": {
+    "mtime": 1781650696.2386558,
+    "ast_hash": "1ab52d30964487acc338d72d6ae5fe0b",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/landing/page.tsx": {
+    "mtime": 1781211551.7912652,
+    "ast_hash": "bda5f1576ca629ff310f4c727a7b17df",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/layout.tsx": {
+    "mtime": 1781208908.1199358,
+    "ast_hash": "208297766d10de2ebed8d99cdb30042a",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/app/page.tsx": {
+    "mtime": 1781212101.8875384,
+    "ast_hash": "ce8489710110b53d6885c720a945f74f",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/ad-generator.tsx": {
+    "mtime": 1781655819.6636481,
+    "ast_hash": "37aa59cda4a391a86350dd0b1e2f45bf",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/agent-automations.tsx": {
+    "mtime": 1781656549.73854,
+    "ast_hash": "b253ce30b5cdc34f5b648be46cd052a8",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/agent-builder.tsx": {
+    "mtime": 1781656294.9932377,
+    "ast_hash": "f28d2fd586a0479e2f0e9cc790db4779",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/agent-dock.tsx": {
+    "mtime": 1781653194.0692298,
+    "ast_hash": "f238236a4e6c9c761166d3ae9334fe68",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/agent-gallery.tsx": {
+    "mtime": 1781653101.6939855,
+    "ast_hash": "1f16b0882b344c1c62e9b08ee3a5c71d",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/agent-modes-guide.tsx": {
+    "mtime": 1781652074.4681501,
+    "ast_hash": "dbd22a86f285fda72e687ce706392545",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/agent-os-charts.tsx": {
+    "mtime": 1781655933.252274,
+    "ast_hash": "4a5623f404d10d3e44be71c44d8ca3ef",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/agent-os-overview.tsx": {
+    "mtime": 1781656389.9675634,
+    "ast_hash": "f66b74591bc87ca604ceb487a8e566f9",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/agent-os-panel.tsx": {
+    "mtime": 1781652179.0156312,
+    "ast_hash": "68bf13e3282b543814ad42d8524d535f",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/agent-question-card.tsx": {
+    "mtime": 1781653197.926625,
+    "ast_hash": "60a8a03139c7c8ebdd5ecff81a9ae5ff",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/agent-ralph-monitor.tsx": {
+    "mtime": 1781656330.5695777,
+    "ast_hash": "6dc4c1729eeada38e71ebd8791ec21d0",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/agent-runs-panel.tsx": {
+    "mtime": 1781656549.7384408,
+    "ast_hash": "73e825f83fd9c19355664ba42987e2b5",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/agent-tasks.tsx": {
+    "mtime": 1781656549.7384357,
+    "ast_hash": "55e580b30c88d415d703c0d24aacb9b4",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/agents-marketplace.tsx": {
+    "mtime": 1781656002.018304,
+    "ast_hash": "e3db4ff6e57bde4b4e46ccc96654e578",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/agents-panel.tsx": {
+    "mtime": 1781656007.3620503,
+    "ast_hash": "fac607e4288a6543d6f72b7dc3304c18",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/artifacts/anim-view.tsx": {
+    "mtime": 1781292976.5327728,
+    "ast_hash": "d3850ce64664662bc401ffc8e7e37e53",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/artifacts/chart-view.tsx": {
+    "mtime": 1781655990.485495,
+    "ast_hash": "6222ca6509718bfea5277445795b410d",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/artifacts/mermaid-view.tsx": {
+    "mtime": 1781656012.143651,
+    "ast_hash": "3d4c8228e92d237230f577d4b6a9e873",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/artifacts/sheet-view.tsx": {
+    "mtime": 1781545948.46576,
+    "ast_hash": "7163ce2c2ccee2f28a9e7c052836a263",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/artifacts/three-view.tsx": {
+    "mtime": 1781545948.4659405,
+    "ast_hash": "d6ef748fdfb5b32115cfef42860fbde4",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/artifacts/web-preview.tsx": {
+    "mtime": 1781545948.4661279,
+    "ast_hash": "0dfba6436d128d219618cb115493bde9",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/aurora.tsx": {
+    "mtime": 1781200551.211339,
+    "ast_hash": "4ff4b2d10dcc4b38db05cff3fd975407",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/bookmarks-panel.tsx": {
+    "mtime": 1781652245.5031457,
+    "ast_hash": "a6e2d371d6a7c458b68a2e41d4d9abef",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/browser-copilot-bar.tsx": {
+    "mtime": 1781653909.2231143,
+    "ast_hash": "4d7b5de41f40b00433ac1233cb09c6d6",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/browser-panel.tsx": {
+    "mtime": 1781656018.0534174,
+    "ast_hash": "11022a54edf54806fca95302b3266ba0",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/canvas-panel.tsx": {
+    "mtime": 1781652683.1900911,
+    "ast_hash": "f90eabe6e6d5ceeeff232d619e66da71",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/capability-tour.tsx": {
+    "mtime": 1781656022.8570354,
+    "ast_hash": "96954a910431ae0bc8ead10c28a1f6cd",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/character-gallery.tsx": {
+    "mtime": 1781650580.321676,
+    "ast_hash": "4e3b032ca34f796e4885000cd7f77962",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/chat-memory-panel.tsx": {
+    "mtime": 1781652738.79561,
+    "ast_hash": "c0dbfa92350fba84eb771c7825098888",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/chat.tsx": {
+    "mtime": 1781662092.2702029,
+    "ast_hash": "007febf996fbaae3a6b1e87bcda85257",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/cinema-studio.tsx": {
+    "mtime": 1781654097.7050264,
+    "ast_hash": "0b5c0b0341a2521615bdedaaba9e6343",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/command-builder.tsx": {
+    "mtime": 1781656027.0836127,
+    "ast_hash": "61ed6231cb9bbcdc8daf447d724efab9",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/command-palette.tsx": {
+    "mtime": 1781656040.4412308,
+    "ast_hash": "1e7fbc9d88f83436f36a30731f672e20",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/confidence-badge.tsx": {
+    "mtime": 1781649730.9861648,
+    "ast_hash": "c8e98ca6731d9a0baa3b3a3f74afff0f",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/cookies-panel.tsx": {
+    "mtime": 1781656776.5715356,
+    "ast_hash": "163299e78d7a413573eaffc5a72916a6",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/css-var-resizer.tsx": {
+    "mtime": 1781609740.9371336,
+    "ast_hash": "c861fd1a64bc1ee9f18942e69538119b",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/custom-bar.tsx": {
+    "mtime": 1781653146.3188474,
+    "ast_hash": "27299c13399924ecbad10dfa721cfebd",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/custom-instructions.tsx": {
+    "mtime": 1781656783.0756743,
+    "ast_hash": "be12c483ed64aa5d78c87a08528f9938",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/debate-panel.tsx": {
+    "mtime": 1781656785.4313872,
+    "ast_hash": "80889373a2193156b2bd47f0b7831c40",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/decision-card.tsx": {
+    "mtime": 1781653170.7896492,
+    "ast_hash": "336d8acbeeffb4f1c281ae67a55ebc52",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/depth-slider.tsx": {
+    "mtime": 1781653468.0290852,
+    "ast_hash": "6efcdd0506cb4ce02087f79d8e71c21d",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/design-canvas-workspace.tsx": {
+    "mtime": 1781656787.782268,
+    "ast_hash": "3fe3c7c241452704b76a783442fc5a74",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/design-canvas.tsx": {
+    "mtime": 1781652744.1215043,
+    "ast_hash": "54c5f2d4604720becac19672c01b065b",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/design-studio.tsx": {
+    "mtime": 1781546414.7053528,
+    "ast_hash": "c20265ff9b7317e2d19f2a7f8e0b1282",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/design-system-studio.tsx": {
+    "mtime": 1781652807.8460798,
+    "ast_hash": "683626ccbb7542786d47ea6f3453fe08",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/design-templates.tsx": {
+    "mtime": 1781653893.2123282,
+    "ast_hash": "91121a87ab9968c45bb1e7234fb948d9",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/dev-mode-panel.tsx": {
+    "mtime": 1781656789.6558902,
+    "ast_hash": "9380c110267738fbe0b078a12bb04a57",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/diagnostics.tsx": {
+    "mtime": 1781656778.5241473,
+    "ast_hash": "d5e92bb288ce2b209dbad8c9739b04b2",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/dual-terminal.tsx": {
+    "mtime": 1781652657.714559,
+    "ast_hash": "72629e9fb33d03880b427758b89d1976",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/effort-selector.tsx": {
+    "mtime": 1781653416.756722,
+    "ast_hash": "942965840f2889a99bc3f395eb48a23c",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/error-boundary.tsx": {
+    "mtime": 1781656549.738525,
+    "ast_hash": "bbcbb79a29b3b57cc9292984be34a492",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/feature-catalog.tsx": {
+    "mtime": 1781656782.448678,
+    "ast_hash": "ef53ee00e4c20fdaea390d242d09fc61",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/feature-visibility.tsx": {
+    "mtime": 1781653160.9728124,
+    "ast_hash": "2c4bbee482b602ceb5d718720300facc",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/floating-window.tsx": {
+    "mtime": 1781653444.4023166,
+    "ast_hash": "b81ec3ac5b3c2653e8e427339dd10c46",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/followup-chips.tsx": {
+    "mtime": 1781653416.1560047,
+    "ast_hash": "b85263b4c83e88644ce360401b10bd0c",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/full-skills-panel.tsx": {
+    "mtime": 1781653941.3911147,
+    "ast_hash": "dc11311640b5a102109759e3399796e4",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/func-config-popover.tsx": {
+    "mtime": 1781653234.0802255,
+    "ast_hash": "ff66f32b7b4e3586cb02ce9a363d9eba",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/function-bar.tsx": {
+    "mtime": 1781537737.7294436,
+    "ast_hash": "a1ceca88c47e149a4d2f05ead432bfd8",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/function-builder.tsx": {
+    "mtime": 1781656823.7610354,
+    "ast_hash": "efc92231f5b08692941239050b38c886",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/functions-panel.tsx": {
+    "mtime": 1781656788.7120662,
+    "ast_hash": "5d89570adc4c0542394ffe02939af54a",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/futuristic-ultra.tsx": {
+    "mtime": 1781656939.586321,
+    "ast_hash": "96c2a0d1509f03ff9c8248be2b863171",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/glass-filter.tsx": {
+    "mtime": 1781202214.9251647,
+    "ast_hash": "3bdd5c1be5f8de293a1163b3f8e0dd06",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/hooks-panel.tsx": {
+    "mtime": 1781652260.8562334,
+    "ast_hash": "77cafbdbfbc94948eda302b96435211a",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/icons/liquid-icon.tsx": {
+    "mtime": 1781655781.7197626,
+    "ast_hash": "0af9c0beea2e30fca6b20cefeeb29a77",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/icons/liquid-tile.tsx": {
+    "mtime": 1781649337.0410125,
+    "ast_hash": "0ce9d34450a085f73995bfb28a213fee",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/image-studio.tsx": {
+    "mtime": 1781656058.8258812,
+    "ast_hash": "a1a35d4c99554fa71ed883189ed3bbe3",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/jobs-panel.tsx": {
+    "mtime": 1781656793.1778212,
+    "ast_hash": "2aa9b3eeb25cb1e80fb747fd58b42e3e",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/knowledge-panel.tsx": {
+    "mtime": 1781656794.8788803,
+    "ast_hash": "79f25c3c1f30680827bef13e8ca101dc",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/landing.tsx": {
+    "mtime": 1781545948.477908,
+    "ast_hash": "fca34217874c491ca9fbeca718fe6d32",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/loop-evals.tsx": {
+    "mtime": 1781656784.9479852,
+    "ast_hash": "073231c5e47d163f11237c82e6521c29",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/loop-gallery.tsx": {
+    "mtime": 1781656789.764369,
+    "ast_hash": "ea3344288d90a9bfb4f7051426fb603e",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/loop-studio.tsx": {
+    "mtime": 1781653989.915017,
+    "ast_hash": "8ac9d0a1c250c3f5452780141f93a4b9",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/markdown.tsx": {
+    "mtime": 1781655866.1025865,
+    "ast_hash": "c7074ef8825e9d3da5e5dda3f3ce80e6",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/master-prompt-panel.tsx": {
+    "mtime": 1781656791.9472935,
+    "ast_hash": "aa023c8da61732ec80445baa685aabfa",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/mcp-panel.tsx": {
+    "mtime": 1781656777.368965,
+    "ast_hash": "79ac2a109debbef201072cf55c44fb24",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/memories-panel.tsx": {
+    "mtime": 1781656780.1919725,
+    "ast_hash": "f98955f565b5fbb150cb291c70a54529",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/memory-export-button.tsx": {
+    "mtime": 1781465231.9641383,
+    "ast_hash": "652d6e8ef7706e6135b80c6c712b97fe",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/memory-window.tsx": {
+    "mtime": 1781652718.8808243,
+    "ast_hash": "0265ca846549a6c82c99d183ca64fcea",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/mode-background.tsx": {
+    "mtime": 1781656872.2059512,
+    "ast_hash": "c46332e8151fe99983d4ea7658aa8f47",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/mode-pills.tsx": {
+    "mtime": 1781653417.5286522,
+    "ast_hash": "0b26f98b50277314b1efd25aa3208ff5",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/model-catalog.tsx": {
+    "mtime": 1781656777.6088443,
+    "ast_hash": "0e37a249aabe76cd04bf9d50eb2a8bce",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/model-control/effort-dial.tsx": {
+    "mtime": 1781650460.7874966,
+    "ast_hash": "c5bdfc25ceb73c9407ea658ec8deda47",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/model-control/model-control.tsx": {
+    "mtime": 1781650658.54517,
+    "ast_hash": "b716e1527ea1ec0793ffb616f86fc324",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/model-control/model-picker.tsx": {
+    "mtime": 1781650459.8715732,
+    "ast_hash": "a3f27c77c14a442d38ed456099321351",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/model-control/tier-picker.tsx": {
+    "mtime": 1781650460.4773543,
+    "ast_hash": "00f9b4f7ecc4fdafafb886435ef09558",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/model-picker.tsx": {
+    "mtime": 1781656790.3844025,
+    "ast_hash": "24ae2d438c6f7b6df8d490df569bdf21",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/model-settings.tsx": {
+    "mtime": 1781652688.805685,
+    "ast_hash": "a4402426bb1c92441bc2561f58d02dfe",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/model-strip.tsx": {
+    "mtime": 1781653413.8893192,
+    "ast_hash": "5249ce9f883e8cd9d9c33818c5e47b12",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/morphing-text.tsx": {
+    "mtime": 1781655915.9432878,
+    "ast_hash": "8d7857ed73987a799f87dd68af301568",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/nav-rail.tsx": {
+    "mtime": 1781649975.1995647,
+    "ast_hash": "7a26409d0f9e3a18a171ea91d3717127",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/onboarding.tsx": {
+    "mtime": 1781655748.0225189,
+    "ast_hash": "eab02dbfaecbe0cc33be133b6fbedcdb",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/open-question-gate.tsx": {
+    "mtime": 1781649787.9291904,
+    "ast_hash": "60e6082032262350e13e4cee4c76a27e",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/orchestrator-panel.tsx": {
+    "mtime": 1781656803.1977007,
+    "ast_hash": "03e9ab601ff22e1c7a4b9011f9891810",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/param-form.tsx": {
+    "mtime": 1781653480.2640305,
+    "ast_hash": "464236a2dfc1be1c6080063dd766f0cf",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/permission-modal.tsx": {
+    "mtime": 1781653133.2914505,
+    "ast_hash": "064b8682a1fb85e342243bbed0cb311f",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/photo-tools.tsx": {
+    "mtime": 1781653927.850675,
+    "ast_hash": "95d7d8e5acbc723e37d31b2c9f8aa100",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/pipeline-builder.tsx": {
+    "mtime": 1781656870.0864367,
+    "ast_hash": "cdb5eac61bf73170598c50533f690b58",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/pipeline-presets.tsx": {
+    "mtime": 1781650580.3219914,
+    "ast_hash": "3eba92ed0107074e26aa793703b555db",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/playground.tsx": {
+    "mtime": 1781656818.5023797,
+    "ast_hash": "4eee4fa93fb4af8c22a7b0b8df21c5c8",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/plus-menu.tsx": {
+    "mtime": 1781653110.9630883,
+    "ast_hash": "07414bac8a56fab0c1b0a8a501bbc39f",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/presets-menu.tsx": {
+    "mtime": 1781653106.6230435,
+    "ast_hash": "d8496c484811a404e91b4abb0fcbaa4c",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/prompts-panel.tsx": {
+    "mtime": 1781656784.040895,
+    "ast_hash": "f38273b460dd67ce5b4da092f89975db",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/rearrange-toggle.tsx": {
+    "mtime": 1781656549.7386158,
+    "ast_hash": "eafbbbeab64c5b0a1bfd3ec2a7cf64b1",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/resizable-frame.tsx": {
+    "mtime": 1781612049.6148436,
+    "ast_hash": "10a6b9e9e29ace07499648936501a0ba",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/resizable-shell.tsx": {
+    "mtime": 1781653880.470605,
+    "ast_hash": "a0083acbaae3b0e2dc10450eed1172db",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/resize-handle.tsx": {
+    "mtime": 1781656549.738621,
+    "ast_hash": "f89973c46f8da10be9c94dd1710fff78",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/run-replay.tsx": {
+    "mtime": 1781656790.658908,
+    "ast_hash": "7105af6a50565332f263b4407831218a",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/run-sandbox.tsx": {
+    "mtime": 1781652817.1057491,
+    "ast_hash": "e834b9bedf338875d87c9d2bbfdfa0d5",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/screen-copilot.tsx": {
+    "mtime": 1781655972.4147491,
+    "ast_hash": "9fd59c47f5b19a49b465010365543b85",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/settings-panel.tsx": {
+    "mtime": 1781658445.2873068,
+    "ast_hash": "01018a785e32f556e7b4103c76d6b763",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/shell/chat-empty-hero.tsx": {
+    "mtime": 1781660705.5441358,
+    "ast_hash": "698d3689907e87ac9ffdf70c22a1c440",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/shell/composer-plus-menu.tsx": {
+    "mtime": 1781660615.9081779,
+    "ast_hash": "fbf14b77c9dd40542ddb06097d8b31c1",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/shell/slim-composer.tsx": {
+    "mtime": 1781660662.1656013,
+    "ast_hash": "5d79e15db8e2ca01281cb311a2dca108",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/shell/taiga-sidebar.tsx": {
+    "mtime": 1781660639.9312866,
+    "ast_hash": "0a2bb154d1790e1e4f516d17b16e0064",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/shell/taiga-topnav.tsx": {
+    "mtime": 1781660623.8550026,
+    "ast_hash": "b816920e82b91065d84bf0802b151704",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/shining-text.tsx": {
+    "mtime": 1781196935.2666576,
+    "ast_hash": "cb3d1a8f269be129c646f767fa3d5fbd",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/sidebar.tsx": {
+    "mtime": 1781655982.4346848,
+    "ast_hash": "59a32ecc9f12f85f8dcfc77627428943",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/skill-badge.tsx": {
+    "mtime": 1781653455.626908,
+    "ast_hash": "59c51d01f4624dd736bd5182c0b87d05",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/skill-builder.tsx": {
+    "mtime": 1781656775.6666145,
+    "ast_hash": "db0fc92d8eeba3089d4409ce113ca79d",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/skills-marketplace.tsx": {
+    "mtime": 1781656782.3433037,
+    "ast_hash": "7eafaa9e7df104f392d02ac0975a7a1e",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/slides-canvas.tsx": {
+    "mtime": 1781655926.8851066,
+    "ast_hash": "af8e549c723af7e00209decc7fef6fe4",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/source-truth-panel.tsx": {
+    "mtime": 1781652784.943216,
+    "ast_hash": "1a80301f494a0a78ed19ce9e5d784f2a",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/sources-panel.tsx": {
+    "mtime": 1781653210.899563,
+    "ast_hash": "2285b66e9f4aa9140e3245a60b385aeb",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/spend-cap-meter.tsx": {
+    "mtime": 1781649761.3243802,
+    "ast_hash": "cb9448db7e12fa5e10b94812daab1e6e",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/spend-cap.tsx": {
+    "mtime": 1781545948.486924,
+    "ast_hash": "a4714a2e881bf222efc15f9a4f252839",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/starfield.tsx": {
+    "mtime": 1781198003.3334713,
+    "ast_hash": "8f51dcbc3c8fef5f7fc2c9b4c46f4aa2",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/studio-skills.tsx": {
+    "mtime": 1781656792.7170386,
+    "ast_hash": "f0c25fd0f8e35a26b2f2de8b26439385",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/sub-meters.tsx": {
+    "mtime": 1781656797.824958,
+    "ast_hash": "4882baf578b10ecb4c4fc3d8fac63c68",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/tasks-panel.tsx": {
+    "mtime": 1781656877.2156258,
+    "ast_hash": "a1cb0a7d2fc0d731baad52622882cebb",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/team-panel.tsx": {
+    "mtime": 1781656802.7520146,
+    "ast_hash": "b582f4699d92ebd7d8e989d5dbd6dd32",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/terminal-panel.tsx": {
+    "mtime": 1781652672.5112488,
+    "ast_hash": "09d85db8223cc511a85957ff6f804bc9",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/theme-panel.tsx": {
+    "mtime": 1781652075.2681036,
+    "ast_hash": "eac54588192e9fe6e7f138c7210d8546",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/thinking-steps.tsx": {
+    "mtime": 1781653488.3402913,
+    "ast_hash": "b510e7e6e1ada1b57cbf1391e40d9654",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/tier-nav.tsx": {
+    "mtime": 1781649382.3752556,
+    "ast_hash": "2f057bb0c4f60c14ae6fa3f207e60922",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/toast.tsx": {
+    "mtime": 1781545948.4895911,
+    "ast_hash": "35eaff085c36f4ab36203eda3a3df370",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/tool-card.tsx": {
+    "mtime": 1781656861.377608,
+    "ast_hash": "8d58321337ec55db2175b3d5385605b8",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/tool-marketplace.tsx": {
+    "mtime": 1781656851.1176934,
+    "ast_hash": "867a9b606ed4266b750aeafddaac4d70",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/tubes-cursor.tsx": {
+    "mtime": 1781199705.1944654,
+    "ast_hash": "d3edd9ba74df570f5b7705dc4a502144",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/ui/badge.tsx": {
+    "mtime": 1781196599.7698545,
+    "ast_hash": "e4ec840217040d5630ee6ed7213a1d72",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/ui/button.tsx": {
+    "mtime": 1781196589.1859381,
+    "ast_hash": "e04ce5251d6b0dd04020988126c905e9",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/ui/dialog.tsx": {
+    "mtime": 1781196599.8169453,
+    "ast_hash": "d9618a63d34473ec512321cc12d43692",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/ui/dropdown-menu.tsx": {
+    "mtime": 1781196599.7261097,
+    "ast_hash": "e6107cbb2088437e76a858f75b5a0280",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/ui/input.tsx": {
+    "mtime": 1781196599.6599832,
+    "ast_hash": "0607b02d99a2e92f9509223f36ccc6ec",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/ui/scroll-area.tsx": {
+    "mtime": 1781196599.7468984,
+    "ast_hash": "ac8fc719d0fd13c77c933474827337da",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/ui/textarea.tsx": {
+    "mtime": 1781196599.679345,
+    "ast_hash": "d448d2a90e48542e51b93a1189127bf2",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/ui/tooltip.tsx": {
+    "mtime": 1781196599.7889009,
+    "ast_hash": "6566a444ce6c0a87d6611903430534fa",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/ultra-fx.tsx": {
+    "mtime": 1781202366.90096,
+    "ast_hash": "560a4b7538c813dd0ce027f5c9ed525c",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/usage-analytics.tsx": {
+    "mtime": 1781656852.6368134,
+    "ast_hash": "efcb96631e93c9e861983e2818ff6f6b",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/use-esc-close.ts": {
+    "mtime": 1781547105.762774,
+    "ast_hash": "b7b7ee298226ef1857337ec31d7a59e4",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/whats-new.tsx": {
+    "mtime": 1781655932.484916,
+    "ast_hash": "c90766875c99716f06f34e9b3f1996ca",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/window-rearrange.tsx": {
+    "mtime": 1781655881.8549504,
+    "ast_hash": "5eeb85d562f10fe5f0cfcad0e71de019",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/workflows.tsx": {
+    "mtime": 1781656864.0752115,
+    "ast_hash": "ca272e2cd41fef62d60f4974325e6e0e",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/components/workspace-panel.tsx": {
+    "mtime": 1781656896.3391626,
+    "ast_hash": "5e3357e24d31cfd1596c5f4dbed1481f",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/ad-gen.ts": {
+    "mtime": 1781381091.6513896,
+    "ast_hash": "6ab8dc1cedb4c2553704e992971eeaaa",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/agent-events.ts": {
+    "mtime": 1781339934.2433443,
+    "ast_hash": "d2be561fb5c3fc1370964141b7cc0d4f",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/agent-health.ts": {
+    "mtime": 1781395416.4005082,
+    "ast_hash": "1549f037268475c7feb7031b720e20aa",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/agent-os.ts": {
+    "mtime": 1781381091.651604,
+    "ast_hash": "d5387941277e34dd915811503650e2a3",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/agent-runs.ts": {
+    "mtime": 1781414611.0149987,
+    "ast_hash": "9510c1471b24f4eb0d2050a0ed793d74",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/agents/agents-catalog.ts": {
+    "mtime": 1781299405.4168882,
+    "ast_hash": "f0aa4249b4d52a1143b52da14c4b517a",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/agents/gen-agents.ts": {
+    "mtime": 1781266263.2727695,
+    "ast_hash": "b457dad636c9f2d17e082a2cf9e5db3c",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/agents/install-agent.ts": {
+    "mtime": 1781299368.387836,
+    "ast_hash": "6a8b94dc8ead372b79f7890ac18b6828",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/agents/unified.ts": {
+    "mtime": 1781305177.4517255,
+    "ast_hash": "b7385f8bad32a3bbd34626a276a6a7b8",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/agents/user-agents.ts": {
+    "mtime": 1781297644.1688256,
+    "ast_hash": "0a1c0c6ac683ec07d8a82d58130eda6a",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/anti-drift.ts": {
+    "mtime": 1781451254.7688448,
+    "ast_hash": "bcfa05268fa9e466551b01c61e162f43",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/artifacts.ts": {
+    "mtime": 1781406341.4902077,
+    "ast_hash": "5963266d79f2c679c88bc044305adca0",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/artifacts/chart.ts": {
+    "mtime": 1781292976.4198828,
+    "ast_hash": "e45213357cbe844491c0a71a79cba643",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/artifacts/diagram.ts": {
+    "mtime": 1781292976.3578296,
+    "ast_hash": "60f892afd9a91f19a1ba8ebb6f50a57c",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/artifacts/pptx.ts": {
+    "mtime": 1781307688.2835944,
+    "ast_hash": "77df6ee9a15bd2a7521a994c514a9eb9",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/artifacts/sheet.ts": {
+    "mtime": 1781292976.3151681,
+    "ast_hash": "b8a9242f4698b567476a1ddd2de2a6b5",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/artifacts/three-runtime.ts": {
+    "mtime": 1781292976.5333183,
+    "ast_hash": "b01f5c929e7b2289d5180f09c4d15fc0",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/artifacts/web.ts": {
+    "mtime": 1781541858.9279864,
+    "ast_hash": "111eb0a716044c3901eaaae7e99814fe",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/audio-gen.ts": {
+    "mtime": 1781524199.5441563,
+    "ast_hash": "66e952cba2f97058e9542ae01275cdce",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/aux-models.ts": {
+    "mtime": 1781308241.0417473,
+    "ast_hash": "1ad2f0e742bd098c9c4b3e2f0a8695c1",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/bookmarks.ts": {
+    "mtime": 1781279955.5290093,
+    "ast_hash": "b58a3a2e981c8b13379b7c4e7df582d8",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/browser.ts": {
+    "mtime": 1781273469.1975296,
+    "ast_hash": "e879c9651e57a489b81df7d719a4715e",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/characters.ts": {
+    "mtime": 1781451217.740395,
+    "ast_hash": "15a7202e5235a0cf97b8feecff33cbbe",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/chat-hooks.ts": {
+    "mtime": 1781378220.3526762,
+    "ast_hash": "5c1fff540ed2cfcfa2e6091642e05efe",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/chat-memory.ts": {
+    "mtime": 1781284339.0404496,
+    "ast_hash": "e0c4bc6e6dd760ad3c5787d8c69a850a",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/cinema-export.ts": {
+    "mtime": 1781234867.801149,
+    "ast_hash": "9936317bd3127d460abbfd88a0591d6e",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/cobrowse-ext.ts": {
+    "mtime": 1781277196.9873514,
+    "ast_hash": "89d13e69bdd33dbc2de77de5b092da64",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/commands/builtins.ts": {
+    "mtime": 1781388602.1123643,
+    "ast_hash": "42ab0ee3df5859c226b63fecdc4b1a74",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/commands/import-skill.ts": {
+    "mtime": 1781207255.112542,
+    "ast_hash": "c8292c428ccd80cb94c8ab0e0d473e8a",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/commands/parse.ts": {
+    "mtime": 1781203735.6450167,
+    "ast_hash": "dcdb1b9811aff97668ffc9a6d10fbca9",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/commands/permissions.ts": {
+    "mtime": 1781656878.6267655,
+    "ast_hash": "f27a7633a771ae4102e12ae647e4a4d4",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/commands/registry.ts": {
+    "mtime": 1781302933.9666505,
+    "ast_hash": "8df70cde26899eaa0fa5b208684defe6",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/commands/skills-data.ts": {
+    "mtime": 1781207234.071581,
+    "ast_hash": "8ded738cfba72ee96540b78a4f435bad",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/commands/types.ts": {
+    "mtime": 1781302888.7980523,
+    "ast_hash": "8e8d398c940cdb954c008f890cbf2c13",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/commands/user-store.ts": {
+    "mtime": 1781287194.2420921,
+    "ast_hash": "12d4da498b6c3720ca0a50138230ee37",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/commands/visibility.ts": {
+    "mtime": 1781211881.710653,
+    "ast_hash": "b86e7d35345563df568b8e3427f7ccd9",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/cookies.ts": {
+    "mtime": 1781274381.1054363,
+    "ast_hash": "34382921bb8f2c3511143ecaae914141",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/custom-buttons.ts": {
+    "mtime": 1781384120.235831,
+    "ast_hash": "44be81fa28d193528fb0b063bb75542b",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/debate-stream.ts": {
+    "mtime": 1781470430.0454454,
+    "ast_hash": "3aa2aaec5a0596587d6fc360202f01a7",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/decision.test.ts": {
+    "mtime": 1781343546.6298733,
+    "ast_hash": "52de0272fc32fad8ccec60c1466c2e28",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/decision.ts": {
+    "mtime": 1781310380.4377167,
+    "ast_hash": "2a19f1c91fd66a944575f54b83ea4d58",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/derive-goal.ts": {
+    "mtime": 1781414697.2414026,
+    "ast_hash": "656953374691c29ffca4aa5f3b0eed16",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/export-doc.ts": {
+    "mtime": 1781339521.3588245,
+    "ast_hash": "8ef7f3cbbd9775a0bb92469c60dc4400",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/features-registry.ts": {
+    "mtime": 1781401267.9269698,
+    "ast_hash": "68f8265b80c12d6b3fd4c060038e2ae3",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/features.ts": {
+    "mtime": 1781378945.2466369,
+    "ast_hash": "3c49fdb028b02af960e780ac9a18620a",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/fetch-timeout.ts": {
+    "mtime": 1781271209.7751775,
+    "ast_hash": "519cf1c0df4607e25089945741066e77",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/folders.ts": {
+    "mtime": 1781378672.6152704,
+    "ast_hash": "650518ee0f23e0a41b6163a90406c589",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/gen-image.ts": {
+    "mtime": 1781349679.998038,
+    "ast_hash": "aee7127701e1ccb7e41f9f5449bca5c2",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/i18n.ts": {
+    "mtime": 1781342915.7585058,
+    "ast_hash": "541d949ea97a9efc6e5957bfdb933d84",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/image-tools.ts": {
+    "mtime": 1781307712.1089053,
+    "ast_hash": "5c45be48ca5b5e69d1abbfec05274c4b",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/init.ts": {
+    "mtime": 1781271238.699538,
+    "ast_hash": "d61ec9c7773090bd692231b3edd5b822",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/jobs.ts": {
+    "mtime": 1781274778.8412895,
+    "ast_hash": "92ce3ce846a623a9d851f363c8db2621",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/living-doc.ts": {
+    "mtime": 1781451179.69929,
+    "ast_hash": "8a0cda981aba576d01d65cec660a9a41",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/loop-cost.ts": {
+    "mtime": 1781395167.0532804,
+    "ast_hash": "f4d02e552f1af3ba1a95e50b5c1b08bb",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/loop-engine.ts": {
+    "mtime": 1781432875.590094,
+    "ast_hash": "ac31ee3e91d821ff73a1edbbed31e128",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/loop-share.ts": {
+    "mtime": 1781395376.494931,
+    "ast_hash": "444c49a6fe7e9c82991234fdd3fedf67",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/loop-store.ts": {
+    "mtime": 1781395165.9023864,
+    "ast_hash": "c1b8b93c736854151d03aec912bd0a20",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/markdown-html.ts": {
+    "mtime": 1781407912.4883752,
+    "ast_hash": "d57768967e32469cdb366a5cc3ff6be5",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/master/master-prompt.ts": {
+    "mtime": 1781220509.3867798,
+    "ast_hash": "04b54f8e38e93d13411278e826f6c193",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/mcp.ts": {
+    "mtime": 1781301047.5017748,
+    "ast_hash": "ab45f03cce96d9b5ced0ca059ed91e54",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/model-control/types.ts": {
+    "mtime": 1781650316.6424868,
+    "ast_hash": "411ba9c11d763c115e420d558a8e42aa",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/model-health.ts": {
+    "mtime": 1781271208.2736018,
+    "ast_hash": "bf2f6e43b57f3c7f13cda98fcf8a616b",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/models/brand-icon.tsx": {
+    "mtime": 1781545948.4918203,
+    "ast_hash": "9186467f1082da3684e792b1514faa4c",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/models/overrides.ts": {
+    "mtime": 1781224515.2542064,
+    "ast_hash": "86c6ff5be6c1870411b6a5285247ac46",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/models/select.ts": {
+    "mtime": 1781475676.669263,
+    "ast_hash": "f34ff32e44a405c4011d5ef54e734623",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/models/use-catalog.ts": {
+    "mtime": 1781656549.7387462,
+    "ast_hash": "bd55e9f4c0b5713d880293ca16efc95e",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/money.test.ts": {
+    "mtime": 1781343586.8987367,
+    "ast_hash": "15e10e2d4fa465efb25a68238f10fc8a",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/money.ts": {
+    "mtime": 1781233215.2166288,
+    "ast_hash": "6bb85b927452713f876116af915330eb",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/morph.ts": {
+    "mtime": 1781395221.7976682,
+    "ast_hash": "c9f41757badc8380c7202c1d51aeb865",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/motion-presets.ts": {
+    "mtime": 1781401498.3716364,
+    "ast_hash": "19773b71b82a63823a825d224eaf5e19",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/motion.ts": {
+    "mtime": 1781342994.1358142,
+    "ast_hash": "58e99b4e3a8ea0b8be39ef7dcb444d07",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/msg-tree.test.ts": {
+    "mtime": 1781343632.7355778,
+    "ast_hash": "bca83d8e6fc35c21d4c9be2f853353dc",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/msg-tree.ts": {
+    "mtime": 1781235575.1508987,
+    "ast_hash": "5f8673190faa3eea5b5a0577b8e7b85c",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/orchestrator.ts": {
+    "mtime": 1781465747.4369693,
+    "ast_hash": "14a8fffe839a81565e32d256ad5ccd63",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/pane-layout.ts": {
+    "mtime": 1781401477.8406742,
+    "ast_hash": "ef4bfee72d49972a4f33e0254dcd7e40",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/pipelines.ts": {
+    "mtime": 1781450378.86184,
+    "ast_hash": "b8bbd8a716957e4a3f6514505f9fffc7",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/presets.ts": {
+    "mtime": 1781266307.4286156,
+    "ast_hash": "7b3454422d3ac0d7cd74f2cc72c502fa",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/profile.ts": {
+    "mtime": 1781284339.0431657,
+    "ast_hash": "add7c27d1c3846508a89e0d4f008f61d",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/prompts.ts": {
+    "mtime": 1781278150.699015,
+    "ast_hash": "a11b85a415d7c6f984af51c1dbbd58d1",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/rag-manage.ts": {
+    "mtime": 1781381091.6520863,
+    "ast_hash": "04dd4c564296daaed239c5b11481903f",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/rag.test.ts": {
+    "mtime": 1781343657.515708,
+    "ast_hash": "1f3479330968813bdb02c7b7c3dfc715",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/rag.ts": {
+    "mtime": 1781349619.9477854,
+    "ast_hash": "d80768ae54158a378906b45781667037",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/recall.ts": {
+    "mtime": 1781230379.0561852,
+    "ast_hash": "2387eeebfe8737734ea077f1ae4e9b5f",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/route-intent.ts": {
+    "mtime": 1781210641.2961094,
+    "ast_hash": "7443ba01960acd0443104255e1ea0cbc",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/run-loop-from-chat.ts": {
+    "mtime": 1781395303.979869,
+    "ast_hash": "1d6ea51ed752bbb7bf8ff66d4c8f0212",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/run-notify.ts": {
+    "mtime": 1781395468.9360585,
+    "ast_hash": "e7110215d34dbc5f15db947182838be5",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/run-to-chat.ts": {
+    "mtime": 1781414666.6080706,
+    "ast_hash": "3efd2cdf29483b04ce57d5863c4e114c",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/screen-capture.ts": {
+    "mtime": 1781395289.110029,
+    "ast_hash": "e681a183480c153a19e7c88bf9a9e165",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/screen-copilot.ts": {
+    "mtime": 1781381091.6523418,
+    "ast_hash": "8a0b00368ba5681cf283dd8e89a388ab",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/session.ts": {
+    "mtime": 1781655930.8143613,
+    "ast_hash": "b9d05ffc894a6b22c5b66637f6327990",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/skill-render.ts": {
+    "mtime": 1781280764.0900216,
+    "ast_hash": "974c39b2d6881afd38b5bc703b573682",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/skill-run.ts": {
+    "mtime": 1781407946.444533,
+    "ast_hash": "0ecfbfea7f42aeaa8ad1f304c889f161",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/skills/full-skills.ts": {
+    "mtime": 1781413434.011222,
+    "ast_hash": "04633804311cd7ebf1e18264c1fb3a36",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/skills/skill-caps.ts": {
+    "mtime": 1781413055.280191,
+    "ast_hash": "824f3a81d152fbf9435ee3cbdac063bc",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/skills/unified.ts": {
+    "mtime": 1781305134.6487238,
+    "ast_hash": "c800a44c85cc34a61b3359f84ad37961",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/skills/user-skills.ts": {
+    "mtime": 1781302917.4753025,
+    "ast_hash": "d7becf45c9fc0efb71a4f04e1ceecadc",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/storyboard.ts": {
+    "mtime": 1781393032.417148,
+    "ast_hash": "b0ac608f828445c9fa973a4b47809234",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/style-profile.ts": {
+    "mtime": 1781274101.3382332,
+    "ast_hash": "370974e0bee940d1b69808c81e4070de",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/supersearch.ts": {
+    "mtime": 1781272152.220194,
+    "ast_hash": "a3a1668a4e5e07435effb5d647b48118",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/theme.ts": {
+    "mtime": 1781307242.0833533,
+    "ast_hash": "3bed9ab8c5b6ca24a2fbbecd695cd32f",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/toast.ts": {
+    "mtime": 1781350209.581104,
+    "ast_hash": "681f64e0b1d07eb478464b9d87fdafc9",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/tool-risk.ts": {
+    "mtime": 1781433056.2190676,
+    "ast_hash": "89770a651dbcbcbdda6c598a37f4dd2a",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/ui-layout.ts": {
+    "mtime": 1781395222.8333857,
+    "ast_hash": "f9f6862f496d20157cd1a421ef70d00b",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/ui-states.tsx": {
+    "mtime": 1781545948.4919786,
+    "ast_hash": "1d22570da076bfd596e10d400652fafc",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/uncensor.ts": {
+    "mtime": 1781279658.0088708,
+    "ast_hash": "c827d1e1a41279f2dd652d85d995de12",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/usage-log.test.ts": {
+    "mtime": 1781343608.602551,
+    "ast_hash": "1f3811dccfba446d52ba97d425b5dc0a",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/usage-log.ts": {
+    "mtime": 1781349645.2991223,
+    "ast_hash": "af9d6c44c78bc1826c970bd8d69363e8",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/use-custom-bar.ts": {
+    "mtime": 1781656549.738615,
+    "ast_hash": "5073da5335d36860c7887099d856d947",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/use-taiga-chat.ts": {
+    "mtime": 1781483435.4410443,
+    "ast_hash": "9b64747dbc64258610f1a0822062bbec",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/use-voice-input.ts": {
+    "mtime": 1781655967.195216,
+    "ast_hash": "3277aa5a1bd61e481c2bbc4dc74ecb70",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/user-config.ts": {
+    "mtime": 1781305027.342986,
+    "ast_hash": "f2cb70e629d9071e7c781c4cba8271f4",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/utils.ts": {
+    "mtime": 1781196589.2075624,
+    "ast_hash": "5a6fd53fdcf2be529e9cc0b718fde352",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/video-gen.ts": {
+    "mtime": 1781349714.648483,
+    "ast_hash": "d8f5a5d7a75459dcf35cc3de59857f0b",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/voice-pref.ts": {
+    "mtime": 1781524293.2188435,
+    "ast_hash": "515269fd7212f1f7ec8b214b214b86fc",
+    "semantic_hash": ""
+  },
+  "taiga-web/src/lib/workspace-files.ts": {
+    "mtime": 1781395364.652557,
+    "ast_hash": "18e0c000ff04d78e98ae56679eca1265",
+    "semantic_hash": ""
+  },
+  "taiga-web/tsconfig.json": {
+    "mtime": 1781196491.9588597,
+    "ast_hash": "ee17fd1c97c735e9f3564e3f5251f125",
+    "semantic_hash": ""
+  },
+  "test_video.py": {
+    "mtime": 1781222604.1514232,
+    "ast_hash": "944c063c680f5a126711719a2120c85b",
+    "semantic_hash": ""
+  },
+  "test_video_endpoint.py": {
+    "mtime": 1781222916.2586768,
+    "ast_hash": "940847673809de4bbd2ad7b64fa22478",
+    "semantic_hash": ""
+  },
+  "tests/run.sh": {
+    "mtime": 1781349851.9522502,
+    "ast_hash": "e6bd0866d86730c61ba16288ecfebf27",
+    "semantic_hash": ""
+  },
+  "tests/test_endpoints.py": {
+    "mtime": 1781349698.3704376,
+    "ast_hash": "0479617cb09a71b5b621eab2f96886fe",
+    "semantic_hash": ""
+  },
+  "video_rag.py": {
+    "mtime": 1781381032.7645285,
+    "ast_hash": "6947a1a5624553b7519e6ac2c34857bc",
+    "semantic_hash": ""
+  },
+  ".agents/skills/refero-design/README.md": {
+    "mtime": 1781181569.8837402,
+    "ast_hash": "f70840eb9dfebd85e7806b727d439e29",
+    "semantic_hash": ""
+  },
+  ".agents/skills/refero-design/SECURITY.md": {
+    "mtime": 1781181569.8837757,
+    "ast_hash": "774893fd103314fb1cdeb31283d329f9",
+    "semantic_hash": ""
+  },
+  ".agents/skills/refero-design/SKILL.md": {
+    "mtime": 1781181569.8838143,
+    "ast_hash": "c4216b9f8c4601f4232218aa9e64cdef",
+    "semantic_hash": ""
+  },
+  ".agents/skills/refero-design/references/anti-ai-slop.md": {
+    "mtime": 1781181569.8841743,
+    "ast_hash": "eb0e9258712f8dd9e5f7c94c69d1c44c",
+    "semantic_hash": ""
+  },
+  ".agents/skills/refero-design/references/color.md": {
+    "mtime": 1781181569.88449,
+    "ast_hash": "866b4de59b58e5f266065120fc1a9c7c",
+    "semantic_hash": ""
+  },
+  ".agents/skills/refero-design/references/copywriting.md": {
+    "mtime": 1781181569.884118,
+    "ast_hash": "36d955419d2b5bd1951c8f07dbe083cd",
+    "semantic_hash": ""
+  },
+  ".agents/skills/refero-design/references/craft-details.md": {
+    "mtime": 1781181569.8842814,
+    "ast_hash": "4d7ed9242b8d2e90a3698ae93320ffa8",
+    "semantic_hash": ""
+  },
+  ".agents/skills/refero-design/references/example-workflow.md": {
+    "mtime": 1781181569.884284,
+    "ast_hash": "84e44a974693d7c2863f4a36496829a5",
+    "semantic_hash": ""
+  },
+  ".agents/skills/refero-design/references/icons.md": {
+    "mtime": 1781181569.8841631,
+    "ast_hash": "8986ea4c48c89d509a1207e887fe7c1c",
+    "semantic_hash": ""
+  },
+  ".agents/skills/refero-design/references/mcp-tools.md": {
+    "mtime": 1781181569.8845177,
+    "ast_hash": "afca051a0e43695828314c8502d7058f",
+    "semantic_hash": ""
+  },
+  ".agents/skills/refero-design/references/motion.md": {
+    "mtime": 1781181569.8846464,
+    "ast_hash": "7dc39433e25ad87850e378b78c3f8baa",
+    "semantic_hash": ""
+  },
+  ".agents/skills/refero-design/references/typography.md": {
+    "mtime": 1781181569.884572,
+    "ast_hash": "b5a4a3c84868c23fb2feb7d493bd3dda",
+    "semantic_hash": ""
+  },
+  ".agents/skills/refero-design/references/visual-workflow.md": {
+    "mtime": 1781181569.884719,
+    "ast_hash": "b8f68f9104cf9b29020d27da7a69a472",
+    "semantic_hash": ""
+  },
+  ".claude/skills/agent-elements/README.md": {
+    "mtime": 1781195071.9683104,
+    "ast_hash": "c05065e53c99718ac0627bec6debdf39",
+    "semantic_hash": ""
+  },
+  ".claude/skills/agent-elements/SKILL.md": {
+    "mtime": 1781195071.968332,
+    "ast_hash": "df306c7739bd806763d8bbda50e1852e",
+    "semantic_hash": ""
+  },
+  "ADDON-FINAL.md": {
+    "mtime": 1781279728.0533786,
+    "ast_hash": "68c9935f7a610f80a0438e91c95d6883",
+    "semantic_hash": ""
+  },
+  "AGENTIC-OS-UNBLOCK.md": {
+    "mtime": 1781376668.4444218,
+    "ast_hash": "fce9e64efd3eb2ca14114aaebc72dab9",
+    "semantic_hash": ""
+  },
+  "AGENTS-BOARD.md": {
+    "mtime": 1781277738.828396,
+    "ast_hash": "ba2388d139fdad4fc1b4d4c632c1391d",
+    "semantic_hash": ""
+  },
+  "ARCH-DECISIONS.md": {
+    "mtime": 1781374350.2157617,
+    "ast_hash": "cb359e5b6b40f5d31942c4f6e848bc49",
+    "semantic_hash": ""
+  },
+  "ARCHITECTURE-MAP.md": {
+    "mtime": 1781475325.1237788,
+    "ast_hash": "a19d9b0ae97dc21ce2272a5b454dbd05",
+    "semantic_hash": ""
+  },
+  "AUDIT.md": {
+    "mtime": 1781475882.4594178,
+    "ast_hash": "d5ee9344070679837ac02500f7782d1b",
+    "semantic_hash": ""
+  },
+  "BACKEND-API.md": {
+    "mtime": 1781268926.7813892,
+    "ast_hash": "3109a3b8db3c53f7a4353e0e4be760c9",
+    "semantic_hash": ""
+  },
+  "BIG-AUDIT.md": {
+    "mtime": 1781482995.0126743,
+    "ast_hash": "aeb5e0bba11f831d2ba1331847a4b74c",
+    "semantic_hash": ""
+  },
+  "BUGS-FOUND.md": {
+    "mtime": 1781671709.8193064,
+    "ast_hash": "48f44a76b19ab7994902d88088436e97",
+    "semantic_hash": ""
+  },
+  "CHAT-AGENT-MORPH.md": {
+    "mtime": 1781379091.9116642,
+    "ast_hash": "c173cccf539c82300d5275c8e21f6940",
+    "semantic_hash": ""
+  },
+  "CLAUDE.md": {
+    "mtime": 1781475325.1240892,
+    "ast_hash": "978d9ab61ac2d488f0ffb13f3b59dbd6",
+    "semantic_hash": ""
+  },
+  "COORDINATOR-NOTES.md": {
+    "mtime": 1781237843.4213178,
+    "ast_hash": "e2ace1f615f5653e9fcf58f22884d6a5",
+    "semantic_hash": ""
+  },
+  "DAMIR-REQUESTS.md": {
+    "mtime": 1781375129.4090536,
+    "ast_hash": "6fccac72d4d30af468fb5c04cbf6bcda",
+    "semantic_hash": ""
+  },
+  "DESIGN-APPLY-QUEUE.md": {
+    "mtime": 1781670015.902842,
+    "ast_hash": "28e947cbf8d116a5d572b66c0e264026",
+    "semantic_hash": ""
+  },
+  "DESIGN-REQUESTS-RECOVERED.md": {
+    "mtime": 1781664592.2643797,
+    "ast_hash": "c49062bb0e3fdb73dbae2bcb2bf6a590",
+    "semantic_hash": ""
+  },
+  "DEV-TOOLING.md": {
+    "mtime": 1781281834.5868032,
+    "ast_hash": "f6f3992b453b57d067a85bb23f7d95a0",
+    "semantic_hash": ""
+  },
+  "DISPATCH.md": {
+    "mtime": 1781277159.0765502,
+    "ast_hash": "9e6eaa98fe3bf5562c62510239be4d71",
+    "semantic_hash": ""
+  },
+  "FEATURE-INVENTORY.md": {
+    "mtime": 1781475325.1239064,
+    "ast_hash": "2c7e5f4d2106de7a5e4bd7c87d74fdda",
+    "semantic_hash": ""
+  },
+  "FINISH-ALL.md": {
+    "mtime": 1781450041.8904166,
+    "ast_hash": "8c82241b88dca772c0cbce3130a8f642",
+    "semantic_hash": ""
+  },
+  "FINISH-PLAN.md": {
+    "mtime": 1781281420.2069185,
+    "ast_hash": "1d42ccbd68b16f9f1f5326884900dfb8",
+    "semantic_hash": ""
+  },
+  "FRONT-GAP-ural.md": {
+    "mtime": 1781274860.4810548,
+    "ast_hash": "879ed385b13e8c8aa4b5764a9ca6262c",
+    "semantic_hash": ""
+  },
+  "FUTURE-TAIGA-CODER.md": {
+    "mtime": 1781291491.0937288,
+    "ast_hash": "dfa4a250f00bae2ebde56e29f6f56dac",
+    "semantic_hash": ""
+  },
+  "FUTURE-TASKS.md": {
+    "mtime": 1781390992.8295093,
+    "ast_hash": "b3457f926ae5fcf9f5e4c9455cb6b34d",
+    "semantic_hash": ""
+  },
+  "GAP-AUDIT.md": {
+    "mtime": 1781476735.1060271,
+    "ast_hash": "40787492d02f1ab91571e54dfaa3a824",
+    "semantic_hash": ""
+  },
+  "GAP-MAP.md": {
+    "mtime": 1781284033.6909661,
+    "ast_hash": "e43ca7bb225478df45652aa894f8ef41",
+    "semantic_hash": ""
+  },
+  "GRAND-PLAN-CUSTOMIZABILITY.md": {
+    "mtime": 1781286330.126528,
+    "ast_hash": "77046cf66040627a7ee0b721c05e32ee",
+    "semantic_hash": ""
+  },
+  "GRAND-PLAN-V2.md": {
+    "mtime": 1781337463.5781846,
+    "ast_hash": "7d66ebf2b47f5d6261685756163113dc",
+    "semantic_hash": ""
+  },
+  "GRAND-PLAN-V3.md": {
+    "mtime": 1781351687.1654797,
+    "ast_hash": "a6d80dcb507b109508ef1e9b213e6379",
+    "semantic_hash": ""
+  },
+  "GRAND-PLAN.md": {
+    "mtime": 1781400770.137335,
+    "ast_hash": "cd00b15cbc6d6e9e3bb87881efbd6264",
+    "semantic_hash": ""
+  },
+  "HOOK-FOR-SOSNA.md": {
+    "mtime": 1781280980.4827497,
+    "ast_hash": "e39a34026ac93faf4be310a962d648a8",
+    "semantic_hash": ""
+  },
+  "INTEGRATION-NOTES.md": {
+    "mtime": 1781288446.053272,
+    "ast_hash": "47c1ce71e876d58b99c1c716ef3f96e1",
+    "semantic_hash": ""
+  },
+  "LANES.md": {
+    "mtime": 1781379827.2568052,
+    "ast_hash": "ebb0c13bd9d2ca9b8ed4b580e7ccc52a",
+    "semantic_hash": ""
+  },
+  "LAUNCH-WORKER.md": {
+    "mtime": 1781661367.4104307,
+    "ast_hash": "a0849b1440630d355bf59cb88164f98f",
+    "semantic_hash": ""
+  },
+  "LIFT-MAP-2.md": {
+    "mtime": 1781280128.9306612,
+    "ast_hash": "c36df177ce7441b76dabff7053568df8",
+    "semantic_hash": ""
+  },
+  "LIFT-MAP-3.md": {
+    "mtime": 1781280894.333009,
+    "ast_hash": "8849ba6caedf16ea7067f352162f4c74",
+    "semantic_hash": ""
+  },
+  "MASTER-AUDIT-PLAN.md": {
+    "mtime": 1781293285.4823625,
+    "ast_hash": "a89e5fd89796248a6560d51ac05c9bb4",
+    "semantic_hash": ""
+  },
+  "MASTER-LANES.md": {
+    "mtime": 1781297524.9172843,
+    "ast_hash": "2004e90b5467541d5aaee340103d6891",
+    "semantic_hash": ""
+  },
+  "MASTER-PLAN.md": {
+    "mtime": 1781281119.9218075,
+    "ast_hash": "3002b82fe0b55626d61be6b2e682fcc2",
+    "semantic_hash": ""
+  },
+  "MORNING-REPORT.md": {
+    "mtime": 1781489660.9057481,
+    "ast_hash": "467029d393309cd88d8a7727fbdaa37b",
+    "semantic_hash": ""
+  },
+  "MORNING-SUMMARY.md": {
+    "mtime": 1781236137.007116,
+    "ast_hash": "768b964d248c18987ef947e9df892a39",
+    "semantic_hash": ""
+  },
+  "NEXT-3-PROMPTS.md": {
+    "mtime": 1781521470.3166993,
+    "ast_hash": "b964033bd19b0cb3911d3d5e16eae64a",
+    "semantic_hash": ""
+  },
+  "NEXT-PLAN.md": {
+    "mtime": 1781274652.1086476,
+    "ast_hash": "4c8f1fcfdad67c146a76ca9728b9b776",
+    "semantic_hash": ""
+  },
+  "OVERNIGHT-BUILD-QUEUE.md": {
+    "mtime": 1781409564.3020926,
+    "ast_hash": "3f81a15a65e676cbd8b05097f7311893",
+    "semantic_hash": ""
+  },
+  "PARAMETERS-AUDIT.md": {
+    "mtime": 1781443803.843479,
+    "ast_hash": "5004b43bca63e09431a6d39fd289ba9d",
+    "semantic_hash": ""
+  },
+  "PARITY-MATRIX.md": {
+    "mtime": 1781275954.599007,
+    "ast_hash": "942b054b4482b1d489a14cc50e518d1b",
+    "semantic_hash": ""
+  },
+  "PHASE-A-C-HARDENING.md": {
+    "mtime": 1781478152.3635736,
+    "ast_hash": "497f38a0b85520e09282ae5dfe805d39",
+    "semantic_hash": ""
+  },
+  "PLAN-WAVE2-3.md": {
+    "mtime": 1781268345.4406226,
+    "ast_hash": "a1714486696bef33975b2ec12abd878b",
+    "semantic_hash": ""
+  },
+  "PLAN-amur.md": {
+    "mtime": 1781235336.7708256,
+    "ast_hash": "a9d5dbf29abc1ddce4327b2ef48d2f9e",
+    "semantic_hash": ""
+  },
+  "PLAN-kedr.md": {
+    "mtime": 1781235199.7576501,
+    "ast_hash": "e5db719f23a7ed20c81b0b3a24d58f2c",
+    "semantic_hash": ""
+  },
+  "PLAN-ural.md": {
+    "mtime": 1781235250.1369863,
+    "ast_hash": "5e4066236b624226622e7a02c65cf965",
+    "semantic_hash": ""
+  },
+  "PLAN.md": {
+    "mtime": 1781400066.5495718,
+    "ast_hash": "a90e8285ce6f929894a9f70e8ddfc15b",
+    "semantic_hash": ""
+  },
+  "PROJECT-STATE.md": {
+    "mtime": 1781348522.230852,
+    "ast_hash": "baa0533c3d594c253d61772f7d92852b",
+    "semantic_hash": ""
+  },
+  "QA-PLAN.md": {
+    "mtime": 1781352381.17728,
+    "ast_hash": "d2d80660421e08467193797e74e07f51",
+    "semantic_hash": ""
+  },
+  "QUESTIONS-amur.md": {
+    "mtime": 1781265989.9485843,
+    "ast_hash": "6802c917f987c2a0a7a9f8d3fcf64946",
+    "semantic_hash": ""
+  },
+  "QUESTIONS-ural.md": {
+    "mtime": 1781266657.4111574,
+    "ast_hash": "17a3a81f8958cbab2949898d858b8ae1",
+    "semantic_hash": ""
+  },
+  "REBUILD-BRIEF.md": {
+    "mtime": 1781475325.1240115,
+    "ast_hash": "fc99bfe72841c6b2ab559a6a5e076706",
+    "semantic_hash": ""
+  },
+  "REMAINING-V1.md": {
+    "mtime": 1781282373.918146,
+    "ast_hash": "564837493e196385d61baf9985b935f4",
+    "semantic_hash": ""
+  },
+  "ROADMAP-AGENT-OS.md": {
+    "mtime": 1781414229.398626,
+    "ast_hash": "fbc380e311c0f35bf7ffbd8d5598f556",
+    "semantic_hash": ""
+  },
+  "SCALE-PLAN.md": {
+    "mtime": 1781470653.7109847,
+    "ast_hash": "e3af098a5bbd7d3d96fc284e0c36a231",
+    "semantic_hash": ""
+  },
+  "SECURITY-AUDIT-ural.md": {
+    "mtime": 1781272522.8410735,
+    "ast_hash": "9a59be14c0ec5736b9d21976a54dc943",
+    "semantic_hash": ""
+  },
+  "SESSION-B-TASKS.md": {
+    "mtime": 1781375665.6102097,
+    "ast_hash": "6ff6b927bf8f28c5ca4f08ae0bc91713",
+    "semantic_hash": ""
+  },
+  "SESSION-C-PROGRESS.md": {
+    "mtime": 1781381032.7563322,
+    "ast_hash": "9d80dd405dbce0d7a1e0b87677ff9827",
+    "semantic_hash": ""
+  },
+  "SESSION-D-PROGRESS.md": {
+    "mtime": 1781381032.7565925,
+    "ast_hash": "5f470619a21060c0aeb4a11b3e7a7115",
+    "semantic_hash": ""
+  },
+  "SKILL-TRANSFORMER-PLAN.md": {
+    "mtime": 1781408453.3436782,
+    "ast_hash": "924a3364e963fe3dd238e3fa04455bc4",
+    "semantic_hash": ""
+  },
+  "START-HERE.md": {
+    "mtime": 1781478138.4765723,
+    "ast_hash": "0a3fe89ec48585b90f09c9214b63bd9e",
+    "semantic_hash": ""
+  },
+  "STATUS-amur.md": {
+    "mtime": 1781281389.883656,
+    "ast_hash": "1986ae7879c5389c2d6be8a6369721b0",
+    "semantic_hash": ""
+  },
+  "STATUS-atlas.md": {
+    "mtime": 1781235147.36968,
+    "ast_hash": "7b7f080054b1e705c59a073a4ea446db",
+    "semantic_hash": ""
+  },
+  "STATUS-claude-overnight.md": {
+    "mtime": 1781436073.1006188,
+    "ast_hash": "921b349bb5597b05232e56dd8d7fdb36",
+    "semantic_hash": ""
+  },
+  "STATUS-kedr.md": {
+    "mtime": 1781281022.2263765,
+    "ast_hash": "333efe8b7dfa038657ea9de0c78e0b60",
+    "semantic_hash": ""
+  },
+  "STATUS-sosna.md": {
+    "mtime": 1781280404.942177,
+    "ast_hash": "f18dbb095c97e2eb7b6ee37769d036b7",
+    "semantic_hash": ""
+  },
+  "STATUS-ural.md": {
+    "mtime": 1781280196.7116647,
+    "ast_hash": "051821e09360dc5bbce7ebdeb20e48a2",
+    "semantic_hash": ""
+  },
+  "STUDIO-SESSION-PROMPT.md": {
+    "mtime": 1781271798.571303,
+    "ast_hash": "fe04cd8da0806b38f5566b238973463c",
+    "semantic_hash": ""
+  },
+  "TAIGA-FOCUS.md": {
+    "mtime": 1781235461.9506233,
+    "ast_hash": "cf8f5b6fd301558ab4a5f87eb9b726b4",
+    "semantic_hash": ""
+  },
+  "TAIGA-GAP-ANALYSIS.md": {
+    "mtime": 1781271623.2530463,
+    "ast_hash": "db2c08f8e9c05ac77f1f6dd3ca1b31ed",
+    "semantic_hash": ""
+  },
+  "TAIGA-LIFT-MAP.md": {
+    "mtime": 1781230068.1513793,
+    "ast_hash": "315e696b3d302cdac4e1a7f7d2ce9768",
+    "semantic_hash": ""
+  },
+  "TAIGA-PLAN.md": {
+    "mtime": 1781200907.9383721,
+    "ast_hash": "c36fa084ceb25f41dbb255712d03c006",
+    "semantic_hash": ""
+  },
+  "TAIGA-REQUIREMENTS.md": {
+    "mtime": 1781225095.3323727,
+    "ast_hash": "5d77a18ce8322850bc84dcc1d0a22a43",
+    "semantic_hash": ""
+  },
+  "TAIGA-RESEARCH-BRIEF.md": {
+    "mtime": 1781225905.2834697,
+    "ast_hash": "314b19baff85551724ffc3ca619792e5",
+    "semantic_hash": ""
+  },
+  "TAIGA-SESSION-DIRECTIVES.md": {
+    "mtime": 1781227052.5073369,
+    "ast_hash": "9d2c95dc494d4c7570843fb55e24c8f6",
+    "semantic_hash": ""
+  },
+  "TEST-CHECKLIST.md": {
+    "mtime": 1781349243.8713722,
+    "ast_hash": "8e38772fd0ec749b3f677da6531de40c",
+    "semantic_hash": ""
+  },
+  "TESTING.md": {
+    "mtime": 1781351053.908486,
+    "ast_hash": "d9f3e87bf0ab6102dd9fabfcee9af353",
+    "semantic_hash": ""
+  },
+  "USER-CASES-RESULTS.md": {
+    "mtime": 1781291781.9001892,
+    "ast_hash": "b2c2acf7e4d6b017089d558411d26cac",
+    "semantic_hash": ""
+  },
+  "USER-CASES.md": {
+    "mtime": 1781284443.8899057,
+    "ast_hash": "634b3d98d22955f88cf3b7b7fe689afa",
+    "semantic_hash": ""
+  },
+  "USER-TEST-GUIDE.md": {
+    "mtime": 1781470879.292958,
+    "ast_hash": "11d9b70f4135ab1ae95c0d3d2c4640e1",
+    "semantic_hash": ""
+  },
+  "WHATS-NEW.md": {
+    "mtime": 1781381032.7569714,
+    "ast_hash": "e397b77f593f6cb78737cbf69ee77806",
+    "semantic_hash": ""
+  },
+  "WIRING-PLAN.md": {
+    "mtime": 1781663988.9411101,
+    "ast_hash": "3fe047c7a80f3a04ca47fdd67552f310",
+    "semantic_hash": ""
+  },
+  "docs/LOVABLE-HANDOFF.md": {
+    "mtime": 1781722401.2022252,
+    "ast_hash": "703005a71645c1e52607fe65f10a20a7",
+    "semantic_hash": ""
+  },
+  "docs/MANIFEST.md": {
+    "mtime": 1781803763.7596016,
+    "ast_hash": "03945680201d3617a153bca4f7302e19",
+    "semantic_hash": ""
+  },
+  "docs/NEW-SESSION-START.md": {
+    "mtime": 1781803776.1111193,
+    "ast_hash": "16f5f7765bb8955ba42def9f22e8cb4c",
+    "semantic_hash": ""
+  },
+  "docs/PROJECT-BIBLE.md": {
+    "mtime": 1781722619.190872,
+    "ast_hash": "3fc4b1b0e6477592025a77c0de9af41e",
+    "semantic_hash": ""
+  },
+  "docs/design/FEATURE-LEDGER.md": {
+    "mtime": 1781722259.0635147,
+    "ast_hash": "3595b11eb0d76665d09173de31d382ec",
+    "semantic_hash": ""
+  },
+  "docs/design/GAPS-RECOVERED.md": {
+    "mtime": 1781722259.0737615,
+    "ast_hash": "411f9dfd82df2595b7169ee9e96b3c0a",
+    "semantic_hash": ""
+  },
+  "docs/design/ICON-MAP.md": {
+    "mtime": 1781722259.0698037,
+    "ast_hash": "d39eb38803e35bcbb41604d97b021129",
+    "semantic_hash": ""
+  },
+  "docs/design/PORT-COVERAGE.md": {
+    "mtime": 1781722259.0674748,
+    "ast_hash": "30505685c4c848500b8b54360c9f43cb",
+    "semantic_hash": ""
+  },
+  "docs/design/PRODUCTION-ROADMAP.md": {
+    "mtime": 1781722259.0717323,
+    "ast_hash": "538abf3b32c2f2cc2f73beeb5c4f1bce",
+    "semantic_hash": ""
+  },
+  "docs/design/README.md": {
+    "mtime": 1781796151.8346615,
+    "ast_hash": "e83a36c28b7bbaf178c3e3cf7084b657",
+    "semantic_hash": ""
+  },
+  "docs/design/STATE-MODEL.md": {
+    "mtime": 1781722259.0655293,
+    "ast_hash": "0249a166c8e36191bd983263c8af54a7",
+    "semantic_hash": ""
+  },
+  "docs/design/design-icons-liquid-glass.html": {
+    "mtime": 1781796676.5052793,
+    "ast_hash": "ce7f8262739f5faabd854bfe3cfb921d",
+    "semantic_hash": ""
+  },
+  "docs/design/design-v0-original-react-chat-jun12.tsx.txt": {
+    "mtime": 1781796151.8153815,
+    "ast_hash": "619e50c6add44199f64ea6835ee25058",
+    "semantic_hash": ""
+  },
+  "docs/design/design-v1-539kb-jun13-resize-windows.html": {
+    "mtime": 1781796111.3643057,
+    "ast_hash": "ec1a0bba5e7c8dbd789aaf57e6decdab",
+    "semantic_hash": ""
+  },
+  "docs/design/design-v2-redesign-jun16.html": {
+    "mtime": 1781796111.367986,
+    "ast_hash": "666cea3b3caef69502c7cdeea87c89c7",
+    "semantic_hash": ""
+  },
+  "docs/design/design-v3-current-shell-jun17.html": {
+    "mtime": 1781796111.370792,
+    "ast_hash": "172f165c57b04af65975ffac5495cc0f",
+    "semantic_hash": ""
+  },
+  "docs/design/reference-mockup.html": {
+    "mtime": 1781722256.3068848,
+    "ast_hash": "666cea3b3caef69502c7cdeea87c89c7",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/EVIDENCE-GALLERY.html": {
+    "mtime": 1781803253.8288684,
+    "ast_hash": "f2ea9f846d8a5be3d1f21c9d9935062e",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/FINAL-GALLERY.html": {
+    "mtime": 1781803253.8294125,
+    "ast_hash": "20e7c9d4e30c34517c398a0381d8becb",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/README.md": {
+    "mtime": 1781803253.8323998,
+    "ast_hash": "7c3f5c25df6b7249280b1326af136f0f",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/USER-CASES.html": {
+    "mtime": 1781803253.8298721,
+    "ast_hash": "65e3bfc056781195c1230ff006e8881b",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/WORKING-GALLERY.html": {
+    "mtime": 1781803253.830598,
+    "ast_hash": "f4b6c61615809bfd162afaf679933e61",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/README.md": {
+    "mtime": 1781803643.7345715,
+    "ast_hash": "c31ccef0b478f272925b362a2a4827d1",
+    "semantic_hash": ""
+  },
+  "docs/qa/EVIDENCE-GALLERY.html": {
+    "mtime": 1781722626.3020964,
+    "ast_hash": "f2ea9f846d8a5be3d1f21c9d9935062e",
+    "semantic_hash": ""
+  },
+  "docs/qa/NAV-IA.html": {
+    "mtime": 1781722626.3092408,
+    "ast_hash": "fbac1c48c506baccea51e679650e6c74",
+    "semantic_hash": ""
+  },
+  "docs/qa/REDESIGN-BEFORE-AFTER.html": {
+    "mtime": 1781722626.310834,
+    "ast_hash": "92a4f03204e62ffaa634de5edb3aca03",
+    "semantic_hash": ""
+  },
+  "docs/qa/SYSTEM-MAP.html": {
+    "mtime": 1781722626.3074646,
+    "ast_hash": "1aeaaaedf2b8c6279bcaafc9946b2e81",
+    "semantic_hash": ""
+  },
+  "docs/qa/TEST-MATRIX.html": {
+    "mtime": 1781722626.3056874,
+    "ast_hash": "064ad62fadb2280ef0fe49f5f0769477",
+    "semantic_hash": ""
+  },
+  "docs/qa/USER-CASES.html": {
+    "mtime": 1781722626.3038611,
+    "ast_hash": "65e3bfc056781195c1230ff006e8881b",
+    "semantic_hash": ""
+  },
+  "requirements.txt": {
+    "mtime": 1781381032.7577178,
+    "ast_hash": "c1f35ce5278147e82344fec078803867",
+    "semantic_hash": ""
+  },
+  "taiga-bridge/README.md": {
+    "mtime": 1781409258.8458843,
+    "ast_hash": "61e35e3faab502d1b02addb446964622",
+    "semantic_hash": ""
+  },
+  "taiga-bridge/sample-skill/SKILL.md": {
+    "mtime": 1781409215.3941877,
+    "ast_hash": "2eff5d4c8eb55a4933977c534eba8774",
+    "semantic_hash": ""
+  },
+  "taiga-bridge/sample-skill/requirements.txt": {
+    "mtime": 1781409204.5149913,
+    "ast_hash": "411a0e4b992c67248c09ac80d7f2ecf9",
+    "semantic_hash": ""
+  },
+  "taiga-bridge/sample-skill/resources/data.txt": {
+    "mtime": 1781409189.7954566,
+    "ast_hash": "3c6ef8a2f0d468aa6c5f372e00f1de5b",
+    "semantic_hash": ""
+  },
+  "taiga-extension/sidepanel.html": {
+    "mtime": 1781381032.764138,
+    "ast_hash": "f5493eb0b764da4c7be3a3e0177e6544",
+    "semantic_hash": ""
+  },
+  "taiga-web/AGENTS.md": {
+    "mtime": 1781196532.424302,
+    "ast_hash": "9e09241799026ac05be315a2f0b50055",
+    "semantic_hash": ""
+  },
+  "taiga-web/CLAUDE.md": {
+    "mtime": 1781196532.424362,
+    "ast_hash": "5c27369b226fcf2be8a6cfe52224e767",
+    "semantic_hash": ""
+  },
+  "taiga-web/README.md": {
+    "mtime": 1781196491.9578032,
+    "ast_hash": "f15aaa42d5d299d091b1171097ea56ad",
+    "semantic_hash": ""
+  },
+  "taiga-web/cobrowse-extension/README.md": {
+    "mtime": 1781277171.737525,
+    "ast_hash": "50e04445062388134c139c7feb90a200",
+    "semantic_hash": ""
+  },
+  "taiga-web/cobrowse-extension/popup.html": {
+    "mtime": 1781277141.0329676,
+    "ast_hash": "c4137ee10972f0ae3f72a127ea188626",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/shell.html": {
+    "mtime": 1781696547.5793526,
+    "ast_hash": "172f165c57b04af65975ffac5495cc0f",
+    "semantic_hash": ""
+  },
+  "tests/README.md": {
+    "mtime": 1781349846.7432353,
+    "ast_hash": "99f52015349361045a5bf7e2e5c284fc",
+    "semantic_hash": ""
+  },
+  "QA-PLAN.pdf": {
+    "mtime": 1781356604.461533,
+    "ast_hash": "ec56025ed2ff186dbbb8fe85a9b23cd3",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/Taiga-Process-Test.pdf": {
+    "mtime": 1781803253.826117,
+    "ast_hash": "008ed8a1db04161b0392259df70dd0e1",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/Taiga-UI-Catalog.pdf": {
+    "mtime": 1781803253.8228188,
+    "ast_hash": "87ead7725a57d2b2d2e17cdc448ff3e4",
+    "semantic_hash": ""
+  },
+  ".agents/skills/refero-design/assets/banner.png": {
+    "mtime": 1781181569.8844554,
+    "ast_hash": "1c28186c8ef1f1ddb85594475f2a8edb",
+    "semantic_hash": ""
+  },
+  "docs/design/assets/1_cedar_neural.png": {
+    "mtime": 1781796676.510279,
+    "ast_hash": "549c243ade913e6176db8809ff1adafc",
+    "semantic_hash": ""
+  },
+  "docs/design/assets/2_monogram_T.png": {
+    "mtime": 1781796676.5119367,
+    "ast_hash": "ec579aaa04025d8a633f19c64c9ae7c9",
+    "semantic_hash": ""
+  },
+  "docs/design/assets/3_taiga_spark.png": {
+    "mtime": 1781796676.5129166,
+    "ast_hash": "0636a57759825d21c34b1210cfd4b43d",
+    "semantic_hash": ""
+  },
+  "docs/design/assets/4_geo_neurocedar.png": {
+    "mtime": 1781796676.5133147,
+    "ast_hash": "7ebbdca4e084528d8c0a95e03ba7d558",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/01-mcp.png": {
+    "mtime": 1781803253.8091936,
+    "ast_hash": "e35a35eb9c7b78b28b2c5bb00ddce199",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/02-fullskills.png": {
+    "mtime": 1781803253.8096278,
+    "ast_hash": "00fd4a9d321d1e50890115f2f5e8cafe",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/03-skillmkt.png": {
+    "mtime": 1781803253.8099506,
+    "ast_hash": "4fc5d36db5639cc2a0bd7129e0e473f9",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/04-skills.png": {
+    "mtime": 1781803253.8102176,
+    "ast_hash": "4c1dbcd288f5bdaebebf2a1425c28b06",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/05-memory.png": {
+    "mtime": 1781803253.8104527,
+    "ast_hash": "55380fde51a6e183bbd9d2741082c288",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/06-smartrag.png": {
+    "mtime": 1781803253.810745,
+    "ast_hash": "b6ab9cf250b045765537362f2d246788",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/07-knowledge.png": {
+    "mtime": 1781803253.8111446,
+    "ast_hash": "fae0db6a2fc68e91f482e12c1d21b80c",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/08-files.png": {
+    "mtime": 1781803253.8115504,
+    "ast_hash": "26fc9c271b1a5e6c5caede49cbea9907",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/09-filesearch.png": {
+    "mtime": 1781803253.8118498,
+    "ast_hash": "131eaf720530416350a8ac8c341198c0",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/10-catalog.png": {
+    "mtime": 1781803253.812141,
+    "ast_hash": "28b83d5a92f6129763cf33ec5d710905",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/11-jobs.png": {
+    "mtime": 1781803253.8124423,
+    "ast_hash": "28b83d5a92f6129763cf33ec5d710905",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/12-cookies.png": {
+    "mtime": 1781803253.812698,
+    "ast_hash": "28b83d5a92f6129763cf33ec5d710905",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/13-browser.png": {
+    "mtime": 1781803253.8129482,
+    "ast_hash": "135ddc2bd59466eddad60072478dda31",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/14-workspace.png": {
+    "mtime": 1781803253.8131971,
+    "ast_hash": "24e265356c34ee79969707bde8f826a2",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/15-terminal.png": {
+    "mtime": 1781803253.8134367,
+    "ast_hash": "a1fcf3bd523fd7ba1dc13b7b67d92239",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/16-playground.png": {
+    "mtime": 1781803253.8136523,
+    "ast_hash": "4c2631be69a64e730a1dad22ab12e586",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/17-settings.png": {
+    "mtime": 1781803253.8138795,
+    "ast_hash": "661cc42d84c18cc36642035a58e06a89",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/18-hooks.png": {
+    "mtime": 1781803253.8141084,
+    "ast_hash": "6077e4f184f76a4a7e45b8ef2c0aa8fc",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/19-copilot.png": {
+    "mtime": 1781803253.814333,
+    "ast_hash": "2ce6f0af9366173d122ebe33e13eb8c8",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/20-voice.png": {
+    "mtime": 1781803253.8145738,
+    "ast_hash": "99c9e70e5883c26ae010ec9e14c0a49c",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/21-model.png": {
+    "mtime": 1781803253.8148274,
+    "ast_hash": "4fa314e50d0f7f1b25a74bc1da5d2b85",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/22-verify.png": {
+    "mtime": 1781803253.8150835,
+    "ast_hash": "2ecd98013be3de511d1a970e6f16787e",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/23-team.png": {
+    "mtime": 1781803253.8153195,
+    "ast_hash": "8b8e3e07ef06b28f02580642d4395314",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/24-loops.png": {
+    "mtime": 1781803253.815544,
+    "ast_hash": "b8c4fdc98351d2e16b91a9d9464618bb",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/25-projects.png": {
+    "mtime": 1781803253.8157995,
+    "ast_hash": "fb26f19b2a7518fc71e6666a8b25ed45",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/26-orchestrate.png": {
+    "mtime": 1781803253.816041,
+    "ast_hash": "3b94f190ee8acb6b48dc4d8b5ba65c2b",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/27-agentpanel.png": {
+    "mtime": 1781803253.8162897,
+    "ast_hash": "43efa0ba34f59a0d7572c3d00beb226b",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/28-artifacts.png": {
+    "mtime": 1781803253.8165076,
+    "ast_hash": "daaafe8d4ec53b1add3dec0a6f1cde1d",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/29-research.png": {
+    "mtime": 1781803253.8167384,
+    "ast_hash": "7c2666df5d2d4d0ee6eb01d6bfc4ce88",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/30-super.png": {
+    "mtime": 1781803253.817,
+    "ast_hash": "694948e76c7e96b5badee440ed3da301",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/31-web.png": {
+    "mtime": 1781803253.8172264,
+    "ast_hash": "f8e12a1e04c730c9cdcf8702f45d3b0a",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/32-designcanvas.png": {
+    "mtime": 1781803253.8174472,
+    "ast_hash": "75d9383694c2f643f3387417b2402bd1",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/agent-multitool/0-fresh-chat.png": {
+    "mtime": 1781803542.5295827,
+    "ast_hash": "1fac8a73270402a0ae6e0b7353105dc6",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/agent-multitool/1-sent-agent-request.png": {
+    "mtime": 1781803542.5301762,
+    "ast_hash": "4dab6ef45dd35189b0b75098229e1fb1",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/agent-multitool/2-tools-in-timeline.png": {
+    "mtime": 1781803542.5306559,
+    "ast_hash": "a074aecb880850f74eec670c11a434a9",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/agent-multitool/3-final-answer.png": {
+    "mtime": 1781803542.5312033,
+    "ast_hash": "e1101b15597b1504920ac7ea520ad97d",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/agent-multitool/4-result-settled.png": {
+    "mtime": 1781803542.5318043,
+    "ast_hash": "5ecad48bb1bc98b4a5c88d1baa949a2d",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/brain-mode/0-app-loaded.png": {
+    "mtime": 1781803542.5418503,
+    "ast_hash": "9759194d4d103ad11559baa361805139",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/brain-mode/1-brain-empty.png": {
+    "mtime": 1781803542.5422225,
+    "ast_hash": "86482abaa4a5c6d55126ed5ce591ae5f",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/brain-mode/2-question-sent.png": {
+    "mtime": 1781803542.542576,
+    "ast_hash": "86482abaa4a5c6d55126ed5ce591ae5f",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/brain-mode/3-lead-triage.png": {
+    "mtime": 1781803542.543048,
+    "ast_hash": "86482abaa4a5c6d55126ed5ce591ae5f",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/brain-mode/4-expert-escalation.png": {
+    "mtime": 1781803542.5433657,
+    "ast_hash": "86482abaa4a5c6d55126ed5ce591ae5f",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/brain-mode/5-final-answer.png": {
+    "mtime": 1781803542.5437026,
+    "ast_hash": "86482abaa4a5c6d55126ed5ce591ae5f",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/brain-mode/6-conversation-overview.png": {
+    "mtime": 1781803542.5440395,
+    "ast_hash": "86482abaa4a5c6d55126ed5ce591ae5f",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/chat-qa/1-empty.png": {
+    "mtime": 1781803542.5526593,
+    "ast_hash": "0e3fcd23124e948181eaefe4ee1c16ac",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/chat-qa/2-typed.png": {
+    "mtime": 1781803542.5535088,
+    "ast_hash": "533a25d14e57932df6d4d0d89e9f58c3",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/chat-qa/3-streaming.png": {
+    "mtime": 1781803542.5541139,
+    "ast_hash": "b1b0937f28ddd44be5e5129ffccc84e8",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/chat-qa/4-answer.png": {
+    "mtime": 1781803542.5548012,
+    "ast_hash": "895456c295b66315b7950ea2edeb4b21",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/chat-qa/5-followup-typed.png": {
+    "mtime": 1781803542.5554621,
+    "ast_hash": "3172b5d99f77e34589693b14e5c2bd75",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/chat-qa/6-followup-answer.png": {
+    "mtime": 1781803542.5564117,
+    "ast_hash": "b733158536b38554f7a865fb8f3b043c",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/chat-qa/6a-followup-streaming.png": {
+    "mtime": 1781803542.5571158,
+    "ast_hash": "cc6620a968a14d24c729e4c1187f77c2",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/council-mode/1-sent.png": {
+    "mtime": 1781803542.565997,
+    "ast_hash": "731001e0da6224a5587567a6c641ee75",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/council-mode/2-thinking.png": {
+    "mtime": 1781803542.5665042,
+    "ast_hash": "bfe42b5c954cdd16c800855f3bbd4505",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/council-mode/3-synthesis.png": {
+    "mtime": 1781803542.5670981,
+    "ast_hash": "6a5a6084066a93ae4eeadf88b381a850",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/debate-run/1-agent-modes.png": {
+    "mtime": 1781803542.5756924,
+    "ast_hash": "0c89fc2410384cb1e161ce07ffc6fc5d",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/debate-run/2-panel-setup.png": {
+    "mtime": 1781803542.5761063,
+    "ast_hash": "6f2c75fa330594b49ec3d2f840d0a48e",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/debate-run/3-topic-typed.png": {
+    "mtime": 1781803542.57666,
+    "ast_hash": "8f5e6db737cd7a32a83b38ad16eee73c",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/debate-run/4-launched.png": {
+    "mtime": 1781803542.57702,
+    "ast_hash": "d15c87d4823757922682c9bd02d29710",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/debate-run/5-rounds.png": {
+    "mtime": 1781803542.5775776,
+    "ast_hash": "d15c87d4823757922682c9bd02d29710",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/debate-run/6-error-no-route.png": {
+    "mtime": 1781803542.578094,
+    "ast_hash": "d15c87d4823757922682c9bd02d29710",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/design-prototype/1-studio.png": {
+    "mtime": 1781803542.5866573,
+    "ast_hash": "25dff7d7bf253e283f4cf1eedfb4df75",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/design-prototype/2-typed.png": {
+    "mtime": 1781803542.5872748,
+    "ast_hash": "c19383d1ba474ae7dbe8bd87d3da7e57",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/design-prototype/3-skeleton.png": {
+    "mtime": 1781803542.5879438,
+    "ast_hash": "fe25fb4e7cea3307f3a8a3d9f22d6c53",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/design-prototype/4-result.png": {
+    "mtime": 1781803542.5883706,
+    "ast_hash": "b50a3156461e881b3fcc55d964ff33a6",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/design-slides/1-design-open.png": {
+    "mtime": 1781803542.5961072,
+    "ast_hash": "519fbf153677dd2a01a2f8f705d2bbff",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/design-slides/2-slides-mode.png": {
+    "mtime": 1781803542.59666,
+    "ast_hash": "6c1a3ae30b2a8e8e7b3afa0ccd7a4769",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/design-slides/3-brief-typed.png": {
+    "mtime": 1781803542.5973096,
+    "ast_hash": "c4b82405676b0eac6db97f71d18308f9",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/design-slides/4-generating.png": {
+    "mtime": 1781803542.5976996,
+    "ast_hash": "f7f1b17a02d89fedd1a4cfcc21b160b2",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/design-slides/5-streaming.png": {
+    "mtime": 1781803542.598028,
+    "ast_hash": "9f502467390759cdd79d2e6dea386f68",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/design-slides/6-slides-in-canvas.png": {
+    "mtime": 1781803542.5987103,
+    "ast_hash": "74183f0040901737d5dea5b515b89b77",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/image-gen/1-empty.png": {
+    "mtime": 1781803542.6063673,
+    "ast_hash": "32b609e1bea684983377dce172f84b3f",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/image-gen/2-typed.png": {
+    "mtime": 1781803542.6068337,
+    "ast_hash": "a6da5ac1ea8ae3e7ad2055e8d85e7a42",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/image-gen/3-generating.png": {
+    "mtime": 1781803542.607205,
+    "ast_hash": "df41ea421d560f898bff3bc9e209e9ae",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/image-gen/4-result.png": {
+    "mtime": 1781803542.6082008,
+    "ast_hash": "0394f8b512df03ebf296d4dbd840d2f0",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/mcp-connect-use/1-mcp-market.png": {
+    "mtime": 1781803542.6155136,
+    "ast_hash": "f06a527872c91ef73d85f2740177f837",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/mcp-connect-use/2-deepwiki-connect.png": {
+    "mtime": 1781803542.6158972,
+    "ast_hash": "5c44c217aa0a3f2377eebbb52cf1354c",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/mcp-connect-use/3-tools-appeared.png": {
+    "mtime": 1781803542.6163943,
+    "ast_hash": "c90b75c915491b109fbfed01c0fde507",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/mcp-connect-use/4-chat-sent.png": {
+    "mtime": 1781803542.616872,
+    "ast_hash": "9486252e1f2c3ff9c1a9d127a2d771d0",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/mcp-connect-use/5-agent-answer.png": {
+    "mtime": 1781803542.6173222,
+    "ast_hash": "81be95cca5f1e2a985dbf0fa18c4c4fd",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/memory-recall/1-newchat-empty.png": {
+    "mtime": 1781803542.6247425,
+    "ast_hash": "873ef685850fc46d8fff739ac354d189",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/memory-recall/2-memorize-sent.png": {
+    "mtime": 1781803542.6251745,
+    "ast_hash": "47af1aef5ff459de4d6a420fbd81d0fd",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/memory-recall/3-memorize-confirmed.png": {
+    "mtime": 1781803542.6255825,
+    "ast_hash": "18130e0e402b9a65e4c2f7128f6d06c9",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/memory-recall/4-newchat2-empty.png": {
+    "mtime": 1781803542.6263304,
+    "ast_hash": "4dac69b597d8043f9d2ab6b788b6cff5",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/memory-recall/5-recall-question-sent.png": {
+    "mtime": 1781803542.6268795,
+    "ast_hash": "3426d9779ecb314dfde643af3a809798",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/memory-recall/6-recall-answer.png": {
+    "mtime": 1781803542.6276321,
+    "ast_hash": "ec320ff33985c0adc82f106df40b4e13",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/memory-recall/7-recall-answer-scrolled.png": {
+    "mtime": 1781803542.6282296,
+    "ast_hash": "b778057bc09f7348e7a56115f2ad7a5c",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/music-gen/1-studio-open.png": {
+    "mtime": 1781803542.6358578,
+    "ast_hash": "6f74a7ef712fe0a43ff9beeb5fb5bb23",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/music-gen/2-music-tab.png": {
+    "mtime": 1781803542.636332,
+    "ast_hash": "d0b33b846e5a16950fb46f96968d75eb",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/music-gen/3-prompt-typed.png": {
+    "mtime": 1781803542.6367831,
+    "ast_hash": "7408d44be5f07a13a58cc98b3663f1da",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/music-gen/4-generating.png": {
+    "mtime": 1781803542.6371634,
+    "ast_hash": "050a53bb13ea9b06017ecf114c8a00f6",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/music-gen/5-generating-progress.png": {
+    "mtime": 1781803542.637599,
+    "ast_hash": "86ac2a4bc6a2f17bb14b59bd529c36b9",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/music-gen/6-audio-result.png": {
+    "mtime": 1781803542.6383007,
+    "ast_hash": "80993d25cb4ca564d2ab4cdded963a27",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/music-gen/7-result-final.png": {
+    "mtime": 1781803542.6390104,
+    "ast_hash": "b0e5f7bc4bde76489ce9e17daea16e9d",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/orchestrate-run/1-empty.png": {
+    "mtime": 1781803542.6479728,
+    "ast_hash": "7b454164ba29437f29b72bce6aad3456",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/orchestrate-run/2-goal-typed.png": {
+    "mtime": 1781803542.6483345,
+    "ast_hash": "8fd1c85dd9035983c49b802b29905dd6",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/orchestrate-run/3a-running.png": {
+    "mtime": 1781803542.6487086,
+    "ast_hash": "733aacc9f4b712199371b7e7ce55d732",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/orchestrate-run/3b-plan.png": {
+    "mtime": 1781803542.6490958,
+    "ast_hash": "75a00d1237a19bbd86bfa152a9419123",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/orchestrate-run/3c-workers.png": {
+    "mtime": 1781803542.6495178,
+    "ast_hash": "f90739c86f31e510bdfb3b432526635b",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/orchestrate-run/4-synthesis.png": {
+    "mtime": 1781803542.650021,
+    "ast_hash": "94c61a5275003b3adeea0b6ded97f1b3",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/skill-import-run/1-fullskills-open.png": {
+    "mtime": 1781803542.6576347,
+    "ast_hash": "670ef5c02c9e179ef8e6fb96dc0c1a96",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/skill-import-run/2-url-typed.png": {
+    "mtime": 1781803542.658295,
+    "ast_hash": "86eb83352b9d8f8d649d775d82fab938",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/skill-import-run/3-skill-appeared.png": {
+    "mtime": 1781803542.6590912,
+    "ast_hash": "f680685932edf88feefa07da76e8d494",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/skill-import-run/3a-import-clicked.png": {
+    "mtime": 1781803542.6597152,
+    "ast_hash": "0615e68e6feea6b9b5f51790dc7dd453",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/skill-import-run/4-run-clicked.png": {
+    "mtime": 1781803542.6602337,
+    "ast_hash": "131d656af651b67de45dbd34eac3dd27",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/skill-import-run/5-output-pre.png": {
+    "mtime": 1781803542.6607687,
+    "ast_hash": "b24423fca4775c728883ef74a4f32fa4",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/team-run/1-config.png": {
+    "mtime": 1781803542.6680887,
+    "ast_hash": "6d7b70245c06f8fff29fb0e670410810",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/team-run/2-goal.png": {
+    "mtime": 1781803542.668812,
+    "ast_hash": "60d6adf3c7b598aaa92da4229b4b8dd9",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/team-run/3-roles.png": {
+    "mtime": 1781803542.6693747,
+    "ast_hash": "446d09f6696b0a15e5cfcdf2979f9c9b",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/team-run/4-launch.png": {
+    "mtime": 1781803542.6700072,
+    "ast_hash": "b36347b25b77d96a122b459a8a207be8",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/team-run/5-result.png": {
+    "mtime": 1781803542.6707635,
+    "ast_hash": "fcde511d392838b50bc56030629377f7",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/team-run/5a-working.png": {
+    "mtime": 1781803542.6712966,
+    "ast_hash": "a8c8902e795f28ad6a6c7fc710fd34a3",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/team-run/6-in-chat.png": {
+    "mtime": 1781803542.6717541,
+    "ast_hash": "fcde511d392838b50bc56030629377f7",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/tts-gen/1-empty.png": {
+    "mtime": 1781803542.6794038,
+    "ast_hash": "c56c2a244f45f479ec8d8c605afb3fd8",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/tts-gen/2-audio-tab.png": {
+    "mtime": 1781803542.679898,
+    "ast_hash": "87136354d7724743513c0474707815f6",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/tts-gen/3-typed.png": {
+    "mtime": 1781803542.6803336,
+    "ast_hash": "f5a122fe7eeb7612304cd25c5ed867c6",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/tts-gen/4-generating.png": {
+    "mtime": 1781803542.6808095,
+    "ast_hash": "f2c61bc3eaa90236e6c991c7b2266fe6",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/tts-gen/5-audio-player.png": {
+    "mtime": 1781803542.6814206,
+    "ast_hash": "d6aee9be828beec3c51fba4aec92e8a8",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/video-gen/1-empty.png": {
+    "mtime": 1781803542.6887772,
+    "ast_hash": "43e631fff9919a76e374fd3bf622ce16",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/video-gen/2-video-tab.png": {
+    "mtime": 1781803542.6895387,
+    "ast_hash": "a3a08f00e340753c3100d5fc0546730d",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/video-gen/3-prompt.png": {
+    "mtime": 1781803542.6900766,
+    "ast_hash": "e7cf3e93c970b6ca51b410f791816bcb",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/video-gen/4-generating.png": {
+    "mtime": 1781803542.6906288,
+    "ast_hash": "d51760b70fcbdc11e2162daa6876555b",
+    "semantic_hash": ""
+  },
+  "docs/design/usertest-jun15/feature-flows/video-gen/5-video-result.png": {
+    "mtime": 1781803542.6913695,
+    "ast_hash": "a6433e0faaf23e7f8bf77eafc2d8f9ac",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/00-baseline.png": {
+    "mtime": 1781722260.785386,
+    "ast_hash": "77cb9419a67c02b976af897090dc46ae",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/00-main-chat.png": {
+    "mtime": 1781722627.2129354,
+    "ast_hash": "3d3d35982e72ff9be571a94a46c8a09b",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/02-size-large.png": {
+    "mtime": 1781722260.7859595,
+    "ast_hash": "f2247fbf0432e820a9521d94d0466aac",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/02-size-settings.png": {
+    "mtime": 1781722260.78667,
+    "ast_hash": "a732cbcad42d93471cf4da6fffff681e",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/03-hero-amber.png": {
+    "mtime": 1781722260.7871895,
+    "ast_hash": "f78db09168f83f6e54614d02064c1bc9",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/06-dock-empty.png": {
+    "mtime": 1781722260.7889125,
+    "ast_hash": "9a7102182789d16750ba5bb186712138",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/06-dock-final.png": {
+    "mtime": 1781722260.7894876,
+    "ast_hash": "7775085289a1b8bf3d7f301c9eee0f83",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/10-macos-windows.png": {
+    "mtime": 1781722260.7912185,
+    "ast_hash": "263bddf5074a8548afff07a7e86b08b1",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/10-mode-chat.png": {
+    "mtime": 1781722627.2137194,
+    "ast_hash": "62326e47b33f6eaaa916473dfac8222f",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/11-mode-code.png": {
+    "mtime": 1781722627.214432,
+    "ast_hash": "a7b47532a7e50da023537ee74736aba3",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/12-mode-uncensored.png": {
+    "mtime": 1781722627.2149935,
+    "ast_hash": "a7b47532a7e50da023537ee74736aba3",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/13-studio-image.png": {
+    "mtime": 1781722627.2154999,
+    "ast_hash": "1e4802a29f9e489dbeeb57672fd4ce95",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/14-mode-ultra.png": {
+    "mtime": 1781722627.2160242,
+    "ast_hash": "d268188ab82dd0500a98fe2852acc9e3",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/20-design-canvas.png": {
+    "mtime": 1781722627.2178657,
+    "ast_hash": "f3f0947d26907aa65f1839a2873cdfe6",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/30-agent-overview.png": {
+    "mtime": 1781722627.22089,
+    "ast_hash": "2190a719974a6789e910fa86757e09af",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/31-agent-modes.png": {
+    "mtime": 1781722627.2221758,
+    "ast_hash": "62512ae2ddf7125ac2d5b412bfa0aae6",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/32-agent-auto.png": {
+    "mtime": 1781722627.223951,
+    "ast_hash": "d88d20dab9169d633182d69c4e3365ab",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/33-agent-tasks.png": {
+    "mtime": 1781722627.2246323,
+    "ast_hash": "1f8c0a05ad2de3c3b0711f935279a909",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/34-agent-runs.png": {
+    "mtime": 1781722627.2262626,
+    "ast_hash": "c3261a132abbbf99e3430db86a8e08a4",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/35-agent-ralph.png": {
+    "mtime": 1781722627.227727,
+    "ast_hash": "f08fd3cf8547adaf4a5767730bf31b22",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/36-agent-truth.png": {
+    "mtime": 1781722627.2294335,
+    "ast_hash": "8d23d36e4a4b797d42255cdf9d2f5225",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/37-agent-sandbox.png": {
+    "mtime": 1781722627.230203,
+    "ast_hash": "a32fc675b1e3107c0eb4cb8d8f77a22d",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/38-agent-tools.png": {
+    "mtime": 1781722627.2318811,
+    "ast_hash": "3ebba803de48074bf7462f5fddb5f50a",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/39-agent-evals.png": {
+    "mtime": 1781722627.2332816,
+    "ast_hash": "64cfd3ee561f1287726801ebaa38b580",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/40-terminal.png": {
+    "mtime": 1781722627.2346911,
+    "ast_hash": "57ca9c0a2da2b5e8dc08ad1aa0b7015c",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/41-workspace.png": {
+    "mtime": 1781722627.2352462,
+    "ast_hash": "3b9d4ccfe79d7eb2e29dd1de9cb0f79b",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/42-copilot.png": {
+    "mtime": 1781722627.2357671,
+    "ast_hash": "4b3bb44068179cdc081354cf1112babe",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/43-hooks.png": {
+    "mtime": 1781722627.2373977,
+    "ast_hash": "82426c7de625b15e497f727b9215c2bc",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/44-settings.png": {
+    "mtime": 1781722627.2502096,
+    "ast_hash": "b9e9038a3468edbb981319f4bb2b6064",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/45-mcp.png": {
+    "mtime": 1781722627.250724,
+    "ast_hash": "40f16d6d99258af2fce3b464cd58d043",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/46-memory.png": {
+    "mtime": 1781722627.2512357,
+    "ast_hash": "6ea8b302f23e15ce36c32839dc663b7e",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/50-skills.png": {
+    "mtime": 1781722627.252799,
+    "ast_hash": "f98dad11605bd7ae048247d8b10ed6e9",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/51-skillmkt.png": {
+    "mtime": 1781722627.2533371,
+    "ast_hash": "357154fd7676d6e9705903df34fbaa69",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/52-fullskills.png": {
+    "mtime": 1781722627.255044,
+    "ast_hash": "4e0b4b4025d13ee2d4526e1037e88926",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/53-playground.png": {
+    "mtime": 1781722627.256529,
+    "ast_hash": "e12cb32b5ec2e818c16645f9be84dad4",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/54-browser.png": {
+    "mtime": 1781722627.2579017,
+    "ast_hash": "1feff778e507742692fe2b7a0db0eb50",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/55-orchestrate.png": {
+    "mtime": 1781722627.259205,
+    "ast_hash": "aa7b19f3aa3acdea6057f82e06647d57",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/56-team.png": {
+    "mtime": 1781722627.2596233,
+    "ast_hash": "152bf6839ef8d1576ce6ee1fdf1771ca",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/57-loops.png": {
+    "mtime": 1781722627.26004,
+    "ast_hash": "e1deb11b3b1ebdd25587ebb6e367ba29",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/58-agentpanel.png": {
+    "mtime": 1781722627.2606275,
+    "ast_hash": "db969d9e7e402e8f14a83a1a04195475",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/59-knowledge.png": {
+    "mtime": 1781722627.2610784,
+    "ast_hash": "77606f53b4b93d421bb11d9161906dbb",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/desktop-app-2plus2.png": {
+    "mtime": 1781722260.7801576,
+    "ast_hash": "1c1e60e84a954362cfecbf4142a05585",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/desktop-ultra-2plus2.png": {
+    "mtime": 1781722260.7809289,
+    "ast_hash": "71e64f257ff083d1b090707ba8cc77dc",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/mobile-app-home.png": {
+    "mtime": 1781722260.7815073,
+    "ast_hash": "84933a4870345afa04d68cbce36bd8a9",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/mobile-app-sidebar-window.png": {
+    "mtime": 1781722260.7821126,
+    "ast_hash": "b753f6593721218a4ae521c0438626ac",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/ultra-real-answer-120-zoom.png": {
+    "mtime": 1781722260.7941625,
+    "ast_hash": "14b6656d9d95dc05071d2e239b02da75",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/ultra-real-answer-120.png": {
+    "mtime": 1781722260.7959137,
+    "ast_hash": "bc86b1f54b7e21798a39f1fef2c3f3f9",
+    "semantic_hash": ""
+  },
+  "docs/screenshots/ultra-real-answer.png": {
+    "mtime": 1781722260.7973223,
+    "ast_hash": "a6917ae16a12365d8aead562141a25fb",
+    "semantic_hash": ""
+  },
+  "taiga-extension/icons/icon128.png": {
+    "mtime": 1781381032.7625816,
+    "ast_hash": "5b267aacd09a89b18edef8765cffa611",
+    "semantic_hash": ""
+  },
+  "taiga-extension/icons/icon16.png": {
+    "mtime": 1781381032.7630007,
+    "ast_hash": "280c2750eb3fa4b13bdcd92167447146",
+    "semantic_hash": ""
+  },
+  "taiga-extension/icons/icon48.png": {
+    "mtime": 1781381032.7631743,
+    "ast_hash": "504123b24d47e5386bf1fc29e650e1dd",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/file.svg": {
+    "mtime": 1781196491.9581547,
+    "ast_hash": "d09f95206c3fa0bb9bd9fefabfd0ea71",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/globe.svg": {
+    "mtime": 1781196491.9583988,
+    "ast_hash": "2aaafa6a49b6563925fe440891e32717",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/icons/liquid/agent.svg": {
+    "mtime": 1781648721.575554,
+    "ast_hash": "1a2d6fcbfd0ac8ee82e74fd50cad637b",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/icons/liquid/brain.svg": {
+    "mtime": 1781648721.5754044,
+    "ast_hash": "57bbbba4db037397a92f4c5e0ebac4d0",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/icons/liquid/chat.svg": {
+    "mtime": 1781648721.575494,
+    "ast_hash": "fbad56bfbae65d389a8f6fc0476cc64b",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/icons/liquid/code.svg": {
+    "mtime": 1781648721.5756218,
+    "ast_hash": "1c151b6dd6fcb9490a5ea7ac196d34c6",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/icons/liquid/design.svg": {
+    "mtime": 1781648721.5756767,
+    "ast_hash": "d872d1f13ad66d5d116ab35d5cc727ea",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/icons/liquid/market.svg": {
+    "mtime": 1781648721.575957,
+    "ast_hash": "f58ed76fa14c8d21455c42c43bc79bc7",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/icons/liquid/notifications.svg": {
+    "mtime": 1781648721.5762088,
+    "ast_hash": "72bfec0734ef9da53382e70d602040e0",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/icons/liquid/profile.svg": {
+    "mtime": 1781648721.576266,
+    "ast_hash": "5a5379f3c2822825994c9668aba3cc42",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/icons/liquid/projects.svg": {
+    "mtime": 1781648721.5758474,
+    "ast_hash": "a86479767e425688b18525a4474bc498",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/icons/liquid/search.svg": {
+    "mtime": 1781648721.5757923,
+    "ast_hash": "f88c6380b2b19fd52c27dfb7eb23d989",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/icons/liquid/settings.svg": {
+    "mtime": 1781648721.5761552,
+    "ast_hash": "e4fda9ccbe4e5faee879081981fc0e97",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/icons/liquid/sparkles.svg": {
+    "mtime": 1781649253.4577358,
+    "ast_hash": "fd77d336027aea0f49426791a09c99b8",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/icons/liquid/studio.svg": {
+    "mtime": 1781649253.4574068,
+    "ast_hash": "309fa9eb9e9e2f95fd479bb9dfda87db",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/icons/liquid/ultra.svg": {
+    "mtime": 1781648721.5757358,
+    "ast_hash": "4bf00b283b6027a5cbff6b5f75d2f72a",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/icons/liquid/wallet.svg": {
+    "mtime": 1781648721.5763183,
+    "ast_hash": "9bb1948de5d78248e36004671ab91ef5",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/next.svg": {
+    "mtime": 1781196491.9582577,
+    "ast_hash": "8e061864f388b47f33a1c3780831193e",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/vercel.svg": {
+    "mtime": 1781196491.9582884,
+    "ast_hash": "c0af2f507b369b085b35ef4bbe3bcf1e",
+    "semantic_hash": ""
+  },
+  "taiga-web/public/window.svg": {
+    "mtime": 1781196491.9582996,
+    "ast_hash": "a2760511c65806022ad20adf74370ff3",
+    "semantic_hash": ""
+  },
+  "taiga.jpg": {
+    "mtime": 1781189345.4434931,
+    "ast_hash": "2210a4c744851149d3a2744f0b3a0eef",
+    "semantic_hash": ""
+  },
+  "taiga2.jpg": {
+    "mtime": 1781189345.4454036,
+    "ast_hash": "9f6b8df12b32ded9d38af4730980d089",
+    "semantic_hash": ""
+  }
+}
