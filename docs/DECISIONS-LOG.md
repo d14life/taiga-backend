@@ -9,6 +9,8 @@
 ---
 
 ## 2026-06-18
+- РЕШЕНИЕ — **ОБА дизайна = источник истины**: design-v3 (НОВЫЙ — КАК строить, визуальный канон) + usertest-jun15 (СТАРЫЙ — ЧТО система должна делать, фич-поведение). Не только v3. (Damir: «old design second one source of truth too — what the system should do».)
+- ПРОСЬБА/РЕШЕНИЕ — **Taiga AI сама использует graphify + эффективные RAG-тулзы** в своей памяти/RAG (граф-память над кодом/доками юзера + мультимодал поверх текущего вектор-RAG `server.py:_rag_*`, Mem0/Letta/grounding). Дать продукту наш граф+RAG-стек. Слой Memory. (Damir: «make taiga ai use graphify too and other effective rag tools».)
 - РЕШЕНИЕ — Моды «Мозг/Совет/Дебаты/Сравнить/Relay» = **«Усиление ответа» (УСИЛИЕ)**, НЕ отдельные моды; усилие определяет поведение всех модов. Топ-навигация = **5 столов: Разговор(Чат)/Студия/Дизайн/Агенты/Код + Ultra (всё-в-одном)**. Источник истины = **design-v3**, не доки. (Damir: «council/brain should just be effort we have → determines all mode; 5 modes; design is source of truth».)
 - РЕШЕНИЕ — **Эталон-репо = ИСТОЧНИК ИСТИНЫ, юзать ВСЕГДА** как базу каждого стола (правило). (Damir: «we have code repos for them to base you from, use it at all times».)
 - РЕШЕНИЕ — **Студия = медиа-студия на базе github.com/anil-matcha/open-generative-ai** (его база + наше; у нас ~7-10 режимов vs его 4). (Damir.)
